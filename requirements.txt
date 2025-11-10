@@ -7,4 +7,5 @@ requests
 ollama
 oci
 pydantic
+fastapi
 scikit-learn>=1.2.0

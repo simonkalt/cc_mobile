@@ -14,7 +14,6 @@ pip install numpy pandas==2.1.4 scipy
 echo "Step 3: Installing conflicting packages using --no-deps..."
 pip install xai --no-deps  # <-- Forces xai to use pandas from Step 2
 pip install oci --no-deps
-pip install fastapi --no-deps
 pip install uvicorn --no-deps
 
 # 4. Install the remaining non-conflicting packages from the minimalist list
