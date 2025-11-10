@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 
-# Step 1: Install core build requirements (as wheels)
-pip install --upgrade pip setuptools wheel numpy scipy
+# 1. Update core tools to avoid build errors
+pip install --upgrade pip setuptools wheel
 
-# Step 2: Run the custom installation steps to handle conflicts
+# 2. Install core numerical libraries with a specific, stable Pandas version.
+# This version avoids the known metadata bug.
+pip install numpy scipy pandas==1.5.3
+
+# 3. Install packages that conflict with dependencies (no-deps flag)
+# They will now use the stable Pandas version installed in Step 2.
+pip install gradio --no-deps
 pip install oci --no-deps
 pip install fastapi --no-deps
 pip install uvicorn --no-deps
 
-# Step 3: Install the rest from the minimal requirements.txt
+# 4. Install the remaining non-conflicting packages from the minimal list
 pip install -r requirements.txt
