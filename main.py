@@ -26,6 +26,8 @@ app = FastAPI()
 class ChatRequest(BaseModel):
     prompt: str
 
+hf_token = ""
+
 # Define a simple root endpoint to check if the server is running
 @app.get("/")
 def read_root():
@@ -48,7 +50,7 @@ async def handle_chat(request: ChatRequest):
     print(f"Received prompt: {request.prompt}")
     
     return {
-        "response": f"You sent me: '{request.prompt}'"
+        "response": f"You sent me: '{request.prompt} with Hugging Face token: {hf_token[:8]}'"
     }
 
 # --- Optional: To run this file directly ---
