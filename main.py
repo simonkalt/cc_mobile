@@ -12,7 +12,7 @@ class ChatRequest(BaseModel):
 # Define a simple root endpoint to check if the server is running
 @app.get("/")
 def read_root():
-    return {"status": "API is running"}
+    return {"status": "Simon's API is running"}
 
 # Define the main endpoint your app will call
 @app.post("/chat")
