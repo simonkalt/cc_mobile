@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import anthropic
 # import google.generativeai as genai
-from google import genai
+# from google import genai
+import google.generativeai as genai
 from huggingface_hub import login
 import requests
 import sys
