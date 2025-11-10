@@ -13,13 +13,17 @@ import google.generativeai as genai
 from huggingface_hub import login
 import requests
 import sys
-import ollama
 import re
 import oci
 # from xai.chat import user as xUser, system as xSystem  # TODO: Install xAI SDK package when needed
 
 # Create the FastAPI app instance
 app = FastAPI()
+
+# Hugging Face token
+load_dotenv()
+hf_token = os.getenv('HF_TOKEN')
+
 
 # Define the data model we expect to receive from the app
 # This ensures the 'prompt' is a string
@@ -31,12 +35,6 @@ hf_token = ""
 # Define a simple root endpoint to check if the server is running
 @app.get("/")
 def read_root():
-    load_dotenv()
-
-    hf_token = os.getenv('HF_TOKEN')
-    # print (hf_token)
-    login(hf_token, add_to_git_credential=True)
-
     return {"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
 
 # Define the main endpoint your app will call

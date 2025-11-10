@@ -4,7 +4,6 @@ anthropic
 google-generativeai
 huggingface-hub
 requests
-ollama
 oci
 pydantic
 fastapi
