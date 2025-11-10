@@ -16,8 +16,8 @@ import sys
 import ollama
 import re
 import oci
-from xai_sdk import Client as xClient
-from xai_sdk.chat import user as xUser, system as xSystem
+# from xai.chat import user as xUser, system as xSystem  # TODO: Install xAI SDK package when needed
+
 # Create the FastAPI app instance
 app = FastAPI()
 
