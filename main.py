@@ -1,6 +1,23 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+import os
+import json
+import datetime
+from dotenv import load_dotenv
+from openai import OpenAI
+import gradio as gr
+import anthropic
+# import google.generativeai as genai
+from google import genai
+from huggingface_hub import login
+import requests
+import sys
+import ollama
+import re
+import oci
+from xai_sdk import Client as xClient
+from xai_sdk.chat import user as xUser, system as xSystem
 # Create the FastAPI app instance
 app = FastAPI()
 
