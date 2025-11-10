@@ -3,10 +3,10 @@ uvicorn[standard]
 pydantic
 python-dotenv
 openai
-gradio
 anthropic
 google-generativeai
 huggingface-hub
 requests
 ollama
 xai
+oci
