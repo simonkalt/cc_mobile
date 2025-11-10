@@ -28,7 +28,13 @@ class ChatRequest(BaseModel):
 # Define a simple root endpoint to check if the server is running
 @app.get("/")
 def read_root():
-    return {"status": "Simon's API is running"}
+    load_dotenv()
+
+    hf_token = os.getenv('HF_TOKEN')
+    # print (hf_token)
+    login(hf_token, add_to_git_credential=True)
+
+    return {"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
 
 # Define the main endpoint your app will call
 @app.post("/chat")
