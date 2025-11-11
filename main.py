@@ -39,7 +39,7 @@ xai_api_key = os.getenv('XAI_API_KEY')
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
-    ("Claude", "claude-3-5-sonnet-20241022", anthropic_api_key),
+    ("Claude", "claude-sonnet-4-20250514", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
     ("Grok", "grok-4-fast-reasoning", xai_api_key),
 ]
@@ -69,7 +69,7 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             ]
         )
         return_response = response.choices[0].message.content
-    elif model == "claude-3-5-sonnet-20241022":
+    elif model == "claude-sonnet-4-20250514":
         client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         response = client.messages.create(
             messages=[
