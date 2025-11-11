@@ -72,8 +72,8 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     elif model == "claude-sonnet-4-20250514":
         client = anthropic.Anthropic(api_key=anthropic_api_key)
         response = client.messages.create(model=model,
+            system="You are a helpful assistant.",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=20000,
