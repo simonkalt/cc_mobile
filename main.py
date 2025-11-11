@@ -31,7 +31,7 @@ gemini_api_key = os.getenv('GEMINI_API_KEY')
 xai_api_key = os.getenv('XAI_API_KEY')
 
 LLM_ENVIRONMENT_MAPPING = [
-    ("ChatGPT", "gpt-4o-mini", openai_api_key),
+    ("ChatGPT", "gpt-4.1", openai_api_key),
     ("Claude", "claude-3-5-sonnet-20241022", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
     ("Grok", "grok-1", xai_api_key),
@@ -49,13 +49,13 @@ def get_available_llms():
 # This ensures the 'prompt' is a string
 class ChatRequest(BaseModel):
     prompt: str
-    active_model: str = "gpt-4o-mini"  # Default model
+    active_model: str = "gpt-4.1"  # Default model
 
-def post_to_llm(prompt: str, model: str = "gpt-4o-mini"):
+def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
-    if model == "gpt-4o-mini":
+    if model == "gpt-4.1":
         client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        response = client.chat.completions.create(
+        response = client.chat.completions.create(model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
@@ -78,6 +78,7 @@ def post_to_llm(prompt: str, model: str = "gpt-4o-mini"):
             contents=[prompt]
         )
         return_response = response.text
+        
 
     return return_response
 
