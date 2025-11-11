@@ -41,7 +41,10 @@ export default function App() {
         // Set the first available LLM as default
         setSelectedModel(data.llms[0].value);
       } else {
-        Alert.alert("No LLMs Available", "No language models are configured on the server.");
+        Alert.alert(
+          "No LLMs Available",
+          "No language models are configured on the server."
+        );
       }
     } catch (error) {
       console.error(error);
@@ -72,9 +75,9 @@ export default function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           prompt: prompt,
-          active_model: selectedModel 
+          active_model: selectedModel,
         }),
       });
 
@@ -231,4 +234,3 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
-

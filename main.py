@@ -123,15 +123,10 @@ def llm_selector():
 
 @app.post("/chat")
 async def handle_chat(request: ChatRequest):
-    # In a real app, this is where you would call:
-    # response = grok_client.chat(request.prompt)
-    # response = gemini_model.generate(request.prompt)
-    
-    # For this example, we'll just echo the prompt back
     print(f"Received prompt: {request.prompt} with model: {request.active_model}")
     response = post_to_llm(request.prompt, request.active_model)
     return {
-        "response": response if response else "Error: No response from LLM"
+        "response": response if response else f"Error: No response from LLM {request.active_model}"
     }
 
 # --- Optional: To run this file directly ---
