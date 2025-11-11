@@ -61,7 +61,7 @@ class ChatRequest(BaseModel):
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
     if model == "gpt-4.1":
-        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        client = OpenAI(api_key=openai_api_key)
         response = client.chat.completions.create(model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
@@ -70,16 +70,18 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
         )
         return_response = response.choices[0].message.content
     elif model == "claude-sonnet-4-20250514":
-        client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-        response = client.messages.create(
+        client = anthropic.Anthropic(api_key=anthropic_api_key)
+        response = client.messages.create(model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            max_tokens=20000,
+            temperature=1
         )
-        return_response = response.choices[0].message.content
+        return_response = response.content[0].text.replace("```json","").replace("```","")
     elif model == "gemini-2.5-flash":
-        client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+        client = genai.Client(api_key=gemini_api_key)
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[prompt]
