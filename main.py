@@ -34,7 +34,7 @@ LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
     ("Claude", "claude-3-5-sonnet-20241022", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
-    ("Grok", "grok-1", xai_api_key),
+    ("Grok", "grok-4-fast-reasoning", xai_api_key),
 ]
 
 
