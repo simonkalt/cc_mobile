@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 import os
 import json
@@ -15,10 +16,10 @@ import oci
 import logging
 import sys
 
-# Configure logging to show DEBUG level messages
-# This works with uvicorn and Render's log collection
+# Configure logging - use INFO level for better visibility on Render
+# Render and many cloud platforms filter DEBUG logs
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
@@ -27,17 +28,34 @@ logging.basicConfig(
     force=True  # Override any existing configuration
 )
 
-# Also configure uvicorn loggers to ensure they respect our level
+# Get a logger for this application and set to INFO
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Configure uvicorn loggers
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
-# Get a logger for this application
-logger = logging.getLogger(__name__)
-
 XAI_SDK_AVAILABLE = False
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown"""
+    # Startup
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True
+    )
+    logger.info("Application startup - logging configured")
+    print("[STARTUP] Application started and logging configured")
+    yield
+    # Shutdown (if needed in the future)
+
 # Create the FastAPI app instance
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 hf_token = os.getenv('HF_TOKEN')
 google_api_key = os.getenv("GOOGLE_API_KEY")
@@ -184,7 +202,9 @@ def get_llms():
 @app.get("/llm-selector", response_class=HTMLResponse)
 def llm_selector():
     llm_options = get_available_llms()
-    logger.debug(f"llm_options: {llm_options}")
+    # Use INFO level and also print for maximum visibility on Render
+    logger.info(f"llm_options: {llm_options}")
+    print(f"[LLM_SELECTOR] llm_options: {llm_options}")  # Fallback for Render logs
     if not llm_options:
         body = "<p>No large language models are configured.</p>"
     else:
