@@ -8,22 +8,13 @@ import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 import anthropic
-# import google.generativeai as genai
-# from google import genai
 import google.generativeai as genai
 from huggingface_hub import login
 import requests
-import sys
-import re
 import oci
-try:
-    from xai_sdk import Client as xClient
-    from xai import user as xUser, system as xSystem
-    XAI_SDK_AVAILABLE = True
-except ImportError:
-    XAI_SDK_AVAILABLE = False
-    # Install with: pip install xai-sdk (requires Python 3.10+)
-    # Or use direct HTTP requests (already implemented as fallback)
+import logging
+
+XAI_SDK_AVAILABLE = False
 
 # Create the FastAPI app instance
 app = FastAPI()
@@ -93,42 +84,27 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
         )
         return_response = response.text
     elif model == "grok-4-fast-reasoning":
-        if XAI_SDK_AVAILABLE:
-            # Use SDK if available
-            xai_client = xClient(
-                api_key=xai_api_key,
-                timeout=3600  # Override default timeout with longer timeout for reasoning models
-            )
-            response = xai_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return_response = response.choices[0].message.content
-        else:
-            # Fallback to direct HTTP requests (no SDK needed)
-            headers = {
-                "Authorization": f"Bearer {xai_api_key}",
-                "Content-Type": "application/json"
-            }
-            data = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt}
-                ]
-            }
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                json=data,
-                headers=headers,
-                timeout=3600
-            )
-            response.raise_for_status()
-            result = response.json()
-            return_response = result["choices"][0]["message"]["content"]
+        # Fallback to direct HTTP requests (no SDK needed)
+        headers = {
+            "Authorization": f"Bearer {xai_api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
+            ]
+        }
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            json=data,
+            headers=headers,
+            timeout=3600
+        )
+        response.raise_for_status()
+        result = response.json()
+        return_response = result["choices"][0]["message"]["content"]
     elif model == "oci-generative-ai":
         try:
             # Initialize OCI config from file
@@ -188,7 +164,7 @@ def get_llms():
 @app.get("/llm-selector", response_class=HTMLResponse)
 def llm_selector():
     llm_options = get_available_llms()
-    print(llm_options);
+    logging.debug(f"llm_options: {llm_options}")
     if not llm_options:
         body = "<p>No large language models are configured.</p>"
     else:
