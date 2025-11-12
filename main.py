@@ -84,7 +84,7 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
         client = genai.Client(api_key=gemini_api_key)
         response = client.models.generate_content(
             model=model,
-            contents=[prompt]
+            contents=prompt
         )
         return_response = response.text
     elif model == "grok-4-fast-reasoning":
