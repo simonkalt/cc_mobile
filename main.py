@@ -14,6 +14,13 @@ import requests
 import oci
 import logging
 
+# Configure logging to show DEBUG level messages
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
 XAI_SDK_AVAILABLE = False
 
 # Create the FastAPI app instance
