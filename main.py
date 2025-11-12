@@ -79,11 +79,25 @@ LLM_ENVIRONMENT_MAPPING = [
 
 
 def get_available_llms():
-    return [
-        {"label": display_name, "value": model_name}
-        for display_name, model_name, api_key in LLM_ENVIRONMENT_MAPPING
-        if api_key
-    ]
+    """Get available LLMs based on configured API keys/credentials"""
+    available = []
+    for display_name, model_name, api_key in LLM_ENVIRONMENT_MAPPING:
+        # For OCI, api_key is actually oci_compartment_id
+        # OCI also needs a config file, so check both
+        if model_name == "oci-generative-ai":
+            # For OCI, check if compartment_id is set and config file exists
+            has_compartment = bool(api_key)
+            has_config = os.path.exists(oci_config_file)
+            if has_compartment and has_config:
+                available.append({"label": display_name, "value": model_name})
+            else:
+                logger.debug(f"Skipping {display_name} - compartment_id: {has_compartment}, config_file exists: {has_config}")
+        elif api_key:
+            available.append({"label": display_name, "value": model_name})
+        else:
+            logger.debug(f"Skipping {display_name} - no credentials configured")
+    logger.info(f"Available LLMs: {available}")
+    return available
 
 # Define the data model we expect to receive from the app
 # This ensures the 'prompt' is a string
