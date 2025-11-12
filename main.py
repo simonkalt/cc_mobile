@@ -85,7 +85,6 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
         client = genai.GenerativeModel(model)
         # client = genai.Client(api_key=gemini_api_key)
         response = client.generate_content(
-            model=model,
             contents=prompt
         )
         return_response = response.text
