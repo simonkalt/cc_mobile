@@ -13,13 +13,26 @@ from huggingface_hub import login
 import requests
 import oci
 import logging
+import sys
 
 # Configure logging to show DEBUG level messages
+# This works with uvicorn and Render's log collection
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Explicitly use stdout for Render
+    ],
+    force=True  # Override any existing configuration
 )
+
+# Also configure uvicorn loggers to ensure they respect our level
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
+# Get a logger for this application
+logger = logging.getLogger(__name__)
 
 XAI_SDK_AVAILABLE = False
 
@@ -171,7 +184,7 @@ def get_llms():
 @app.get("/llm-selector", response_class=HTMLResponse)
 def llm_selector():
     llm_options = get_available_llms()
-    logging.debug(f"llm_options: {llm_options}")
+    logger.debug(f"llm_options: {llm_options}")
     if not llm_options:
         body = "<p>No large language models are configured.</p>"
     else:
