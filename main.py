@@ -188,6 +188,7 @@ def get_llms():
 @app.get("/llm-selector", response_class=HTMLResponse)
 def llm_selector():
     llm_options = get_available_llms()
+    print(llm_options);
     if not llm_options:
         body = "<p>No large language models are configured.</p>"
     else:
