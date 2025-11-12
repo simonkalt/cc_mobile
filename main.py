@@ -28,7 +28,6 @@ except ImportError:
 # Create the FastAPI app instance
 app = FastAPI()
 
-# Hugging Face token
 hf_token = os.getenv('HF_TOKEN')
 google_api_key = os.getenv("GOOGLE_API_KEY")
 openai_api_key = os.getenv('OPENAI_API_KEY')
