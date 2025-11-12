@@ -81,8 +81,10 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
         )
         return_response = response.content[0].text.replace("```json","").replace("```","")
     elif model == "gemini-2.5-flash":
-        client = genai.Client(api_key=gemini_api_key)
-        response = client.models.generate_content(
+        genai.configure(api_key=gemini_api_key)
+        client = genai.GenerativeModel(model)
+        # client = genai.Client(api_key=gemini_api_key)
+        response = client.generate_content(
             model=model,
             contents=prompt
         )
