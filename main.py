@@ -85,13 +85,17 @@ def get_available_llms():
         # For OCI, api_key is actually oci_compartment_id
         # OCI also needs a config file, so check both
         if model_name == "oci-generative-ai":
-            # For OCI, check if compartment_id is set and config file exists
+            # For OCI, check if compartment_id is set
+            # Config file check is done at runtime in post_to_llm with error handling
             has_compartment = bool(api_key)
             has_config = os.path.exists(oci_config_file)
-            if has_compartment and has_config:
+            logger.info(f"OCI check - compartment_id: {has_compartment}, config_file: {oci_config_file}, exists: {has_config}")
+            if has_compartment:
+                # Show OCI option if compartment_id is set, even if config file doesn't exist yet
+                # The error will be handled gracefully in post_to_llm
                 available.append({"label": display_name, "value": model_name})
             else:
-                logger.debug(f"Skipping {display_name} - compartment_id: {has_compartment}, config_file exists: {has_config}")
+                logger.info(f"Skipping {display_name} - compartment_id not set")
         elif api_key:
             available.append({"label": display_name, "value": model_name})
         else:
