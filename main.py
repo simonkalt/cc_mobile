@@ -100,7 +100,7 @@ def get_available_llms():
             available.append({"label": display_name, "value": model_name})
         else:
             logger.debug(f"Skipping {display_name} - no credentials configured")
-    logger.info(f"Available LLMs: {available}")
+    # logger.info(f"Available LLMs: {available}")
     return available
 
 # Define the data model we expect to receive from the app
