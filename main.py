@@ -103,7 +103,7 @@ oci_config_file = os.getenv('OCI_CONFIG_FILE', '/etc/secrets/config')  # ← Ren
 # oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('config'))
 oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
 oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
-oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceyahfzhfevshucolit6g2z72bz7lcpy7qa6cv2vnwczzqjq')
+oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceya5zq6k7j3k4m5n6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0')
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
