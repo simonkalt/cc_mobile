@@ -86,6 +86,11 @@ async def lifespan(app: FastAPI):
 # - Compartment ID set: {bool(oci_compartment_id)}"""
     # send_ntfy_notification(config_summary, "OCI Config")
 
+    if os.path.exists("oci_api_key.pem"):
+        print("oci_api_key.pem File exists!")
+    else:
+        print("oci_api_key.pem File does NOT exist.")
+
     yield
     # Shutdown (if needed in the future)
 
@@ -98,6 +103,7 @@ openai_api_key = os.getenv('OPENAI_API_KEY')
 anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
 gemini_api_key = os.getenv('GEMINI_API_KEY')
 xai_api_key = os.getenv('XAI_API_KEY')
+
 oci_compartment_id = os.getenv('OCI_COMPARTMENT_ID')
 oci_config_file = os.getenv('OCI_CONFIG_FILE', '/etc/secrets/config')  # ← Render path!
 # oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('config'))
