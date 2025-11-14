@@ -69,7 +69,8 @@ oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
 oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'cohere.command')
 
-logging.debug(oci_config_file, oci_region)
+logger.info(f"oci_config_file: {oci_config_file}")
+logger.info(f"oci_region: {oci_region}")
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
