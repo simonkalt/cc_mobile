@@ -20,4 +20,7 @@ pip install uvicorn --no-deps
 echo "Step 4: Installing remaining packages from requirements.txt..."
 pip install -r requirements.txt
 
+# Example build command in Render settings:
+chmod 600 oci_api_key.pem
+
 echo "Build process complete!"
