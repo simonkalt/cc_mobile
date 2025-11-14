@@ -38,6 +38,22 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 XAI_SDK_AVAILABLE = False
 
+def send_ntfy_notification(message: str, title: str = "CoverLetter App"):
+    """Send a notification to ntfy topic CustomCoverLetter"""
+    try:
+        requests.post(
+            "https://ntfy.sh/CustomCoverLetter",
+            data=message.encode('utf-8'),
+            headers={
+                "Title": title,
+                "Priority": "default"
+            },
+            timeout=5
+        )
+    except Exception as e:
+        # Silently fail - don't break the app if notifications fail
+        logger.debug(f"Failed to send ntfy notification: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
@@ -50,7 +66,7 @@ async def lifespan(app: FastAPI):
         force=True
     )
     logger.info("Application startup - logging configured")
-    print("[STARTUP] Application started and logging configured")
+    send_ntfy_notification("Application started and logging configured", "Startup")
     
     # Log OCI configuration variables
     logger.info(f"oci_config_file: {oci_config_file}")
@@ -58,13 +74,17 @@ async def lifespan(app: FastAPI):
     logger.info(f"oci_compartment_id: {oci_compartment_id}")
     logger.info(f"oci_config_profile: {oci_config_profile}")
     logger.info(f"oci_model_id: {oci_model_id}")
-    print(f"[CONFIG] oci_config_file: {oci_config_file}")  # Fallback for Render logs
-    print(f"[CONFIG] oci_region: {oci_region}")  # Fallback for Render logs
-    print(f"[CONFIG] oci_compartment_id: {oci_compartment_id}")  # Fallback for Render logs
-    print(f"[CONFIG] oci_config_profile: {oci_config_profile}")  # Fallback for Render logs
-    print(f"[CONFIG] oci_model_id: {oci_model_id}")  # Fallback for Render logs
-    print(f"Config exists: {os.path.exists('/etc/secrets/config')}")
-    print(f"Compartment ID: {os.getenv('OCI_COMPARTMENT_ID')}")    
+    
+    # Send OCI configuration via ntfy
+    config_summary = f"""OCI Configuration:
+- Config file: {oci_config_file}
+- Region: {oci_region}
+- Compartment ID: {oci_compartment_id}
+- Config profile: {oci_config_profile}
+- Model ID: {oci_model_id}
+- Config exists: {os.path.exists(oci_config_file)}
+- Compartment ID set: {bool(oci_compartment_id)}"""
+    send_ntfy_notification(config_summary, "OCI Config")
 
     yield
     # Shutdown (if needed in the future)
