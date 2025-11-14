@@ -69,22 +69,22 @@ async def lifespan(app: FastAPI):
     send_ntfy_notification("Application started and logging configured", "Startup")
     
     # Log OCI configuration variables
-    logger.info(f"oci_config_file: {oci_config_file}")
-    logger.info(f"oci_region: {oci_region}")
-    logger.info(f"oci_compartment_id: {oci_compartment_id}")
-    logger.info(f"oci_config_profile: {oci_config_profile}")
-    logger.info(f"oci_model_id: {oci_model_id}")
+    # logger.info(f"oci_config_file: {oci_config_file}")
+    # logger.info(f"oci_region: {oci_region}")
+    # logger.info(f"oci_compartment_id: {oci_compartment_id}")
+    # logger.info(f"oci_config_profile: {oci_config_profile}")
+    # logger.info(f"oci_model_id: {oci_model_id}")
     
     # Send OCI configuration via ntfy
-    config_summary = f"""OCI Configuration:
-- Config file: {oci_config_file}
-- Region: {oci_region}
-- Compartment ID: {oci_compartment_id}
-- Config profile: {oci_config_profile}
-- Model ID: {oci_model_id}
-- Config exists: {os.path.exists(oci_config_file)}
-- Compartment ID set: {bool(oci_compartment_id)}"""
-    send_ntfy_notification(config_summary, "OCI Config")
+#     config_summary = f"""OCI Configuration:
+# - Config file: {oci_config_file}
+# - Region: {oci_region}
+# - Compartment ID: {oci_compartment_id}
+# - Config profile: {oci_config_profile}
+# - Model ID: {oci_model_id}
+# - Config exists: {os.path.exists(oci_config_file)}
+# - Compartment ID set: {bool(oci_compartment_id)}"""
+    # send_ntfy_notification(config_summary, "OCI Config")
 
     yield
     # Shutdown (if needed in the future)
