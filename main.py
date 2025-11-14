@@ -110,7 +110,7 @@ LLM_ENVIRONMENT_MAPPING = [
     ("Claude", "claude-sonnet-4-20250514", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
     ("Grok", "grok-4-fast-reasoning", xai_api_key),
-    ("OCI", "oci-generative-ai", oci_compartment_id),
+    ("OCI (Llama)", "oci-generative-ai", oci_compartment_id),
 ]
 
 
@@ -218,13 +218,11 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             full_prompt = f"You are a helpful assistant.\n\nUser: {prompt}\nAssistant:"
             
             # Use Cohere request for Cohere models (or Llama if using Llama)
-            inference_request = oci.generative_ai_inference.models.CohereGenerateRequest(
+            inference_request = oci.generative_ai_inference.models.LlamaLlmInferenceRequest(
                 prompt=full_prompt,
                 max_tokens=2048,
-                temperature=0.7,
-                num_generations=1
-            )
-            
+                temperature=0.7
+            )            
             # Create generate text details
             generate_text_details = oci.generative_ai_inference.models.GenerateTextDetails(
                 serving_mode=serving_mode,
