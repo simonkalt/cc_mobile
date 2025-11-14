@@ -63,7 +63,9 @@ async def lifespan(app: FastAPI):
     print(f"[CONFIG] oci_compartment_id: {oci_compartment_id}")  # Fallback for Render logs
     print(f"[CONFIG] oci_config_profile: {oci_config_profile}")  # Fallback for Render logs
     print(f"[CONFIG] oci_model_id: {oci_model_id}")  # Fallback for Render logs
-    
+    print(f"Config exists: {os.path.exists('/etc/secrets/config')}")
+    print(f"Compartment ID: {os.getenv('OCI_COMPARTMENT_ID')}")    
+
     yield
     # Shutdown (if needed in the future)
 
