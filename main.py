@@ -71,6 +71,14 @@ oci_model_id = os.getenv('OCI_MODEL_ID', 'cohere.command')
 
 logger.info(f"oci_config_file: {oci_config_file}")
 logger.info(f"oci_region: {oci_region}")
+logger.info(f"oci_compartment_id: {oci_compartment_id}")
+logger.info(f"oci_config_profile: {oci_config_profile}")
+logger.info(f"oci_model_id: {oci_model_id}")
+print(f"[CONFIG] oci_config_file: {oci_config_file}")  # Fallback for Render logs
+print(f"[CONFIG] oci_region: {oci_region}")  # Fallback for Render logs
+print(f"[CONFIG] oci_compartment_id: {oci_compartment_id}")  # Fallback for Render logs
+print(f"[CONFIG] oci_config_profile: {oci_config_profile}")  # Fallback for Render logs
+print(f"[CONFIG] oci_model_id: {oci_model_id}")  # Fallback for Render logs
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
