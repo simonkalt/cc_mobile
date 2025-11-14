@@ -66,8 +66,10 @@ xai_api_key = os.getenv('XAI_API_KEY')
 oci_compartment_id = os.getenv('OCI_COMPARTMENT_ID')
 oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('/etc/secrets/config'))
 oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
-oci_region = os.getenv('OCI_REGION', 'us-chicago-1')
+oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'cohere.command')
+
+logging.debug(oci_config_file, oci_region)
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
@@ -169,7 +171,6 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             # Create Generative AI client
             service_endpoint = f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
             generative_ai_client = oci.generative_ai_inference.GenerativeAiInferenceClient(
-                config=config,
                 service_endpoint=service_endpoint
             )
             
