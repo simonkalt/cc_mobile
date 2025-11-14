@@ -51,6 +51,19 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Application startup - logging configured")
     print("[STARTUP] Application started and logging configured")
+    
+    # Log OCI configuration variables
+    logger.info(f"oci_config_file: {oci_config_file}")
+    logger.info(f"oci_region: {oci_region}")
+    logger.info(f"oci_compartment_id: {oci_compartment_id}")
+    logger.info(f"oci_config_profile: {oci_config_profile}")
+    logger.info(f"oci_model_id: {oci_model_id}")
+    print(f"[CONFIG] oci_config_file: {oci_config_file}")  # Fallback for Render logs
+    print(f"[CONFIG] oci_region: {oci_region}")  # Fallback for Render logs
+    print(f"[CONFIG] oci_compartment_id: {oci_compartment_id}")  # Fallback for Render logs
+    print(f"[CONFIG] oci_config_profile: {oci_config_profile}")  # Fallback for Render logs
+    print(f"[CONFIG] oci_model_id: {oci_model_id}")  # Fallback for Render logs
+    
     yield
     # Shutdown (if needed in the future)
 
@@ -68,17 +81,6 @@ oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('/etc/secrets/
 oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
 oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'cohere.command')
-
-logger.info(f"oci_config_file: {oci_config_file}")
-logger.info(f"oci_region: {oci_region}")
-logger.info(f"oci_compartment_id: {oci_compartment_id}")
-logger.info(f"oci_config_profile: {oci_config_profile}")
-logger.info(f"oci_model_id: {oci_model_id}")
-print(f"[CONFIG] oci_config_file: {oci_config_file}")  # Fallback for Render logs
-print(f"[CONFIG] oci_region: {oci_region}")  # Fallback for Render logs
-print(f"[CONFIG] oci_compartment_id: {oci_compartment_id}")  # Fallback for Render logs
-print(f"[CONFIG] oci_config_profile: {oci_config_profile}")  # Fallback for Render logs
-print(f"[CONFIG] oci_model_id: {oci_model_id}")  # Fallback for Render logs
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
