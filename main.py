@@ -202,9 +202,10 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             # Initialize OCI config from file
             config = oci.config.from_file(oci_config_file, oci_config_profile)
             
-            # Create Generative AI client
+            # Create Generative AI client — FIXED: pass config!
             service_endpoint = f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
             generative_ai_client = oci.generative_ai_inference.GenerativeAiInferenceClient(
+                config=config,                # ← THIS WAS MISSING
                 service_endpoint=service_endpoint
             )
             
@@ -214,13 +215,14 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             )
             
             # Prepare the inference request
-            # Format prompt with system message
             full_prompt = f"You are a helpful assistant.\n\nUser: {prompt}\nAssistant:"
             
-            inference_request = oci.generative_ai_inference.models.LlamaLlmInferenceRequest(
+            # Use Cohere request for Cohere models (or Llama if using Llama)
+            inference_request = oci.generative_ai_inference.models.CohereGenerateRequest(
                 prompt=full_prompt,
                 max_tokens=2048,
-                temperature=0.7
+                temperature=0.7,
+                num_generations=1
             )
             
             # Create generate text details
@@ -233,8 +235,12 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             # Make the request
             response = generative_ai_client.generate_text(generate_text_details)
             return_response = response.data.inference_response.generated_texts[0].text
+
         except Exception as e:
-            return_response = f"Error calling OCI Generative AI: {str(e)}. Ensure OCI config file exists at {oci_config_file} and OCI_COMPARTMENT_ID is set."
+            error_msg = f"Error calling OCI Generative AI: {str(e)}. Ensure OCI config file exists at {oci_config_file} and OCI_COMPARTMENT_ID is set."
+            logger.error(error_msg)
+            send_ntfy_notification(error_msg, "OCI Error")
+            return_response = error_msg
 
     return return_response
 
