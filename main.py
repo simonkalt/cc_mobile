@@ -87,9 +87,9 @@ async def lifespan(app: FastAPI):
     # send_ntfy_notification(config_summary, "OCI Config")
 
     if os.path.exists("oci_api_key.pem"):
-        print("oci_api_key.pem File exists!")
+        send_ntfy_notification("File exists!","oci_api_key.pem")
     else:
-        print("oci_api_key.pem File does NOT exist.")
+        send_ntfy_notification("oci_api_key.pem File does NOT exist.","oci_api_key.pem")
 
     yield
     # Shutdown (if needed in the future)
