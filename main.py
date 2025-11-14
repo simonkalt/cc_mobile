@@ -63,6 +63,7 @@ openai_api_key = os.getenv('OPENAI_API_KEY')
 anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
 gemini_api_key = os.getenv('GEMINI_API_KEY')
 xai_api_key = os.getenv('XAI_API_KEY')
+
 oci_compartment_id = os.getenv('OCI_COMPARTMENT_ID')
 oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('/etc/secrets/config'))
 oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
@@ -71,6 +72,9 @@ oci_model_id = os.getenv('OCI_MODEL_ID', 'cohere.command')
 
 logger.info(f"oci_config_file: {oci_config_file}")
 logger.info(f"oci_region: {oci_region}")
+logger.info(f"oci_model_id: {oci_model_id}")
+logger.info(f"oci_compartment_id: {oci_compartment_id}")
+logger.info(f"oci_config_profile: {oci_config_profile}")
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
