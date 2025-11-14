@@ -99,10 +99,11 @@ anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
 gemini_api_key = os.getenv('GEMINI_API_KEY')
 xai_api_key = os.getenv('XAI_API_KEY')
 oci_compartment_id = os.getenv('OCI_COMPARTMENT_ID')
-oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('config'))
+oci_config_file = os.getenv('OCI_CONFIG_FILE', '/etc/secrets/config')  # ← Render path!
+# oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('config'))
 oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
 oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
-oci_model_id = os.getenv('OCI_MODEL_ID', 'cohere.command')
+oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceyahfzhfevshucolit6g2z72bz7lcpy7qa6cv2vnwczzqjq')
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
@@ -209,8 +210,7 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             
             # Prepare the serving mode
             serving_mode = oci.generative_ai_inference.models.OnDemandServingMode(
-                model_id=oci_model_id,
-                capacity_type=oci.generative_ai_inference.models.OnDemandServingMode.CAPACITY_TYPE_ON_DEMAND
+                model_id=oci_model_id
             )
             
             # Prepare the inference request
