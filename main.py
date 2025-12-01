@@ -116,7 +116,7 @@ LLM_ENVIRONMENT_MAPPING = [
     ("Claude", "claude-sonnet-4-20250514", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
     ("Grok", "grok-4-fast-reasoning", xai_api_key),
-    ("OCI (Llama)", "oci-generative-ai", oci_compartment_id),
+    # ("OCI (Llama)", "oci-generative-ai", oci_compartment_id),
 ]
 
 
