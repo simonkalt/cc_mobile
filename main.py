@@ -151,6 +151,10 @@ oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
 oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceya5zq6k7j3k4m5n6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0')
 
+# S3 configuration
+s3_bucket_name = os.getenv('S3_BUCKET_NAME', '')
+s3_resume_prefix = os.getenv('S3_RESUME_PREFIX', 'PDF Resumes')  # Default prefix for resume files
+
 # System message for cover letter generation
 system_message = """You are an expert cover letter writer. Generate a professional cover letter based on the provided information. 
 Return your response as a JSON object with two fields:
@@ -516,22 +520,31 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     # Check if resume is a file path and read PDF if it is
     resume_content = resume
     if resume and (resume.endswith('.pdf') or resume.endswith('.PDF')):
-        # First, check if it's an S3 path
-        is_s3_path = resume.startswith('s3://') or ('/' in resume and not os.path.isabs(resume) and not os.path.exists(resume))
+        # First, check if it's an explicit S3 path (starts with s3://)
+        is_s3_path = resume.startswith('s3://')
         
-        # If it looks like an S3 path (starts with s3:// or contains / but file doesn't exist locally)
-        if is_s3_path or (S3_AVAILABLE and '/' in resume and not os.path.exists(resume)):
+        # Or if we have a configured S3 bucket, try to construct the S3 path
+        if not is_s3_path and S3_AVAILABLE and s3_bucket_name:
+            # Construct S3 path: s3://bucket/prefix/resume_filename
+            # If resume already contains the prefix, use it as-is, otherwise prepend it
+            if resume.startswith(s3_resume_prefix):
+                s3_key = resume
+            else:
+                s3_key = f"{s3_resume_prefix}/{resume}" if s3_resume_prefix else resume
+            s3_path = f"s3://{s3_bucket_name}/{s3_key}"
+            is_s3_path = True
+            logger.info(f"Constructed S3 path from configured bucket: {s3_path}")
+        
+        # Try to download from S3 if we have an S3 path
+        if is_s3_path and S3_AVAILABLE:
             try:
-                logger.info(f"Attempting to download PDF from S3: {resume}")
-                # Try to download from S3
-                # If it's not already in s3:// format, assume it's bucket/key format
-                s3_path = resume if resume.startswith('s3://') else resume
-                pdf_bytes = download_pdf_from_s3(s3_path)
+                logger.info(f"Attempting to download PDF from S3: {s3_path if 's3_path' in locals() else resume}")
+                s3_path_to_use = s3_path if 's3_path' in locals() else resume
+                pdf_bytes = download_pdf_from_s3(s3_path_to_use)
                 resume_content = read_pdf_from_bytes(pdf_bytes)
                 logger.info("Successfully downloaded and extracted text from S3 PDF")
             except Exception as e:
                 logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
-                # Fall through to try local paths
                 is_s3_path = False
         
         # If not S3 or S3 download failed, try local file paths
