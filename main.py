@@ -434,14 +434,15 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     r = ""
     
     try:
-        if llm == "Gemini":
+        # Map model names to display names for compatibility
+        if llm == "Gemini" or llm == "gemini-2.5-flash":
             msg = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
             genai.configure(api_key=gemini_api_key)
             model = genai.GenerativeModel("gemini-2.5-flash")
             response = model.generate_content(contents=msg)
             r = response.text
             
-        elif llm == "ChatGPT":
+        elif llm == "ChatGPT" or llm == gpt_model or llm == "gpt-4.1":
             client = OpenAI(api_key=openai_api_key)
             messages = [
                 {"role": "user", "content": system_message},
@@ -453,7 +454,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             response = client.chat.completions.create(model=gpt_model, messages=messages)
             r = response.choices[0].message.content
             
-        elif llm == "Grok":
+        elif llm == "Grok" or llm == xai_model or llm == "grok-4-fast-reasoning":
             # Use HTTP API (xai SDK has different API structure)
             headers = {
                 "Authorization": f"Bearer {xai_api_key}",
@@ -479,12 +480,12 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             result = response.json()
             r = result["choices"][0]["message"]["content"]
                 
-        elif llm == "OCI":
+        elif llm == "OCI" or llm == "oci-generative-ai":
             full_prompt = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received: {r[:100]}...")
             
-        elif llm == "Llama":
+        elif llm == "Llama" or llm == ollama_model or llm == "llama3.2":
             if not OLLAMA_AVAILABLE:
                 raise ImportError("ollama library is not installed. Please install it with: pip install ollama")
             
@@ -509,7 +510,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response['message']['content']
             
-        elif llm == "Claude":
+        elif llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514":
             client = anthropic.Anthropic(api_key=anthropic_api_key)
             messages = [
                 {
