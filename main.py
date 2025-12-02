@@ -152,8 +152,16 @@ oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceya5zq6k7j3k4m5n6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0')
 
 # S3 configuration
-s3_bucket_name = os.getenv('S3_BUCKET_NAME', '')
+s3_bucket_uri = os.getenv('S3_BUCKET_URI', '')
 s3_resume_prefix = os.getenv('S3_RESUME_PREFIX', 'PDF Resumes')  # Default prefix for resume files
+
+# Parse bucket name from URI (handles both s3://bucket-name and bucket-name formats)
+s3_bucket_name = ''
+if s3_bucket_uri:
+    if s3_bucket_uri.startswith('s3://'):
+        s3_bucket_name = s3_bucket_uri[5:]  # Remove 's3://' prefix
+    else:
+        s3_bucket_name = s3_bucket_uri
 
 # System message for cover letter generation
 system_message = """You are an expert cover letter writer. Generate a professional cover letter based on the provided information. 
@@ -533,7 +541,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                 s3_key = f"{s3_resume_prefix}/{resume}" if s3_resume_prefix else resume
             s3_path = f"s3://{s3_bucket_name}/{s3_key}"
             is_s3_path = True
-            logger.info(f"Constructed S3 path from configured bucket: {s3_path}")
+            logger.info(f"Constructed S3 path from configured bucket URI: {s3_path}")
         
         # Try to download from S3 if we have an S3 path
         if is_s3_path and S3_AVAILABLE:
