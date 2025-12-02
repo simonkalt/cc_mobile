@@ -153,10 +153,11 @@ personality_profiles = {
 }
 
 # Model names mapping
-gpt_model = os.getenv('GPT_MODEL', 'gpt-4.1')
-claude_model = os.getenv('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
-ollama_model = os.getenv('OLLAMA_MODEL', 'llama3.2')
-xai_model = os.getenv('XAI_MODEL', 'grok-4-fast-reasoning')
+gpt_model = "gpt-4.1"
+claude_model = "claude-sonnet-4-20250514"
+ollama_model = "llama3.2"
+OLLAMA_API = "http://localhost:11434/api/chat"
+xai_model = "grok-4-fast-reasoning"
 
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
