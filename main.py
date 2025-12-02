@@ -449,24 +449,59 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     # Check if resume is a file path and read PDF if it is
     resume_content = resume
     if resume and (resume.endswith('.pdf') or resume.endswith('.PDF')):
-        # Check if it's a file path (contains path separators or exists as file)
-        if os.path.sep in resume or os.path.exists(resume):
-            logger.info(f"Detected PDF file path: {resume}, attempting to read PDF content")
-            resume_content = read_pdf_file(resume)
-        # If it doesn't exist, it might be a relative path - try to find it
-        elif not os.path.isabs(resume):
+        # Get the current working directory
+        cwd = os.getcwd()
+        logger.info(f"Current working directory: {cwd}")
+        
+        # Build list of possible paths to try
+        possible_paths = []
+        
+        # If it's already an absolute path, try it first
+        if os.path.isabs(resume):
+            possible_paths.append(resume)
+        else:
+            # If it contains path separators (like "PDF Resumes/file.pdf"), try it as-is first
+            if os.path.sep in resume or '/' in resume:
+                possible_paths.append(resume)
+                # Also try from current directory
+                possible_paths.append(os.path.join(cwd, resume))
+            
             # Try common locations
-            possible_paths = [
-                resume,
-                os.path.join("PDF Resumes", resume),
-                os.path.join("resumes", resume),
-                os.path.join(".", resume)
-            ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    logger.info(f"Found PDF at: {path}, reading content")
-                    resume_content = read_pdf_file(path)
-                    break
+            possible_paths.extend([
+                os.path.join(cwd, resume),
+                os.path.join(cwd, "PDF Resumes", os.path.basename(resume)),
+                os.path.join(cwd, "PDF Resumes", resume),
+                os.path.join(cwd, "resumes", os.path.basename(resume)),
+                os.path.join(cwd, "resumes", resume),
+                os.path.join(".", resume),
+                os.path.join(".", "PDF Resumes", os.path.basename(resume)),
+                os.path.join(".", "PDF Resumes", resume),
+            ])
+            
+            # If the resume path already includes "PDF Resumes", try extracting just the filename
+            if "PDF Resumes" in resume or "pdf" in resume.lower():
+                filename = os.path.basename(resume)
+                possible_paths.extend([
+                    os.path.join(cwd, "PDF Resumes", filename),
+                    os.path.join(".", "PDF Resumes", filename),
+                ])
+        
+        # Try each path until we find one that exists
+        found = False
+        for path in possible_paths:
+            # Normalize the path
+            normalized_path = os.path.normpath(path)
+            logger.debug(f"Trying PDF path: {normalized_path}")
+            if os.path.exists(normalized_path) and os.path.isfile(normalized_path):
+                logger.info(f"Found PDF at: {normalized_path}, reading content")
+                resume_content = read_pdf_file(normalized_path)
+                found = True
+                break
+        
+        if not found:
+            logger.warning(f"PDF file not found. Tried paths: {possible_paths[:5]}... (showing first 5)")
+            # Return the original resume string if we can't find the file
+            resume_content = resume
     
     # Build message payload
     message_data = {
