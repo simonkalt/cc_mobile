@@ -155,6 +155,11 @@ oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaa
 s3_bucket_uri = os.getenv('S3_BUCKET_URI', '')
 s3_resume_prefix = os.getenv('S3_RESUME_PREFIX', 'PDF Resumes')  # Default prefix for resume files
 
+# AWS credentials (optional - can also use IAM role or AWS credentials file)
+aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID', '')
+aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+aws_region = os.getenv('AWS_REGION', 'us-east-1')  # Default region
+
 # Parse bucket name from URI (handles both s3://bucket-name and bucket-name formats)
 s3_bucket_name = ''
 if s3_bucket_uri:
@@ -397,8 +402,18 @@ def download_pdf_from_s3(s3_path: str) -> bytes:
         
         logger.info(f"Downloading PDF from S3: bucket={bucket_name}, key={object_key}")
         
-        # Create S3 client (will use default credentials from environment/IAM role)
-        s3_client = boto3.client('s3')
+        # Create S3 client with credentials if provided, otherwise use default (IAM role, credentials file, etc.)
+        if aws_access_key_id and aws_secret_access_key:
+            logger.info("Using AWS credentials from environment variables")
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+                region_name=aws_region
+            )
+        else:
+            logger.info("Using default AWS credentials (IAM role, credentials file, or environment)")
+            s3_client = boto3.client('s3', region_name=aws_region)
         
         # Download the object
         response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
@@ -408,7 +423,11 @@ def download_pdf_from_s3(s3_path: str) -> bytes:
         return pdf_bytes
         
     except NoCredentialsError:
-        error_msg = "AWS credentials not found. Cannot download from S3."
+        error_msg = (
+            "AWS credentials not found. Cannot download from S3. "
+            "Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables, "
+            "or configure AWS credentials file, or use an IAM role."
+        )
         logger.error(error_msg)
         raise Exception(error_msg)
     except ClientError as e:
