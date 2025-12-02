@@ -153,7 +153,7 @@ oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaa
 
 # S3 configuration
 s3_bucket_uri = os.getenv('S3_BUCKET_URI', '')
-s3_resume_prefix = os.getenv('S3_RESUME_PREFIX', 'PDF Resumes')  # Default prefix for resume files
+s3_resume_prefix = os.getenv('S3_RESUME_PREFIX', '')  # Default prefix for resume files
 
 # AWS credentials (optional - can also use IAM role or AWS credentials file)
 aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID', '')
