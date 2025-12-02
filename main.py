@@ -599,13 +599,38 @@ def llm_selector():
 
 
 @app.post("/chat")
-async def handle_chat(request: ChatRequest):
-    logger.info(f"Received chat request - prompt length: {len(request.prompt)}, model: {request.active_model}")
+async def handle_chat(request: Request):
+    """Handle both simple chat requests and job info requests"""
     try:
-        response = post_to_llm(request.prompt, request.active_model)
-        return {
-            "response": response if response else f"Error: No response from LLM {request.active_model}"
-        }
+        body = await request.json()
+        
+        # Check if this is a job info request (has 'llm', 'company_name', etc.)
+        if 'llm' in body and 'company_name' in body:
+            logger.info("Detected job info request in /chat endpoint, routing to job-info handler")
+            # Convert to JobInfoRequest and handle it
+            job_request = JobInfoRequest(**body)
+            result = get_job_info(
+                llm=job_request.llm,
+                date_input=job_request.date_input,
+                company_name=job_request.company_name,
+                hiring_manager=job_request.hiring_manager,
+                ad_source=job_request.ad_source,
+                resume=job_request.resume,
+                jd=job_request.jd,
+                additional_instructions=job_request.additional_instructions,
+                tone=job_request.tone,
+                address=job_request.address,
+                phone_number=job_request.phone_number
+            )
+            return result
+        else:
+            # Handle as regular chat request
+            chat_request = ChatRequest(**body)
+            logger.info(f"Received chat request - prompt length: {len(chat_request.prompt)}, model: {chat_request.active_model}")
+            response = post_to_llm(chat_request.prompt, chat_request.active_model)
+            return {
+                "response": response if response else f"Error: No response from LLM {chat_request.active_model}"
+            }
     except Exception as e:
         logger.error(f"Error in handle_chat: {str(e)}")
         return {
