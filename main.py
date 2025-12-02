@@ -152,21 +152,13 @@ oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceya5zq6k7j3k4m5n6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0')
 
 # S3 configuration
-s3_bucket_uri = os.getenv('S3_BUCKET_URI', '')
-s3_resume_prefix = os.getenv('S3_RESUME_PREFIX', '')  # Default prefix for resume files
+s3_bucket_name = 'custom-cover-user-resumes'
+s3_resume_prefix = 'PDF Resumes'  # Fixed prefix for resume files
 
 # AWS credentials (optional - can also use IAM role or AWS credentials file)
 aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID', '')
 aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY', '')
 aws_region = os.getenv('AWS_REGION', 'us-east-1')  # Default region
-
-# Parse bucket name from URI (handles both s3://bucket-name and bucket-name formats)
-s3_bucket_name = ''
-if s3_bucket_uri:
-    if s3_bucket_uri.startswith('s3://'):
-        s3_bucket_name = s3_bucket_uri[5:]  # Remove 's3://' prefix
-    else:
-        s3_bucket_name = s3_bucket_uri
 
 # System message for cover letter generation
 system_message = """You are an expert cover letter writer. Generate a professional cover letter based on the provided information. 
@@ -547,53 +539,25 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     # Check if resume is a file path and read PDF if it is
     resume_content = resume
     if resume and (resume.endswith('.pdf') or resume.endswith('.PDF')):
-        # First, check if it's an explicit S3 path (starts with s3://)
-        is_s3_path = resume.startswith('s3://')
-        
-        # Or if we have a configured S3 bucket, try to construct the S3 path
-        if not is_s3_path and S3_AVAILABLE and s3_bucket_name:
-            # Construct S3 path: s3://bucket/prefix/resume_filename
-            # Handle different path formats:
-            # - If resume is just filename: "file.pdf" -> "PDF Resumes/file.pdf"
-            # - If resume includes prefix: "PDF Resumes/file.pdf" -> "PDF Resumes/file.pdf"
-            # - Normalize path separators
-            
-            resume_normalized = resume.replace('\\', '/')  # Normalize path separators
-            prefix_normalized = s3_resume_prefix.replace('\\', '/')
-            
-            # Check if resume already starts with the prefix (with or without slash)
-            if resume_normalized.startswith(prefix_normalized + '/') or resume_normalized == prefix_normalized:
-                # Resume already includes the prefix, use it as-is
-                s3_key = resume_normalized
-            elif resume_normalized.startswith('/'):
-                # Absolute path, remove leading slash
-                s3_key = resume_normalized.lstrip('/')
-            else:
-                # Just filename or relative path, prepend prefix
-                s3_key = f"{prefix_normalized}/{resume_normalized}" if prefix_normalized else resume_normalized
-            
-            s3_path = f"s3://{s3_bucket_name}/{s3_key}"
-            is_s3_path = True
-            logger.info(f"Constructed S3 path from configured bucket URI:")
-            logger.info(f"  - Resume input: '{resume}'")
-            logger.info(f"  - S3 prefix: '{s3_resume_prefix}'")
-            logger.info(f"  - S3 key: '{s3_key}'")
-            logger.info(f"  - Full S3 path: '{s3_path}'")
-        
-        # Try to download from S3 if we have an S3 path
-        if is_s3_path and S3_AVAILABLE:
+        # Try to download from S3 first
+        if S3_AVAILABLE and s3_bucket_name:
             try:
-                logger.info(f"Attempting to download PDF from S3: {s3_path if 's3_path' in locals() else resume}")
-                s3_path_to_use = s3_path if 's3_path' in locals() else resume
-                pdf_bytes = download_pdf_from_s3(s3_path_to_use)
+                # Extract just the filename if path includes directory
+                filename = os.path.basename(resume.replace('\\', '/'))
+                
+                # Construct simple S3 path: s3://bucket/prefix/filename
+                s3_key = f"{s3_resume_prefix}/{filename}" if s3_resume_prefix else filename
+                s3_path = f"s3://{s3_bucket_name}/{s3_key}"
+                
+                logger.info(f"Downloading PDF from S3: {s3_path}")
+                pdf_bytes = download_pdf_from_s3(s3_path)
                 resume_content = read_pdf_from_bytes(pdf_bytes)
                 logger.info("Successfully downloaded and extracted text from S3 PDF")
             except Exception as e:
                 logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
-                is_s3_path = False
         
-        # If not S3 or S3 download failed, try local file paths
-        if not is_s3_path or resume_content == resume:
+        # If S3 download failed or S3 not available, try local file paths
+        if resume_content == resume:
             # Get the current working directory
             cwd = os.getcwd()
             logger.info(f"Trying local file paths. Current working directory: {cwd}")
