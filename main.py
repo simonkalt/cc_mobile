@@ -553,14 +553,32 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         # Or if we have a configured S3 bucket, try to construct the S3 path
         if not is_s3_path and S3_AVAILABLE and s3_bucket_name:
             # Construct S3 path: s3://bucket/prefix/resume_filename
-            # If resume already contains the prefix, use it as-is, otherwise prepend it
-            if resume.startswith(s3_resume_prefix):
-                s3_key = resume
+            # Handle different path formats:
+            # - If resume is just filename: "file.pdf" -> "PDF Resumes/file.pdf"
+            # - If resume includes prefix: "PDF Resumes/file.pdf" -> "PDF Resumes/file.pdf"
+            # - Normalize path separators
+            
+            resume_normalized = resume.replace('\\', '/')  # Normalize path separators
+            prefix_normalized = s3_resume_prefix.replace('\\', '/')
+            
+            # Check if resume already starts with the prefix (with or without slash)
+            if resume_normalized.startswith(prefix_normalized + '/') or resume_normalized == prefix_normalized:
+                # Resume already includes the prefix, use it as-is
+                s3_key = resume_normalized
+            elif resume_normalized.startswith('/'):
+                # Absolute path, remove leading slash
+                s3_key = resume_normalized.lstrip('/')
             else:
-                s3_key = f"{s3_resume_prefix}/{resume}" if s3_resume_prefix else resume
+                # Just filename or relative path, prepend prefix
+                s3_key = f"{prefix_normalized}/{resume_normalized}" if prefix_normalized else resume_normalized
+            
             s3_path = f"s3://{s3_bucket_name}/{s3_key}"
             is_s3_path = True
-            logger.info(f"Constructed S3 path from configured bucket URI: {s3_path}")
+            logger.info(f"Constructed S3 path from configured bucket URI:")
+            logger.info(f"  - Resume input: '{resume}'")
+            logger.info(f"  - S3 prefix: '{s3_resume_prefix}'")
+            logger.info(f"  - S3 key: '{s3_key}'")
+            logger.info(f"  - Full S3 path: '{s3_path}'")
         
         # Try to download from S3 if we have an S3 path
         if is_s3_path and S3_AVAILABLE:
