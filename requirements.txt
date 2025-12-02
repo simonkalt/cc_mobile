@@ -9,3 +9,4 @@ pydantic
 fastapi
 scikit-learn>=1.2.0
 xai-sdk
+ollama

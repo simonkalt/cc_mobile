@@ -16,6 +16,13 @@ import oci
 import logging
 import sys
 
+# Try to import ollama, make it optional
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+
 # Configure logging - use INFO level for better visibility on Render
 # Render and many cloud platforms filter DEBUG logs
 logging.basicConfig(
@@ -111,6 +118,30 @@ oci_config_profile = os.getenv('OCI_CONFIG_PROFILE', 'CoverLetter')
 oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceya5zq6k7j3k4m5n6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0')
 
+# System message for cover letter generation
+system_message = """You are an expert cover letter writer. Generate a professional cover letter based on the provided information. 
+Return your response as a JSON object with two fields:
+- "markdown": The cover letter in markdown format
+- "html": The cover letter in HTML format
+
+The cover letter should be well-structured, professional, and tailored to the specific job and company."""
+
+# Personality profiles for different tones
+personality_profiles = {
+    "Professional": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor.",
+    "Friendly": "Warm, approachable, and personable tone. Use conversational language while remaining professional.",
+    "Confident": "Assertive, self-assured, and impactful tone. Highlight achievements and capabilities with conviction.",
+    "Enthusiastic": "Energetic, passionate, and excited tone. Show genuine interest and enthusiasm for the role and company.",
+    "Casual": "Relaxed, informal, and conversational tone. Use a more laid-back approach while still being respectful.",
+    "Formal": "Very formal, traditional, and conservative tone. Use formal business language and traditional structure."
+}
+
+# Model names mapping
+gpt_model = os.getenv('GPT_MODEL', 'gpt-4.1')
+claude_model = os.getenv('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
+ollama_model = os.getenv('OLLAMA_MODEL', 'llama3.2')
+xai_model = os.getenv('XAI_MODEL', 'grok-4-fast-reasoning')
+
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
     ("Claude", "claude-sonnet-4-20250514", anthropic_api_key),
@@ -150,6 +181,20 @@ def get_available_llms():
 class ChatRequest(BaseModel):
     prompt: str
     active_model: str = "gpt-4.1"  # Default model
+
+# Define the data model for job info request
+class JobInfoRequest(BaseModel):
+    llm: str
+    date_input: str
+    company_name: str
+    hiring_manager: str
+    ad_source: str
+    resume: str
+    jd: str  # Job description
+    additional_instructions: str = ""
+    tone: str = "Professional"
+    address: str = ""  # City, State
+    phone_number: str = ""
 
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
@@ -248,6 +293,248 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
 
     return return_response
 
+def get_text(contents):
+    """Helper function to extract text from OCI content list"""
+    text = ""
+    for content in contents:
+        if hasattr(content, 'text'):
+            text += content.text
+        elif isinstance(content, str):
+            text += content
+    return text
+
+def get_oc_info(prompt: str):
+    """Helper function to get response from OCI Generative AI using GenericChatRequest"""
+    try:
+        # Initialize OCI config from file
+        config = oci.config.from_file(oci_config_file, oci_config_profile)
+        
+        # Create Generative AI client
+        service_endpoint = f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
+        generative_ai_inference_client = oci.generative_ai_inference.GenerativeAiInferenceClient(
+            config=config,
+            service_endpoint=service_endpoint,
+            retry_strategy=oci.retry.NoneRetryStrategy(),
+            timeout=(10, 240)
+        )
+        
+        # Create text content
+        oci_content = oci.generative_ai_inference.models.TextContent()
+        oci_content.text = prompt
+        
+        # Create message
+        message = oci.generative_ai_inference.models.Message()
+        message.role = "USER"
+        message.content = [oci_content]
+        
+        # Create chat request
+        chat_request = oci.generative_ai_inference.models.GenericChatRequest()
+        chat_request.api_format = oci.generative_ai_inference.models.BaseChatRequest.API_FORMAT_GENERIC
+        chat_request.messages = [message]
+        chat_request.max_tokens = 1024
+        chat_request.temperature = 0
+        chat_request.top_p = 1
+        chat_request.top_k = 0
+        
+        # Create chat detail
+        oci_chat_detail = oci.generative_ai_inference.models.ChatDetails()
+        oci_chat_detail.serving_mode = oci.generative_ai_inference.models.OnDemandServingMode(
+            model_id=oci_model_id
+        )
+        oci_chat_detail.chat_request = chat_request
+        oci_chat_detail.compartment_id = oci_compartment_id
+        
+        # Make the chat request
+        chat_response = generative_ai_inference_client.chat(oci_chat_detail)
+        
+        if not chat_response:
+            return json.dumps({"markdown": "Error: No response from OCI", "html": "<p>Error: No response from OCI</p>"})
+        
+        # Access the 'data' attribute
+        data_obj = chat_response.data
+        
+        text = ""
+        choices = []
+        message_obj = None
+        contents = []
+        
+        # Drill down using attributes
+        chat_response_obj = getattr(data_obj, "chat_response", None)
+        if chat_response_obj and hasattr(chat_response_obj, "choices"):
+            choices = chat_response_obj.choices
+            for choice in choices:
+                message_obj = getattr(choice, "message", None)
+                if message_obj:
+                    contents = getattr(message_obj, "content", [])
+                    text = get_text(contents)
+                    
+                    # Fix of <pre> formatting for OCI only...
+                    data = json.loads(text)
+                    data["markdown"] = data["markdown"].replace("\\n", "\n")
+                    text = json.dumps(data)
+        
+        return text
+        
+    except Exception as e:
+        error_msg = f"Error calling OCI Generative AI: {str(e)}"
+        logger.error(error_msg)
+        return json.dumps({"markdown": f"Error: {error_msg}", "html": f"<p>Error: {error_msg}</p>"})
+
+def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: str, 
+                 ad_source: str, resume: str, jd: str, additional_instructions: str, 
+                 tone: str, address: str = "", phone_number: str = ""):
+    """
+    Generate cover letter based on job information using specified LLM.
+    Returns a dictionary with 'markdown' and 'html' fields.
+    """
+    # Get today's date if not provided
+    today_date = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    # Build message payload
+    message_data = {
+        "llm": llm,
+        "today": f"Date: {today_date}",
+        "company_name": company_name,
+        "hiring_manager": hiring_manager,
+        "ad_source": ad_source,
+        "resume": resume,
+        "jd": jd,
+        "additional_instructions": additional_instructions,
+        "tone": f"Use the following tone/personality when generating the result, but do not specifically note the activities within this text: {personality_profiles.get(tone, personality_profiles['Professional'])}"
+    }
+    
+    # Add optional fields
+    if address:
+        message_data["address"] = address
+    if phone_number:
+        message_data["phone_number"] = phone_number
+    
+    message = json.dumps(message_data)
+    r = ""
+    
+    try:
+        if llm == "Gemini":
+            msg = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
+            genai.configure(api_key=gemini_api_key)
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(contents=msg)
+            r = response.text
+            
+        elif llm == "ChatGPT":
+            client = OpenAI(api_key=openai_api_key)
+            messages = [
+                {"role": "user", "content": system_message},
+                {"role": "user", "content": message},
+                {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+                {"role": "user", "content": f"Company Name: {company_name}"},
+                {"role": "user", "content": f"Ad Source: {ad_source}"}
+            ]
+            response = client.chat.completions.create(model=gpt_model, messages=messages)
+            r = response.choices[0].message.content
+            
+        elif llm == "Grok":
+            # Use HTTP API (xai SDK has different API structure)
+            headers = {
+                "Authorization": f"Bearer {xai_api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "model": xai_model,
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": message},
+                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+                    {"role": "user", "content": f"Company Name: {company_name}"},
+                    {"role": "user", "content": f"Ad Source: {ad_source}"}
+                ]
+            }
+            response = requests.post(
+                "https://api.x.ai/v1/chat/completions",
+                json=data,
+                headers=headers,
+                timeout=3600
+            )
+            response.raise_for_status()
+            result = response.json()
+            r = result["choices"][0]["message"]["content"]
+                
+        elif llm == "OCI":
+            full_prompt = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
+            r = get_oc_info(full_prompt)
+            logger.info(f"OCI response received: {r[:100]}...")
+            
+        elif llm == "Llama":
+            if not OLLAMA_AVAILABLE:
+                raise ImportError("ollama library is not installed. Please install it with: pip install ollama")
+            
+            message_data_llama = {
+                "Company Name": company_name,
+                "Hiring Manager": hiring_manager,
+                "Resume": resume,
+                "Ad Source": ad_source,
+                "Job Description": jd,
+                "Additional Instructions": additional_instructions
+            }
+            if address:
+                message_data_llama["Address"] = address
+            if phone_number:
+                message_data_llama["Phone Number"] = phone_number
+                
+            message_llama = json.dumps(message_data_llama)
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": message_llama}
+            ]
+            response = ollama.chat(model=ollama_model, messages=messages)
+            r = response['message']['content']
+            
+        elif llm == "Claude":
+            client = anthropic.Anthropic(api_key=anthropic_api_key)
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": message},
+                        {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
+                        {"type": "text", "text": f"Company Name: {company_name}"},
+                        {"type": "text", "text": f"Ad Source: {ad_source}"}
+                    ]
+                }
+            ]
+            response = client.messages.create(
+                model=claude_model,
+                system=system_message,
+                messages=messages,
+                max_tokens=20000,
+                temperature=1
+            )
+            r = response.content[0].text
+        else:
+            raise ValueError(f"Unsupported LLM: {llm}")
+        
+        # Clean and parse the response
+        r = r.replace("```json", "").replace("```", "").strip()
+        json_r = json.loads(r)
+        
+        return {
+            "markdown": json_r.get("markdown", ""),
+            "html": json_r.get("html", "")
+        }
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON response: {e}")
+        logger.error(f"Response was: {r[:500]}")
+        return {
+            "markdown": f"Error: Failed to parse LLM response as JSON. Raw response: {r[:500]}",
+            "html": f"<p>Error: Failed to parse LLM response as JSON.</p><pre>{r[:500]}</pre>"
+        }
+    except Exception as e:
+        logger.error(f"Error in get_job_info: {str(e)}")
+        return {
+            "markdown": f"Error: {str(e)}",
+            "html": f"<p>Error: {str(e)}</p>"
+        }
+
 # Define a simple root endpoint to check if the server is running
 @app.get("/")
 def read_root():
@@ -298,6 +585,25 @@ async def handle_chat(request: ChatRequest):
     return {
         "response": response if response else f"Error: No response from LLM {request.active_model}"
     }
+
+@app.post("/api/job-info")
+async def handle_job_info(request: JobInfoRequest):
+    """Generate cover letter based on job information"""
+    logger.info(f"Received job info request for LLM: {request.llm}, Company: {request.company_name}")
+    result = get_job_info(
+        llm=request.llm,
+        date_input=request.date_input,
+        company_name=request.company_name,
+        hiring_manager=request.hiring_manager,
+        ad_source=request.ad_source,
+        resume=request.resume,
+        jd=request.jd,
+        additional_instructions=request.additional_instructions,
+        tone=request.tone,
+        address=request.address,
+        phone_number=request.phone_number
+    )
+    return result
 
 # --- Optional: To run this file directly ---
 # You would typically use the 'uvicorn' command below,
