@@ -1,6 +1,7 @@
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ValidationError
 from contextlib import asynccontextmanager
 
 import os
@@ -104,6 +105,21 @@ async def lifespan(app: FastAPI):
 # Create the FastAPI app instance
 app = FastAPI(lifespan=lifespan)
 
+# Add exception handler for validation errors to help debug 422 errors
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors and log them for debugging"""
+    body = await request.body()
+    logger.error(f"Validation error on {request.url.path}: {exc.errors()}")
+    logger.error(f"Request body: {body.decode('utf-8') if body else 'Empty body'}")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": exc.errors(),
+            "body": body.decode('utf-8') if body else 'Empty body'
+        }
+    )
+
 hf_token = os.getenv('HF_TOKEN')
 google_api_key = os.getenv("GOOGLE_API_KEY")
 openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -181,6 +197,10 @@ def get_available_llms():
 class ChatRequest(BaseModel):
     prompt: str
     active_model: str = "gpt-4.1"  # Default model
+    
+    class Config:
+        # Allow extra fields to be ignored
+        extra = "ignore"
 
 # Define the data model for job info request
 class JobInfoRequest(BaseModel):
@@ -580,11 +600,32 @@ def llm_selector():
 
 @app.post("/chat")
 async def handle_chat(request: ChatRequest):
-    print(f"Received prompt: {request.prompt} with model: {request.active_model}")
-    response = post_to_llm(request.prompt, request.active_model)
-    return {
-        "response": response if response else f"Error: No response from LLM {request.active_model}"
-    }
+    logger.info(f"Received chat request - prompt length: {len(request.prompt)}, model: {request.active_model}")
+    try:
+        response = post_to_llm(request.prompt, request.active_model)
+        return {
+            "response": response if response else f"Error: No response from LLM {request.active_model}"
+        }
+    except Exception as e:
+        logger.error(f"Error in handle_chat: {str(e)}")
+        return {
+            "response": f"Error processing request: {str(e)}"
+        }
+
+# Debug endpoint to see raw request
+@app.post("/chat-debug")
+async def handle_chat_debug(request: Request):
+    """Debug endpoint to see what's being received"""
+    body = await request.body()
+    logger.info(f"Raw request body: {body}")
+    logger.info(f"Content-Type: {request.headers.get('content-type')}")
+    try:
+        json_body = await request.json()
+        logger.info(f"Parsed JSON: {json_body}")
+        return {"received": json_body}
+    except Exception as e:
+        logger.error(f"Failed to parse JSON: {e}")
+        return {"error": str(e), "raw_body": body.decode('utf-8') if body else 'Empty'}
 
 @app.post("/api/job-info")
 async def handle_job_info(request: JobInfoRequest):
