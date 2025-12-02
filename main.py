@@ -46,6 +46,14 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 XAI_SDK_AVAILABLE = False
 
+# Try to import PyPDF2 for PDF reading (after logger is defined)
+try:
+    import PyPDF2
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+    logger.warning("PyPDF2 not available. PDF reading will not work.")
+
 def send_ntfy_notification(message: str, title: str = "CoverLetter App"):
     """Send a notification to ntfy topic CustomCoverLetter"""
     try:
@@ -324,6 +332,33 @@ def get_text(contents):
             text += content
     return text
 
+def read_pdf_file(file_path: str) -> str:
+    """Read PDF file and extract text content"""
+    if not PDF_AVAILABLE:
+        raise ImportError("PyPDF2 is not installed. Cannot read PDF files.")
+    
+    if not os.path.exists(file_path):
+        logger.warning(f"PDF file not found: {file_path}")
+        return f"[PDF file not found: {file_path}]"
+    
+    try:
+        text_content = ""
+        with open(file_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            num_pages = len(pdf_reader.pages)
+            
+            for page_num in range(num_pages):
+                page = pdf_reader.pages[page_num]
+                text_content += page.extract_text()
+                if page_num < num_pages - 1:
+                    text_content += "\n\n"
+        
+        logger.info(f"Successfully extracted text from PDF: {file_path} ({num_pages} pages)")
+        return text_content.strip()
+    except Exception as e:
+        logger.error(f"Error reading PDF file {file_path}: {str(e)}")
+        return f"[Error reading PDF file: {str(e)}]"
+
 def get_oc_info(prompt: str):
     """Helper function to get response from OCI Generative AI using GenericChatRequest"""
     try:
@@ -411,6 +446,28 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     # Get today's date if not provided
     today_date = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
     
+    # Check if resume is a file path and read PDF if it is
+    resume_content = resume
+    if resume and (resume.endswith('.pdf') or resume.endswith('.PDF')):
+        # Check if it's a file path (contains path separators or exists as file)
+        if os.path.sep in resume or os.path.exists(resume):
+            logger.info(f"Detected PDF file path: {resume}, attempting to read PDF content")
+            resume_content = read_pdf_file(resume)
+        # If it doesn't exist, it might be a relative path - try to find it
+        elif not os.path.isabs(resume):
+            # Try common locations
+            possible_paths = [
+                resume,
+                os.path.join("PDF Resumes", resume),
+                os.path.join("resumes", resume),
+                os.path.join(".", resume)
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    logger.info(f"Found PDF at: {path}, reading content")
+                    resume_content = read_pdf_file(path)
+                    break
+    
     # Build message payload
     message_data = {
         "llm": llm,
@@ -418,7 +475,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         "company_name": company_name,
         "hiring_manager": hiring_manager,
         "ad_source": ad_source,
-        "resume": resume,
+        "resume": resume_content,  # Use extracted PDF content instead of file path
         "jd": jd,
         "additional_instructions": additional_instructions,
         "tone": f"Use the following tone/personality when generating the result, but do not specifically note the activities within this text: {personality_profiles.get(tone, personality_profiles['Professional'])}"
