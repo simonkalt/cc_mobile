@@ -54,6 +54,15 @@ except ImportError:
     PDF_AVAILABLE = False
     logger.warning("PyPDF2 not available. PDF reading will not work.")
 
+# Try to import boto3 for AWS S3 access
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+    S3_AVAILABLE = True
+except ImportError:
+    S3_AVAILABLE = False
+    logger.warning("boto3 not available. S3 PDF reading will not work.")
+
 def send_ntfy_notification(message: str, title: str = "CoverLetter App"):
     """Send a notification to ntfy topic CustomCoverLetter"""
     try:
@@ -332,8 +341,76 @@ def get_text(contents):
             text += content
     return text
 
+def read_pdf_from_bytes(pdf_bytes: bytes) -> str:
+    """Extract text content from PDF bytes"""
+    if not PDF_AVAILABLE:
+        raise ImportError("PyPDF2 is not installed. Cannot read PDF files.")
+    
+    try:
+        text_content = ""
+        from io import BytesIO
+        pdf_file = BytesIO(pdf_bytes)
+        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        num_pages = len(pdf_reader.pages)
+        
+        for page_num in range(num_pages):
+            page = pdf_reader.pages[page_num]
+            text_content += page.extract_text()
+            if page_num < num_pages - 1:
+                text_content += "\n\n"
+        
+        logger.info(f"Successfully extracted text from PDF ({num_pages} pages)")
+        return text_content.strip()
+    except Exception as e:
+        logger.error(f"Error reading PDF: {str(e)}")
+        return f"[Error reading PDF: {str(e)}]"
+
+def download_pdf_from_s3(s3_path: str) -> bytes:
+    """Download PDF from S3 bucket and return as bytes"""
+    if not S3_AVAILABLE:
+        raise ImportError("boto3 is not installed. Cannot download from S3.")
+    
+    try:
+        # Parse S3 path - could be s3://bucket/key or just bucket/key
+        if s3_path.startswith('s3://'):
+            s3_path = s3_path[5:]  # Remove 's3://' prefix
+        
+        # Split bucket and key
+        parts = s3_path.split('/', 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid S3 path format: {s3_path}. Expected format: bucket/key or s3://bucket/key")
+        
+        bucket_name = parts[0]
+        object_key = parts[1]
+        
+        logger.info(f"Downloading PDF from S3: bucket={bucket_name}, key={object_key}")
+        
+        # Create S3 client (will use default credentials from environment/IAM role)
+        s3_client = boto3.client('s3')
+        
+        # Download the object
+        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        pdf_bytes = response['Body'].read()
+        
+        logger.info(f"Successfully downloaded PDF from S3 ({len(pdf_bytes)} bytes)")
+        return pdf_bytes
+        
+    except NoCredentialsError:
+        error_msg = "AWS credentials not found. Cannot download from S3."
+        logger.error(error_msg)
+        raise Exception(error_msg)
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"Error downloading from S3: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise Exception(error_msg)
+    except Exception as e:
+        error_msg = f"Unexpected error downloading from S3: {str(e)}"
+        logger.error(error_msg)
+        raise Exception(error_msg)
+
 def read_pdf_file(file_path: str) -> str:
-    """Read PDF file and extract text content"""
+    """Read PDF file from local filesystem and extract text content"""
     if not PDF_AVAILABLE:
         raise ImportError("PyPDF2 is not installed. Cannot read PDF files.")
     
@@ -342,19 +419,9 @@ def read_pdf_file(file_path: str) -> str:
         return f"[PDF file not found: {file_path}]"
     
     try:
-        text_content = ""
         with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            num_pages = len(pdf_reader.pages)
-            
-            for page_num in range(num_pages):
-                page = pdf_reader.pages[page_num]
-                text_content += page.extract_text()
-                if page_num < num_pages - 1:
-                    text_content += "\n\n"
-        
-        logger.info(f"Successfully extracted text from PDF: {file_path} ({num_pages} pages)")
-        return text_content.strip()
+            pdf_bytes = file.read()
+        return read_pdf_from_bytes(pdf_bytes)
     except Exception as e:
         logger.error(f"Error reading PDF file {file_path}: {str(e)}")
         return f"[Error reading PDF file: {str(e)}]"
@@ -449,59 +516,81 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     # Check if resume is a file path and read PDF if it is
     resume_content = resume
     if resume and (resume.endswith('.pdf') or resume.endswith('.PDF')):
-        # Get the current working directory
-        cwd = os.getcwd()
-        logger.info(f"Current working directory: {cwd}")
+        # First, check if it's an S3 path
+        is_s3_path = resume.startswith('s3://') or ('/' in resume and not os.path.isabs(resume) and not os.path.exists(resume))
         
-        # Build list of possible paths to try
-        possible_paths = []
+        # If it looks like an S3 path (starts with s3:// or contains / but file doesn't exist locally)
+        if is_s3_path or (S3_AVAILABLE and '/' in resume and not os.path.exists(resume)):
+            try:
+                logger.info(f"Attempting to download PDF from S3: {resume}")
+                # Try to download from S3
+                # If it's not already in s3:// format, assume it's bucket/key format
+                s3_path = resume if resume.startswith('s3://') else resume
+                pdf_bytes = download_pdf_from_s3(s3_path)
+                resume_content = read_pdf_from_bytes(pdf_bytes)
+                logger.info("Successfully downloaded and extracted text from S3 PDF")
+            except Exception as e:
+                logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
+                # Fall through to try local paths
+                is_s3_path = False
         
-        # If it's already an absolute path, try it first
-        if os.path.isabs(resume):
-            possible_paths.append(resume)
-        else:
-            # If it contains path separators (like "PDF Resumes/file.pdf"), try it as-is first
-            if os.path.sep in resume or '/' in resume:
+        # If not S3 or S3 download failed, try local file paths
+        if not is_s3_path or resume_content == resume:
+            # Get the current working directory
+            cwd = os.getcwd()
+            logger.info(f"Trying local file paths. Current working directory: {cwd}")
+            
+            # Build list of possible paths to try
+            possible_paths = []
+            
+            # If it's already an absolute path, try it first
+            if os.path.isabs(resume):
                 possible_paths.append(resume)
-                # Also try from current directory
-                possible_paths.append(os.path.join(cwd, resume))
-            
-            # Try common locations
-            possible_paths.extend([
-                os.path.join(cwd, resume),
-                os.path.join(cwd, "PDF Resumes", os.path.basename(resume)),
-                os.path.join(cwd, "PDF Resumes", resume),
-                os.path.join(cwd, "resumes", os.path.basename(resume)),
-                os.path.join(cwd, "resumes", resume),
-                os.path.join(".", resume),
-                os.path.join(".", "PDF Resumes", os.path.basename(resume)),
-                os.path.join(".", "PDF Resumes", resume),
-            ])
-            
-            # If the resume path already includes "PDF Resumes", try extracting just the filename
-            if "PDF Resumes" in resume or "pdf" in resume.lower():
-                filename = os.path.basename(resume)
+            else:
+                # If it contains path separators (like "PDF Resumes/file.pdf"), try it as-is first
+                if os.path.sep in resume or '/' in resume:
+                    possible_paths.append(resume)
+                    # Also try from current directory
+                    possible_paths.append(os.path.join(cwd, resume))
+                
+                # Try common locations
                 possible_paths.extend([
-                    os.path.join(cwd, "PDF Resumes", filename),
-                    os.path.join(".", "PDF Resumes", filename),
+                    os.path.join(cwd, resume),
+                    os.path.join(cwd, "PDF Resumes", os.path.basename(resume)),
+                    os.path.join(cwd, "PDF Resumes", resume),
+                    os.path.join(cwd, "resumes", os.path.basename(resume)),
+                    os.path.join(cwd, "resumes", resume),
+                    os.path.join(".", resume),
+                    os.path.join(".", "PDF Resumes", os.path.basename(resume)),
+                    os.path.join(".", "PDF Resumes", resume),
                 ])
-        
-        # Try each path until we find one that exists
-        found = False
-        for path in possible_paths:
-            # Normalize the path
-            normalized_path = os.path.normpath(path)
-            logger.debug(f"Trying PDF path: {normalized_path}")
-            if os.path.exists(normalized_path) and os.path.isfile(normalized_path):
-                logger.info(f"Found PDF at: {normalized_path}, reading content")
-                resume_content = read_pdf_file(normalized_path)
-                found = True
-                break
-        
-        if not found:
-            logger.warning(f"PDF file not found. Tried paths: {possible_paths[:5]}... (showing first 5)")
-            # Return the original resume string if we can't find the file
-            resume_content = resume
+                
+                # If the resume path already includes "PDF Resumes", try extracting just the filename
+                if "PDF Resumes" in resume or "pdf" in resume.lower():
+                    filename = os.path.basename(resume)
+                    possible_paths.extend([
+                        os.path.join(cwd, "PDF Resumes", filename),
+                        os.path.join(".", "PDF Resumes", filename),
+                    ])
+            
+            # Try each path until we find one that exists
+            found = False
+            for path in possible_paths:
+                # Normalize the path
+                normalized_path = os.path.normpath(path)
+                logger.debug(f"Trying PDF path: {normalized_path}")
+                if os.path.exists(normalized_path) and os.path.isfile(normalized_path):
+                    logger.info(f"Found PDF at: {normalized_path}, reading content")
+                    resume_content = read_pdf_file(normalized_path)
+                    found = True
+                    break
+            
+            if not found:
+                logger.warning(f"PDF file not found locally. Tried paths: {possible_paths[:5]}... (showing first 5)")
+                # If we haven't successfully extracted content, return the original
+                if resume_content == resume:
+                    logger.warning(f"Could not read PDF from S3 or local filesystem. Using original resume string.")
+                    resume_content = resume
     
     # Build message payload
     message_data = {
