@@ -10,3 +10,7 @@ fastapi
 scikit-learn>=1.2.0
 xai-sdk
 ollama
+# xai dependencies (required by xai 0.3.0)
+cycler
+kiwisolver
+matplotlib>=3.6.0,<4.0.0

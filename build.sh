@@ -16,6 +16,10 @@ pip install xai --no-deps  # <-- Forces xai to use pandas from Step 2
 pip install oci --no-deps
 pip install uvicorn --no-deps
 
+# 3.5. Install xai's missing dependencies that were skipped by --no-deps
+echo "Step 3.5: Installing xai dependencies..."
+pip install cycler kiwisolver "matplotlib>=3.6.0,<4.0.0"
+
 # 4. Install the remaining non-conflicting packages from the minimalist list
 echo "Step 4: Installing remaining packages from requirements.txt..."
 pip install -r requirements.txt

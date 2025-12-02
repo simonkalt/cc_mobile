@@ -94,9 +94,9 @@ async def lifespan(app: FastAPI):
 # - Compartment ID set: {bool(oci_compartment_id)}"""
     # send_ntfy_notification(config_summary, "OCI Config")
 
-    if os.path.exists("oci_api_key.pem"):
-        send_ntfy_notification("File exists!","oci_api_key.pem")
-    else:
+    if not os.path.exists("oci_api_key.pem"):
+    #     send_ntfy_notification("File exists!","oci_api_key.pem")
+    # else:
         send_ntfy_notification("oci_api_key.pem File does NOT exist.","oci_api_key.pem")
 
     yield
