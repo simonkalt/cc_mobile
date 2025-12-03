@@ -642,8 +642,21 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             msg = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
             genai.configure(api_key=gemini_api_key)
             model = genai.GenerativeModel("gemini-2.5-flash")
-            response = model.generate_content(contents=msg)
+            
+            # Configure generation to ensure complete JSON response
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": 8192,  # Increase max tokens to prevent truncation
+            }
+            
+            response = model.generate_content(
+                contents=msg,
+                generation_config=generation_config
+            )
             r = response.text
+            logger.info(f"Gemini response length: {len(r)} characters")
             
         elif llm == "ChatGPT" or llm == gpt_model or llm == "gpt-4.1":
             client = OpenAI(api_key=openai_api_key)
@@ -739,7 +752,47 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         
         # Clean and parse the response
         r = r.replace("```json", "").replace("```", "").strip()
-        json_r = json.loads(r)
+        
+        # Try to extract JSON if it's embedded in text
+        # Look for JSON object boundaries
+        start_idx = r.find('{')
+        end_idx = r.rfind('}')
+        
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            # Extract just the JSON portion
+            json_str = r[start_idx:end_idx + 1]
+        else:
+            json_str = r
+        
+        try:
+            json_r = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            # If parsing fails, try to fix common issues
+            # Remove any trailing incomplete JSON
+            logger.warning(f"Initial JSON parse failed: {e}, attempting to fix...")
+            
+            # Try to find and extract a valid JSON object
+            # Look for the last complete JSON object
+            brace_count = 0
+            last_valid_end = -1
+            for i, char in enumerate(json_str):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        last_valid_end = i
+                        break
+            
+            if last_valid_end > 0:
+                json_str = json_str[:last_valid_end + 1]
+                try:
+                    json_r = json.loads(json_str)
+                    logger.info("Successfully fixed truncated JSON")
+                except json.JSONDecodeError:
+                    raise e
+            else:
+                raise e
         
         return {
             "markdown": json_r.get("markdown", ""),
@@ -748,10 +801,12 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
-        logger.error(f"Response was: {r[:500]}")
+        logger.error(f"Response length: {len(r)} characters")
+        logger.error(f"Response (first 1000 chars): {r[:1000]}")
+        logger.error(f"Response (last 500 chars): {r[-500:]}")
         return {
-            "markdown": f"Error: Failed to parse LLM response as JSON. Raw response: {r[:500]}",
-            "html": f"<p>Error: Failed to parse LLM response as JSON.</p><pre>{r[:500]}</pre>"
+            "markdown": f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}",
+            "html": f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
         }
     except Exception as e:
         logger.error(f"Error in get_job_info: {str(e)}")
