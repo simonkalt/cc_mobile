@@ -160,13 +160,33 @@ aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID', '')
 aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY', '')
 aws_region = os.getenv('AWS_REGION', 'us-east-1')  # Default region
 
-# System message for cover letter generation
-system_message = """You are an expert cover letter writer. Generate a professional cover letter based on the provided information. 
-Return your response as a JSON object with two fields:
-- "markdown": The cover letter in markdown format
-- "html": The cover letter in HTML format
+# Load system prompt from JSON config file
+def load_system_prompt():
+    """Load system prompt from JSON config file"""
+    config_path = "system_prompt.json"
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        system_prompt = config.get("system_prompt", "")
+        if not system_prompt:
+            logger.warning(f"System prompt not found in {config_path}. Using default.")
+            return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+        
+        logger.info(f"Loaded system prompt from {config_path} ({len(system_prompt)} characters)")
+        return system_prompt
+    except FileNotFoundError:
+        logger.warning(f"System prompt file not found: {config_path}. Using default.")
+        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing system prompt JSON: {e}. Using default.")
+        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+    except Exception as e:
+        logger.error(f"Error loading system prompt: {e}. Using default.")
+        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
 
-The cover letter should be well-structured, professional, and tailored to the specific job and company."""
+# Load system message at startup
+system_message = load_system_prompt()
 
 # Load personality profiles from JSON config file
 def load_personality_profiles():
@@ -697,7 +717,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         elif llm == "ChatGPT" or llm == gpt_model or llm == "gpt-4.1":
             client = OpenAI(api_key=openai_api_key)
             messages = [
-                {"role": "user", "content": system_message},
+                {"role": "system", "content": system_message},
                 {"role": "user", "content": message},
                 {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
                 {"role": "user", "content": f"Company Name: {company_name}"},
@@ -878,6 +898,14 @@ def get_personality_profiles():
     personality_profiles = load_personality_profiles()
     # Return just the keys (profile names) for the dropdown
     return {"profiles": [{"label": key, "value": key} for key in personality_profiles.keys()]}
+
+@app.get("/api/system-prompt")
+def get_system_prompt():
+    """JSON API endpoint to get the current system prompt"""
+    # Reload system prompt to get latest from file (useful if file is updated)
+    global system_message
+    system_message = load_system_prompt()
+    return {"system_prompt": system_message}
 
 @app.get("/llm-selector", response_class=HTMLResponse)
 def llm_selector():
