@@ -794,8 +794,14 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             else:
                 raise e
         
+        # Clean up the markdown field - remove "markdown " prefix if Gemini added it
+        markdown_content = json_r.get("markdown", "")
+        if markdown_content.startswith("markdown "):
+            markdown_content = markdown_content[9:]  # Remove "markdown " (9 characters)
+            logger.info("Removed 'markdown ' prefix from Gemini response")
+        
         return {
-            "markdown": json_r.get("markdown", ""),
+            "markdown": markdown_content,
             "html": json_r.get("html", "")
         }
         
