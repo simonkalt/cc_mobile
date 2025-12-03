@@ -168,15 +168,51 @@ Return your response as a JSON object with two fields:
 
 The cover letter should be well-structured, professional, and tailored to the specific job and company."""
 
-# Personality profiles for different tones
-personality_profiles = {
-    "Professional": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor.",
-    "Friendly": "Warm, approachable, and personable tone. Use conversational language while remaining professional.",
-    "Confident": "Assertive, self-assured, and impactful tone. Highlight achievements and capabilities with conviction.",
-    "Enthusiastic": "Energetic, passionate, and excited tone. Show genuine interest and enthusiasm for the role and company.",
-    "Casual": "Relaxed, informal, and conversational tone. Use a more laid-back approach while still being respectful.",
-    "Formal": "Very formal, traditional, and conservative tone. Use formal business language and traditional structure."
-}
+# Load personality profiles from JSON config file
+def load_personality_profiles():
+    """Load personality profiles from JSON config file and resolve references"""
+    config_path = "personality_profiles.json"
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            profiles = json.load(f)
+        
+        # Resolve references (e.g., "Witty Simon" references "Simon")
+        # First pass: copy all profiles
+        resolved_profiles = profiles.copy()
+        
+        # Second pass: resolve references
+        import re
+        for key, value in resolved_profiles.items():
+            if isinstance(value, str) and '[' in value and ']' in value:
+                # Find all references like [Simon]
+                matches = re.findall(r'\[([^\]]+)\]', value)
+                for match in matches:
+                    if match in resolved_profiles:
+                        # Replace [Simon] with the actual Simon profile
+                        value = value.replace(f'[{match}]', resolved_profiles[match])
+                resolved_profiles[key] = value
+        
+        logger.info(f"Loaded {len(resolved_profiles)} personality profiles from {config_path}")
+        return resolved_profiles
+    except FileNotFoundError:
+        logger.warning(f"Personality profiles file not found: {config_path}. Using default profiles.")
+        # Return a minimal default set
+        return {
+            "Simon": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor."
+        }
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing personality profiles JSON: {e}. Using default profiles.")
+        return {
+            "Simon": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor."
+        }
+    except Exception as e:
+        logger.error(f"Error loading personality profiles: {e}. Using default profiles.")
+        return {
+            "Simon": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor."
+        }
+
+# Load personality profiles at startup
+personality_profiles = load_personality_profiles()
 
 # Model names mapping
 gpt_model = "gpt-4.1"
@@ -624,7 +660,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         "resume": resume_content,  # Use extracted PDF content instead of file path
         "jd": jd,
         "additional_instructions": additional_instructions,
-        "tone": f"Use the following tone/personality when generating the result, but do not specifically note the activities within this text: {personality_profiles.get(tone, personality_profiles['Professional'])}"
+        "tone": f"Use the following tone/personality when generating the result, but do not specifically note the activities within this text: {personality_profiles.get(tone, list(personality_profiles.values())[0] if personality_profiles else 'Professional tone')}"
     }
     
     # Add optional fields
@@ -833,6 +869,15 @@ def get_llms():
     """JSON API endpoint to get available LLMs for the mobile app"""
     llm_options = get_available_llms()
     return {"llms": llm_options}
+
+@app.get("/api/personality-profiles")
+def get_personality_profiles():
+    """JSON API endpoint to get available personality profiles for the UI"""
+    # Reload profiles to get latest from file (useful if file is updated)
+    global personality_profiles
+    personality_profiles = load_personality_profiles()
+    # Return just the keys (profile names) for the dropdown
+    return {"profiles": [{"label": key, "value": key} for key in personality_profiles.keys()]}
 
 @app.get("/llm-selector", response_class=HTMLResponse)
 def llm_selector():
