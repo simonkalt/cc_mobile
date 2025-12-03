@@ -670,6 +670,18 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                     logger.warning(f"Could not read PDF from S3 or local filesystem. Using original resume string.")
                     resume_content = resume
     
+    # Get personality profile and log it
+    selected_profile = personality_profiles.get(tone)
+    if selected_profile:
+        logger.info(f"Using personality profile: '{tone}'")
+        logger.info(f"Personality profile text ({len(selected_profile)} chars): {selected_profile}")
+    else:
+        # Fallback to first available profile or default
+        fallback_profile = list(personality_profiles.values())[0] if personality_profiles else 'Professional tone'
+        logger.warning(f"Personality profile '{tone}' not found. Available profiles: {list(personality_profiles.keys())}")
+        logger.info(f"Using fallback profile: {fallback_profile}")
+        selected_profile = fallback_profile
+    
     # Build message payload
     message_data = {
         "llm": llm,
@@ -680,7 +692,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         "resume": resume_content,  # Use extracted PDF content instead of file path
         "jd": jd,
         "additional_instructions": additional_instructions,
-        "tone": f"Use the following tone/personality when generating the result, but do not specifically note the activities within this text: {personality_profiles.get(tone, list(personality_profiles.values())[0] if personality_profiles else 'Professional tone')}"
+        "tone": f"Use the following tone/personality when generating the result, but do not specifically note the activities within this text: {selected_profile}"
     }
     
     # Add optional fields
