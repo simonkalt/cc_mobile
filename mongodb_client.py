@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 # MongoDB connection variables
 MONGODB_URI = os.getenv('MONGODB_URI', '')
-MONGODB_DB_NAME = os.getenv('MONGODB_DB_NAME', 'cover_letters')
-MONGODB_COLLECTION_NAME = os.getenv('MONGODB_COLLECTION_NAME', 'letters')
+MONGODB_DB_NAME = os.getenv('MONGODB_DB_NAME', 'CoverLetter')
+MONGODB_COLLECTION_NAME = os.getenv('MONGODB_COLLECTION_NAME', 'users')
 
 # Global MongoDB client and database instances
 mongodb_client: Optional[MongoClient] = None

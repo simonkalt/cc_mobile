@@ -17,9 +17,9 @@
 
 3. **Add to your `.env` file:**
    ```env
-   MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/cover_letters?retryWrites=true&w=majority
-   MONGODB_DB_NAME=cover_letters
-   MONGODB_COLLECTION_NAME=letters
+   MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/CoverLetter?retryWrites=true&w=majority
+   MONGODB_DB_NAME=CoverLetter
+   MONGODB_COLLECTION_NAME=users
    ```
    
    **Important:** Replace `username` and `password` with your actual credentials!

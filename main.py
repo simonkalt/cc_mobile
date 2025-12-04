@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError, EmailStr
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -154,7 +155,28 @@ async def lifespan(app: FastAPI):
         logger.info("MongoDB Atlas connection closed")
 
 # Create the FastAPI app instance
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Cover Letter API",
+    description="API for cover letter generation and user management",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Configure CORS for React app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",  # React dev server
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        # Add your production React app URL here
+        # "https://your-react-app.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
 # Add exception handler for validation errors to help debug 422 errors
 @app.exception_handler(RequestValidationError)

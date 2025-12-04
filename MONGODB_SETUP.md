@@ -102,9 +102,9 @@ mongodb+srv://coverletter_user:MySecurePassword123@cluster0.abc123.mongodb.net/c
 
 ```env
 # MongoDB Atlas Configuration
-MONGODB_URI=mongodb+srv://username:password@customcoverletter.rtu8cqb.mongodb.net/?appName=CustomCoverLetter
-MONGODB_DB_NAME=cover_letters
-MONGODB_COLLECTION_NAME=letters
+MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/CoverLetter?retryWrites=true&w=majority
+MONGODB_DB_NAME=CoverLetter
+MONGODB_COLLECTION_NAME=users
 ```
 
 **Important Security Notes:**
