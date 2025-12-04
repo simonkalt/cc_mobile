@@ -11,6 +11,7 @@ Complete guide for deploying your FastAPI application to Render.com.
 ## Step 1: Prepare Your Repository
 
 Make sure your repository has:
+
 - ✅ `main.py` (FastAPI app)
 - ✅ `requirements.txt` (all dependencies)
 - ✅ `.gitignore` (excludes `.env` and sensitive files)
@@ -29,11 +30,13 @@ Make sure your repository has:
 **Environment:** `Python 3`
 
 **Build Command:**
+
 ```bash
 pip install -r requirements.txt
 ```
 
 **Start Command:**
+
 ```bash
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
@@ -77,7 +80,8 @@ AWS_SECRET_ACCESS_KEY=...
 AWS_REGION=us-east-1
 ```
 
-**Important:** 
+**Important:**
+
 - Never commit these to your repository
 - Use Render's environment variables section
 - Use strong, unique passwords
@@ -93,6 +97,7 @@ CORS_ORIGINS=https://your-react-app.onrender.com,https://your-custom-domain.com
 **Multiple origins:** Separate with commas (no spaces)
 
 **Example:**
+
 ```env
 CORS_ORIGINS=https://myapp.onrender.com,https://myapp.com,http://localhost:3000
 ```
@@ -122,6 +127,7 @@ See `RENDER_DEPLOYMENT.md` for detailed MongoDB setup.
 ## Step 8: Get Your API URL
 
 After deployment, Render provides a URL like:
+
 ```
 https://cover-letter-api.onrender.com
 ```
@@ -134,20 +140,22 @@ Update your React app to use the Render URL:
 
 ```javascript
 // Production
-const API_BASE_URL = 'https://cover-letter-api.onrender.com';
+const API_BASE_URL = "https://cover-letter-api.onrender.com";
 
 // Or use environment variable
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 ```
 
 ## Step 10: Test Your Deployment
 
 ### Health Check
+
 ```bash
 curl https://your-api.onrender.com/
 ```
 
 ### Test User Registration
+
 ```bash
 curl -X POST https://your-api.onrender.com/api/users/register \
   -H "Content-Type: application/json" \
@@ -155,6 +163,7 @@ curl -X POST https://your-api.onrender.com/api/users/register \
 ```
 
 ### Access API Docs
+
 Visit: `https://your-api.onrender.com/docs`
 
 ## Render-Specific Considerations
@@ -168,6 +177,7 @@ Visit: `https://your-api.onrender.com/docs`
 ### Upgrading to Paid Tier
 
 Benefits:
+
 - Always-on service (no spin-down)
 - Custom domains
 - More resources
@@ -188,6 +198,7 @@ Benefits:
 ### Auto-Deploy
 
 Render automatically deploys when you push to:
+
 - `main` branch (production)
 - Or configure specific branches
 
@@ -196,11 +207,13 @@ Render automatically deploys when you push to:
 ### Service Won't Start
 
 **Check logs in Render dashboard:**
+
 - Look for import errors
 - Check if all dependencies are in `requirements.txt`
 - Verify Python version compatibility
 
 **Common issues:**
+
 - Missing dependencies in `requirements.txt`
 - Port not using `$PORT` variable
 - Environment variables not set
@@ -210,6 +223,7 @@ Render automatically deploys when you push to:
 **Symptoms:** React app can't connect to API
 
 **Solutions:**
+
 1. Add React app URL to `CORS_ORIGINS` environment variable
 2. Check that URL matches exactly (http vs https, trailing slashes)
 3. Verify CORS middleware is configured correctly
@@ -217,6 +231,7 @@ Render automatically deploys when you push to:
 ### MongoDB Connection Errors
 
 **Check:**
+
 1. `MONGODB_URI` is set correctly
 2. IP whitelist includes `0.0.0.0/0` in MongoDB Atlas
 3. Username/password are correct
@@ -251,4 +266,3 @@ Render automatically deploys when you push to:
 - Render Docs: https://render.com/docs
 - Render Community: https://community.render.com
 - MongoDB Atlas Docs: https://docs.atlas.mongodb.com
-
