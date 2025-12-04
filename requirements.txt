@@ -16,3 +16,5 @@ kiwisolver
 matplotlib>=3.6.0,<4.0.0
 PyPDF2
 boto3
+pymongo
+bcrypt

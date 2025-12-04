@@ -1,8 +1,11 @@
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, EmailStr
 from contextlib import asynccontextmanager
+from typing import Optional
+from bson import ObjectId
+from datetime import datetime
 
 import os
 import json
@@ -16,6 +19,14 @@ import requests
 import oci
 import logging
 import sys
+
+# Import MongoDB client
+try:
+    from mongodb_client import connect_to_mongodb, close_mongodb_connection
+    MONGODB_AVAILABLE = True
+except ImportError:
+    MONGODB_AVAILABLE = False
+    logger.warning("mongodb_client module not available. MongoDB features will be disabled.")
 
 # Try to import ollama, make it optional
 try:
@@ -45,6 +56,14 @@ logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 XAI_SDK_AVAILABLE = False
+
+# Import MongoDB client (after logger is defined)
+try:
+    from mongodb_client import connect_to_mongodb, close_mongodb_connection
+    MONGODB_AVAILABLE = True
+except ImportError:
+    MONGODB_AVAILABLE = False
+    logger.warning("mongodb_client module not available. MongoDB features will be disabled.")
 
 # Try to import PyPDF2 for PDF reading (after logger is defined)
 try:
@@ -93,6 +112,17 @@ async def lifespan(app: FastAPI):
     logger.info("Application startup - logging configured")
     send_ntfy_notification("Application started and logging configured", "Startup")
     
+    # Connect to MongoDB Atlas
+    if MONGODB_AVAILABLE:
+        logger.info("Attempting to connect to MongoDB Atlas...")
+        if connect_to_mongodb():
+            logger.info("MongoDB Atlas connection established")
+            send_ntfy_notification("MongoDB Atlas connected successfully", "MongoDB")
+        else:
+            logger.warning("MongoDB Atlas connection failed. Continuing without database.")
+    else:
+        logger.info("MongoDB not available - skipping connection")
+    
     # Log OCI configuration variables
     # logger.info(f"oci_config_file: {oci_config_file}")
     # logger.info(f"oci_region: {oci_region}")
@@ -117,7 +147,11 @@ async def lifespan(app: FastAPI):
         send_ntfy_notification("oci_api_key.pem File does NOT exist.","oci_api_key.pem")
 
     yield
-    # Shutdown (if needed in the future)
+    # Shutdown
+    if MONGODB_AVAILABLE:
+        logger.info("Closing MongoDB Atlas connection...")
+        close_mongodb_connection()
+        logger.info("MongoDB Atlas connection closed")
 
 # Create the FastAPI app instance
 app = FastAPI(lifespan=lifespan)
@@ -196,7 +230,6 @@ def load_personality_profiles():
         with open(config_path, 'r', encoding='utf-8') as f:
             profiles = json.load(f)
         
-        # Resolve references (e.g., "Witty Simon" references "Simon")
         # First pass: copy all profiles
         resolved_profiles = profiles.copy()
         
@@ -241,6 +274,8 @@ ollama_model = "llama3.2"
 OLLAMA_API = "http://localhost:11434/api/chat"
 xai_model = "grok-4-fast-reasoning"
 
+
+# we need to move this to the server side and make it dynamic
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
     ("Claude", "claude-sonnet-4-20250514", anthropic_api_key),
@@ -1021,6 +1056,48 @@ async def handle_job_info(request: JobInfoRequest):
         phone_number=request.phone_number
     )
     return result
+
+# User API Endpoints
+from user_api import (
+    UserRegisterRequest, UserUpdateRequest, UserResponse, UserLoginRequest, UserLoginResponse,
+    register_user, get_user_by_id, get_user_by_email, update_user, delete_user, login_user
+)
+
+@app.post("/api/users/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_user_endpoint(user_data: UserRegisterRequest):
+    """Register a new user"""
+    logger.info(f"User registration request: {user_data.email}")
+    return register_user(user_data)
+
+@app.post("/api/users/login", response_model=UserLoginResponse)
+async def login_user_endpoint(login_data: UserLoginRequest):
+    """Authenticate user login"""
+    logger.info(f"Login attempt: {login_data.email}")
+    return login_user(login_data)
+
+@app.get("/api/users/{user_id}", response_model=UserResponse)
+async def get_user_by_id_endpoint(user_id: str):
+    """Get user by ID"""
+    logger.info(f"Get user request: {user_id}")
+    return get_user_by_id(user_id)
+
+@app.get("/api/users/email/{email}", response_model=UserResponse)
+async def get_user_by_email_endpoint(email: str):
+    """Get user by email"""
+    logger.info(f"Get user by email request: {email}")
+    return get_user_by_email(email)
+
+@app.put("/api/users/{user_id}", response_model=UserResponse)
+async def update_user_endpoint(user_id: str, updates: UserUpdateRequest):
+    """Update user information"""
+    logger.info(f"Update user request: {user_id}")
+    return update_user(user_id, updates)
+
+@app.delete("/api/users/{user_id}")
+async def delete_user_endpoint(user_id: str):
+    """Delete user"""
+    logger.info(f"Delete user request: {user_id}")
+    return delete_user(user_id)
 
 # --- Optional: To run this file directly ---
 # You would typically use the 'uvicorn' command below,
