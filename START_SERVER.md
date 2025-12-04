@@ -147,9 +147,14 @@ const registerUser = async (userData) => {
 
 ### For Render.com
 
-1. Set environment variables in Render dashboard
+See `RENDER_SETUP.md` for complete deployment guide.
+
+**Quick Setup:**
+
+1. Set environment variables in Render dashboard (see `RENDER_SETUP.md`)
 2. Build command: `pip install -r requirements.txt`
 3. Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+4. Add `CORS_ORIGINS` environment variable with your React app URL(s)
 
 ### Environment Variables for Production
 

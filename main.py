@@ -163,20 +163,26 @@ app = FastAPI(
 )
 
 # Configure CORS for React app
+# Get allowed origins from environment variable or use defaults
+cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
+# Add default localhost origins for development
+default_origins = [
+    "http://localhost:3000",  # React dev server
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+]
+# Combine and filter out empty strings
+all_origins = [origin.strip() for origin in cors_origins + default_origins if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React dev server
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        # Add your production React app URL here
-        # "https://your-react-app.com",
-    ],
+    allow_origins=all_origins,
     allow_credentials=True,
     allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, etc.)
     allow_headers=["*"],  # Allows all headers
 )
+logger.info(f"CORS configured for origins: {all_origins}")
 
 # Add exception handler for validation errors to help debug 422 errors
 @app.exception_handler(RequestValidationError)
@@ -1126,4 +1132,6 @@ async def delete_user_endpoint(user_id: str):
 # but this is also an option for simple testing.
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Use PORT environment variable (Render provides this) or default to 8000
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
