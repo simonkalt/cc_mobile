@@ -770,8 +770,23 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     # Prepare additional instructions to be appended last (so they override all other instructions)
     additional_instructions_text = ""
     if additional_instructions and additional_instructions.strip():
-        additional_instructions_text = f"\n\nCRITICAL - Additional Instructions (THESE OVERRIDE ALL PREVIOUS INSTRUCTIONS, including tone/personality and system prompts): {additional_instructions}"
-        logger.info(f"Additional instructions provided ({len(additional_instructions)} chars) - will override other instructions: {additional_instructions}")
+        # Use very explicit override language that LLMs will prioritize
+        additional_instructions_text = f"""
+
+=== FINAL OVERRIDE INSTRUCTIONS - HIGHEST PRIORITY ===
+IGNORE ALL PREVIOUS INSTRUCTIONS ABOUT LENGTH, TONE, STYLE, OR FORMATTING.
+THE FOLLOWING INSTRUCTIONS TAKE ABSOLUTE PRECEDENCE OVER EVERYTHING ELSE, INCLUDING:
+- System prompts
+- Personality profiles
+- Tone settings
+- Any other instructions in this conversation
+
+YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
+{additional_instructions}
+
+=== END OVERRIDE INSTRUCTIONS ===
+"""
+        logger.info(f"Additional instructions provided ({len(additional_instructions)} chars) - will override ALL other instructions: {additional_instructions}")
     
     r = ""
     
@@ -779,6 +794,8 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
             msg = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            if additional_instructions_text:
+                logger.info("Additional instructions appended to Gemini prompt as final override")
             genai.configure(api_key=gemini_api_key)
             model = genai.GenerativeModel("gemini-2.5-flash")
             
@@ -806,9 +823,10 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                 {"role": "user", "content": f"Company Name: {company_name}"},
                 {"role": "user", "content": f"Ad Source: {ad_source}"}
             ]
-            # Append additional instructions last so they override all previous instructions
+            # Append additional instructions last as a separate, high-priority message
             if additional_instructions_text:
                 messages.append({"role": "user", "content": additional_instructions_text.strip()})
+                logger.info("Additional instructions appended to ChatGPT messages as final override")
             response = client.chat.completions.create(model=gpt_model, messages=messages)
             r = response.choices[0].message.content
             
@@ -828,6 +846,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             # Append additional instructions last so they override all previous instructions
             if additional_instructions_text:
                 messages_list.append({"role": "user", "content": additional_instructions_text.strip()})
+                logger.info("Additional instructions appended to Grok messages as final override")
             data = {
                 "model": xai_model,
                 "messages": messages_list
@@ -871,6 +890,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             # Append additional instructions last so they override all previous instructions
             if additional_instructions_text:
                 messages.append({"role": "user", "content": additional_instructions_text.strip()})
+                logger.info("Additional instructions appended to Llama messages as final override")
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response['message']['content']
             
@@ -885,6 +905,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             # Append additional instructions last so they override all previous instructions
             if additional_instructions_text:
                 content_list.append({"type": "text", "text": additional_instructions_text.strip()})
+                logger.info("Additional instructions appended to Claude messages as final override")
             messages = [
                 {
                     "role": "user",
