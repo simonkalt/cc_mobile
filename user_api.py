@@ -277,10 +277,19 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
     if updates.avatarUrl is not None:
         update_doc["avatarUrl"] = updates.avatarUrl
     
-    # Handle nested updates for preferences
-    if updates.preferences:
-        for key, value in updates.preferences.items():
-            update_doc[f"preferences.{key}"] = value
+    # REMOVED: Handle nested updates for preferences
+    # This was causing MongoDB conflicts because it tried to update both
+    # the whole 'preferences' object and nested paths like 'preferences.appSettings'
+    # in the same operation. MongoDB doesn't allow this.
+    # 
+    # If you need partial updates to preferences, you should either:
+    # 1. Send the complete preferences object (current approach), OR
+    # 2. Use MongoDB's $set operator with dot notation for specific nested fields
+    #    (but don't set the whole 'preferences' object in the same update)
+    #
+    # if updates.preferences:
+    #     for key, value in updates.preferences.items():
+    #         update_doc[f"preferences.{key}"] = value
     
     try:
         result = collection.update_one(
@@ -306,6 +315,7 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update user: {str(e)}"
         )
+
 
 
 def delete_user(user_id: str) -> dict:
