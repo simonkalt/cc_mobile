@@ -162,6 +162,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
 # Configure CORS for React app
 # Get allowed origins from environment variable or use defaults
 cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
@@ -224,6 +225,8 @@ aws_region = os.getenv('AWS_REGION', 'us-east-1')  # Default region
 
 # Load system prompt from JSON config file
 def load_system_prompt():
+
+
     """Load system prompt from JSON config file"""
     config_path = "system_prompt.json"
     try:
@@ -301,7 +304,6 @@ claude_model = "claude-sonnet-4-20250514"
 ollama_model = "llama3.2"
 OLLAMA_API = "http://localhost:11434/api/chat"
 xai_model = "grok-4-fast-reasoning"
-
 
 # we need to move this to the server side and make it dynamic
 LLM_ENVIRONMENT_MAPPING = [
