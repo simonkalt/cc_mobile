@@ -747,7 +747,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         logger.info(f"Using fallback profile: {fallback_profile}")
         selected_profile = fallback_profile
     
-    # Build message payload
+    # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
         "llm": llm,
         "today": f"Date: {today_date}",
@@ -756,7 +756,6 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         "ad_source": ad_source,
         "resume": resume_content,  # Use extracted PDF content instead of file path
         "jd": jd,
-        "additional_instructions": additional_instructions,
         "tone": f"Use the following tone/personality when generating the result, but do not specifically note the activities within this text: {selected_profile}"
     }
     
@@ -767,12 +766,19 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         message_data["phone_number"] = phone_number
     
     message = json.dumps(message_data)
+    
+    # Prepare additional instructions to be appended last (so they override all other instructions)
+    additional_instructions_text = ""
+    if additional_instructions and additional_instructions.strip():
+        additional_instructions_text = f"\n\nCRITICAL - Additional Instructions (THESE OVERRIDE ALL PREVIOUS INSTRUCTIONS, including tone/personality and system prompts): {additional_instructions}"
+        logger.info(f"Additional instructions provided ({len(additional_instructions)} chars) - will override other instructions: {additional_instructions}")
+    
     r = ""
     
     try:
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
-            msg = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
+            msg = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             genai.configure(api_key=gemini_api_key)
             model = genai.GenerativeModel("gemini-2.5-flash")
             
@@ -800,6 +806,9 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                 {"role": "user", "content": f"Company Name: {company_name}"},
                 {"role": "user", "content": f"Ad Source: {ad_source}"}
             ]
+            # Append additional instructions last so they override all previous instructions
+            if additional_instructions_text:
+                messages.append({"role": "user", "content": additional_instructions_text.strip()})
             response = client.chat.completions.create(model=gpt_model, messages=messages)
             r = response.choices[0].message.content
             
@@ -809,15 +818,19 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                 "Authorization": f"Bearer {xai_api_key}",
                 "Content-Type": "application/json"
             }
+            messages_list = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": message},
+                {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+                {"role": "user", "content": f"Company Name: {company_name}"},
+                {"role": "user", "content": f"Ad Source: {ad_source}"}
+            ]
+            # Append additional instructions last so they override all previous instructions
+            if additional_instructions_text:
+                messages_list.append({"role": "user", "content": additional_instructions_text.strip()})
             data = {
                 "model": xai_model,
-                "messages": [
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": message},
-                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
-                    {"role": "user", "content": f"Company Name: {company_name}"},
-                    {"role": "user", "content": f"Ad Source: {ad_source}"}
-                ]
+                "messages": messages_list
             }
             response = requests.post(
                 "https://api.x.ai/v1/chat/completions",
@@ -830,7 +843,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             r = result["choices"][0]["message"]["content"]
                 
         elif llm == "OCI" or llm == "oci-generative-ai":
-            full_prompt = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
+            full_prompt = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received: {r[:100]}...")
             
@@ -843,8 +856,7 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                 "Hiring Manager": hiring_manager,
                 "Resume": resume,
                 "Ad Source": ad_source,
-                "Job Description": jd,
-                "Additional Instructions": additional_instructions
+                "Job Description": jd
             }
             if address:
                 message_data_llama["Address"] = address
@@ -856,20 +868,27 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": message_llama}
             ]
+            # Append additional instructions last so they override all previous instructions
+            if additional_instructions_text:
+                messages.append({"role": "user", "content": additional_instructions_text.strip()})
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response['message']['content']
             
         elif llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514":
             client = anthropic.Anthropic(api_key=anthropic_api_key)
+            content_list = [
+                {"type": "text", "text": message},
+                {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
+                {"type": "text", "text": f"Company Name: {company_name}"},
+                {"type": "text", "text": f"Ad Source: {ad_source}"}
+            ]
+            # Append additional instructions last so they override all previous instructions
+            if additional_instructions_text:
+                content_list.append({"type": "text", "text": additional_instructions_text.strip()})
             messages = [
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": message},
-                        {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
-                        {"type": "text", "text": f"Company Name: {company_name}"},
-                        {"type": "text", "text": f"Ad Source: {ad_source}"}
-                    ]
+                    "content": content_list
                 }
             ]
             response = client.messages.create(
