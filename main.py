@@ -363,6 +363,8 @@ class JobInfoRequest(BaseModel):
     tone: str = "Professional"
     address: str = ""  # City, State
     phone_number: str = ""
+    user_id: Optional[str] = None  # Optional user ID to access custom personality profiles
+    user_email: Optional[str] = None  # Optional user email to access custom personality profiles
 
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
@@ -649,10 +651,15 @@ def get_oc_info(prompt: str):
 
 def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: str, 
                  ad_source: str, resume: str, jd: str, additional_instructions: str, 
-                 tone: str, address: str = "", phone_number: str = ""):
+                 tone: str, address: str = "", phone_number: str = "", 
+                 user_id: Optional[str] = None, user_email: Optional[str] = None):
     """
     Generate cover letter based on job information using specified LLM.
     Returns a dictionary with 'markdown' and 'html' fields.
+    
+    Args:
+        user_id: Optional user ID to access custom personality profiles
+        user_email: Optional user email to access custom personality profiles
     """
     # Get today's date if not provided
     today_date = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
@@ -735,17 +742,76 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                     logger.warning(f"Could not read PDF from S3 or local filesystem. Using original resume string.")
                     resume_content = resume
     
-    # Get personality profile and log it
-    selected_profile = personality_profiles.get(tone)
-    if selected_profile:
-        logger.info(f"Using personality profile: '{tone}'")
-        logger.info(f"Personality profile text ({len(selected_profile)} chars): {selected_profile}")
-    else:
-        # Fallback to first available profile or default
-        fallback_profile = list(personality_profiles.values())[0] if personality_profiles else 'Professional tone'
-        logger.warning(f"Personality profile '{tone}' not found. Available profiles: {list(personality_profiles.keys())}")
-        logger.info(f"Using fallback profile: {fallback_profile}")
-        selected_profile = fallback_profile
+    # Get personality profile - check user's custom profiles first, then defaults
+    selected_profile = None
+    profile_source = "default"
+    
+    # Try to get user's custom personality profiles if user_id or user_email is provided
+    if user_id or user_email:
+        try:
+            from user_api import get_user_by_id, get_user_by_email
+            user = None
+            if user_id:
+                try:
+                    user = get_user_by_id(user_id)
+                except Exception as e:
+                    logger.debug(f"Could not get user by ID {user_id}: {e}")
+            elif user_email:
+                try:
+                    user = get_user_by_email(user_email)
+                except Exception as e:
+                    logger.debug(f"Could not get user by email {user_email}: {e}")
+            
+            if user:
+                # Check user's custom personality profiles
+                # user is a UserResponse Pydantic model, so access preferences as attribute
+                user_prefs = user.preferences if user.preferences else {}
+                if isinstance(user_prefs, dict):
+                    app_settings = user_prefs.get("appSettings", {})
+                    if isinstance(app_settings, dict):
+                        custom_profiles = app_settings.get("personalityProfiles", [])
+                    else:
+                        custom_profiles = []
+                else:
+                    custom_profiles = []
+                
+                logger.info(f"User preferences retrieved. Custom profiles count: {len(custom_profiles) if isinstance(custom_profiles, list) else 0}")
+                
+                if custom_profiles:
+                    logger.info(f"Found {len(custom_profiles)} custom personality profiles for user")
+                    # Try to find matching profile by name (case-insensitive) or ID
+                    for profile in custom_profiles:
+                        if isinstance(profile, dict):
+                            profile_name = profile.get("name", "").lower()
+                            profile_id = profile.get("id", "")
+                            profile_desc = profile.get("description", "")
+                            
+                            # Match by name (case-insensitive) or ID
+                            if tone.lower() == profile_name or tone == profile_id:
+                                selected_profile = profile_desc
+                                profile_source = "user_custom"
+                                logger.info(f"Using custom personality profile: '{profile.get('name')}' (ID: {profile_id})")
+                                logger.info(f"Custom profile text ({len(selected_profile)} chars): {selected_profile}")
+                                break
+        except Exception as e:
+            logger.warning(f"Error accessing user's custom personality profiles: {e}. Falling back to default profiles.")
+    
+    # If no custom profile found, use default personality profiles
+    if not selected_profile:
+        selected_profile = personality_profiles.get(tone)
+        if selected_profile:
+            profile_source = "default"
+            logger.info(f"Using default personality profile: '{tone}'")
+            logger.info(f"Personality profile text ({len(selected_profile)} chars): {selected_profile}")
+        else:
+            # Fallback to first available profile or default
+            fallback_profile = list(personality_profiles.values())[0] if personality_profiles else 'Professional tone'
+            logger.warning(f"Personality profile '{tone}' not found. Available profiles: {list(personality_profiles.keys())}")
+            logger.info(f"Using fallback profile: {fallback_profile}")
+            selected_profile = fallback_profile
+            profile_source = "fallback"
+    
+    logger.info(f"Personality profile source: {profile_source}")
     
     # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
@@ -1076,7 +1142,9 @@ async def handle_chat(request: Request):
                 additional_instructions=job_request.additional_instructions,
                 tone=job_request.tone,
                 address=job_request.address,
-                phone_number=job_request.phone_number
+                phone_number=job_request.phone_number,
+                user_id=job_request.user_id,
+                user_email=job_request.user_email
             )
             return result
         else:
