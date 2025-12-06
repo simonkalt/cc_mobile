@@ -806,7 +806,18 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
             detail="Failed to retrieve personality profile"
         )
     
-    logger.info(f"Personality profile source: {profile_source}")
+    logger.info(f"Personality profile source: {profile_source} (profile retrieved from user's database preferences)")
+    
+    # Build personality instruction - make it prominent and direct
+    personality_instruction = f"""
+=== PERSONALITY PROFILE INSTRUCTION - CRITICAL ===
+YOU MUST FOLLOW THIS PERSONALITY PROFILE EXACTLY:
+{selected_profile}
+
+Apply this personality throughout the entire cover letter. This instruction takes precedence over default writing styles.
+=== END PERSONALITY PROFILE INSTRUCTION ===
+"""
+    logger.info(f"Personality instruction prepared ({len(personality_instruction)} chars): {selected_profile[:100]}...")
     
     # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
@@ -854,7 +865,9 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
     try:
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
-            msg = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            # Include personality instruction prominently at the start
+            msg = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            logger.info("Personality instruction included in Gemini prompt")
             if additional_instructions_text:
                 logger.info("Additional instructions appended to Gemini prompt as final override")
             genai.configure(api_key=gemini_api_key)
@@ -879,6 +892,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             client = OpenAI(api_key=openai_api_key)
             messages = [
                 {"role": "system", "content": system_message},
+                {"role": "user", "content": personality_instruction.strip()},  # Add personality instruction as separate, prominent message
                 {"role": "user", "content": message},
                 {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
                 {"role": "user", "content": f"Company Name: {company_name}"},
@@ -899,11 +913,13 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             }
             messages_list = [
                 {"role": "system", "content": system_message},
+                {"role": "user", "content": personality_instruction.strip()},  # Add personality instruction as separate, prominent message
                 {"role": "user", "content": message},
                 {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
                 {"role": "user", "content": f"Company Name: {company_name}"},
                 {"role": "user", "content": f"Ad Source: {ad_source}"}
             ]
+            logger.info("Personality instruction included in Grok messages")
             # Append additional instructions last so they override all previous instructions
             if additional_instructions_text:
                 messages_list.append({"role": "user", "content": additional_instructions_text.strip()})
@@ -923,7 +939,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             r = result["choices"][0]["message"]["content"]
                 
         elif llm == "OCI" or llm == "oci-generative-ai":
-            full_prompt = f"{system_message}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            # Include personality instruction prominently at the start
+            full_prompt = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received: {r[:100]}...")
             
@@ -931,23 +948,15 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             if not OLLAMA_AVAILABLE:
                 raise ImportError("ollama library is not installed. Please install it with: pip install ollama")
             
-            message_data_llama = {
-                "Company Name": company_name,
-                "Hiring Manager": hiring_manager,
-                "Resume": resume,
-                "Ad Source": ad_source,
-                "Job Description": jd
-            }
-            if address:
-                message_data_llama["Address"] = address
-            if phone_number:
-                message_data_llama["Phone Number"] = phone_number
-                
-            message_llama = json.dumps(message_data_llama)
+            # Use the same message_data that includes the personality profile (tone field)
+            # This ensures the personality profile description is included in Llama prompts
+            message_llama = message  # Use the original message which includes the tone/personality profile
             messages = [
                 {"role": "system", "content": system_message},
+                {"role": "user", "content": personality_instruction.strip()},  # Add personality instruction as separate, prominent message
                 {"role": "user", "content": message_llama}
             ]
+            logger.info("Personality instruction included in Llama messages")
             # Append additional instructions last so they override all previous instructions
             if additional_instructions_text:
                 messages.append({"role": "user", "content": additional_instructions_text.strip()})
@@ -958,11 +967,13 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         elif llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514":
             client = anthropic.Anthropic(api_key=anthropic_api_key)
             content_list = [
+                {"type": "text", "text": personality_instruction.strip()},  # Add personality instruction as separate, prominent message
                 {"type": "text", "text": message},
                 {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
                 {"type": "text", "text": f"Company Name: {company_name}"},
                 {"type": "text", "text": f"Ad Source: {ad_source}"}
             ]
+            logger.info("Personality instruction included in Claude messages")
             # Append additional instructions last so they override all previous instructions
             if additional_instructions_text:
                 content_list.append({"type": "text", "text": additional_instructions_text.strip()})
@@ -1170,6 +1181,16 @@ async def handle_chat(request: Request):
         # Check if this is a job info request (has 'llm', 'company_name', etc.)
         if 'llm' in body and 'company_name' in body:
             logger.info("Detected job info request in /chat endpoint, routing to job-info handler")
+            # Check for required user identification
+            if not body.get('user_id') and not body.get('user_email'):
+                logger.error("Job info request missing user_id or user_email")
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "user_id or user_email is required",
+                        "detail": "Please provide either 'user_id' or 'user_email' in your request to access personality profiles."
+                    }
+                )
             # Convert to JobInfoRequest and handle it
             job_request = JobInfoRequest(**body)
             result = get_job_info(
@@ -1196,11 +1217,18 @@ async def handle_chat(request: Request):
             return {
                 "response": response if response else f"Error: No response from LLM {chat_request.active_model}"
             }
+    except HTTPException as e:
+        # Re-raise HTTPException so FastAPI can handle it properly
+        raise
     except Exception as e:
         logger.error(f"Error in handle_chat: {str(e)}")
-        return {
-            "response": f"Error processing request: {str(e)}"
-        }
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error",
+                "detail": str(e)
+            }
+        )
 
 # Debug endpoint to see raw request
 @app.post("/chat-debug")
