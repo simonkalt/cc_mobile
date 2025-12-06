@@ -4,7 +4,7 @@ User API endpoints for registration and CRUD operations
 import bcrypt
 from fastapi import HTTPException, status
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 from mongodb_client import get_collection, is_connected
@@ -13,6 +13,45 @@ import logging
 logger = logging.getLogger(__name__)
 
 USERS_COLLECTION = "users"
+
+
+# Nested Models for Preferences
+class PrintMargins(BaseModel):
+    top: Optional[float] = 1.0
+    right: Optional[float] = 0.75
+    bottom: Optional[float] = 0.25
+    left: Optional[float] = 0.75
+
+
+class PageSize(BaseModel):
+    width: Optional[float] = 8.5
+    height: Optional[float] = 11.0
+
+
+class PrintProperties(BaseModel):
+    margins: Optional[PrintMargins] = None
+    fontFamily: Optional[str] = "Georgia"
+    fontSize: Optional[float] = 11.0
+    lineHeight: Optional[float] = 1.15
+    pageSize: Optional[PageSize] = None
+
+
+class PersonalityProfile(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
+class AppSettings(BaseModel):
+    printProperties: Optional[PrintProperties] = None
+    personalityProfiles: Optional[List[PersonalityProfile]] = None
+    selectedModel: Optional[str] = None
+
+
+class UserPreferences(BaseModel):
+    newsletterOptIn: Optional[bool] = False
+    theme: Optional[str] = "light"
+    appSettings: Optional[AppSettings] = None
 
 
 # Pydantic Models for Request/Response
@@ -150,7 +189,26 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "dateUpdated": datetime.utcnow(),
         "preferences": user_data.preferences or {
             "newsletterOptIn": False,
-            "theme": "light"
+            "theme": "light",
+            "appSettings": {
+                "printProperties": {
+                    "margins": {
+                        "top": 1.0,
+                        "right": 0.75,
+                        "bottom": 0.25,
+                        "left": 0.75
+                    },
+                    "fontFamily": "Georgia",
+                    "fontSize": 11.0,
+                    "lineHeight": 1.15,
+                    "pageSize": {
+                        "width": 8.5,
+                        "height": 11.0
+                    }
+                },
+                "personalityProfiles": [],
+                "selectedModel": None
+            }
         }
     }
     
@@ -273,23 +331,47 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
     if updates.address is not None:
         update_doc["address"] = updates.address
     if updates.preferences is not None:
-        update_doc["preferences"] = updates.preferences
+        # Handle preferences update - support nested structure
+        # If preferences is a dict, we can merge it or replace it
+        # For nested updates like appSettings, we'll use dot notation
+        if isinstance(updates.preferences, dict):
+            # Check if this is a partial update (has appSettings nested structure)
+            if "appSettings" in updates.preferences:
+                # Handle nested appSettings updates using dot notation
+                app_settings = updates.preferences.get("appSettings", {})
+                if isinstance(app_settings, dict):
+                    # Update printProperties if present
+                    if "printProperties" in app_settings:
+                        print_props = app_settings["printProperties"]
+                        if isinstance(print_props, dict):
+                            # Update margins
+                            if "margins" in print_props:
+                                for margin_key, margin_value in print_props["margins"].items():
+                                    update_doc[f"preferences.appSettings.printProperties.margins.{margin_key}"] = margin_value
+                            # Update other printProperties fields
+                            for prop_key in ["fontFamily", "fontSize", "lineHeight"]:
+                                if prop_key in print_props:
+                                    update_doc[f"preferences.appSettings.printProperties.{prop_key}"] = print_props[prop_key]
+                            # Update pageSize
+                            if "pageSize" in print_props:
+                                for size_key, size_value in print_props["pageSize"].items():
+                                    update_doc[f"preferences.appSettings.printProperties.pageSize.{size_key}"] = size_value
+                    # Update personalityProfiles
+                    if "personalityProfiles" in app_settings:
+                        update_doc["preferences.appSettings.personalityProfiles"] = app_settings["personalityProfiles"]
+                    # Update selectedModel
+                    if "selectedModel" in app_settings:
+                        update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]
+            # Update top-level preferences fields
+            if "newsletterOptIn" in updates.preferences:
+                update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]
+            if "theme" in updates.preferences:
+                update_doc["preferences.theme"] = updates.preferences["theme"]
+        else:
+            # If it's not a dict, replace the whole preferences object
+            update_doc["preferences"] = updates.preferences
     if updates.avatarUrl is not None:
         update_doc["avatarUrl"] = updates.avatarUrl
-    
-    # REMOVED: Handle nested updates for preferences
-    # This was causing MongoDB conflicts because it tried to update both
-    # the whole 'preferences' object and nested paths like 'preferences.appSettings'
-    # in the same operation. MongoDB doesn't allow this.
-    # 
-    # If you need partial updates to preferences, you should either:
-    # 1. Send the complete preferences object (current approach), OR
-    # 2. Use MongoDB's $set operator with dot notation for specific nested fields
-    #    (but don't set the whole 'preferences' object in the same update)
-    #
-    # if updates.preferences:
-    #     for key, value in updates.preferences.items():
-    #         update_doc[f"preferences.{key}"] = value
     
     try:
         result = collection.update_one(
