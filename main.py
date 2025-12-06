@@ -253,50 +253,8 @@ def load_system_prompt():
 # Load system message at startup
 system_message = load_system_prompt()
 
-# Load personality profiles from JSON config file
-def load_personality_profiles():
-    """Load personality profiles from JSON config file and resolve references"""
-    config_path = "personality_profiles.json"
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            profiles = json.load(f)
-        
-        # First pass: copy all profiles
-        resolved_profiles = profiles.copy()
-        
-        # Second pass: resolve references
-        import re
-        for key, value in resolved_profiles.items():
-            if isinstance(value, str) and '[' in value and ']' in value:
-                # Find all references like [Simon]
-                matches = re.findall(r'\[([^\]]+)\]', value)
-                for match in matches:
-                    if match in resolved_profiles:
-                        # Replace [Simon] with the actual Simon profile
-                        value = value.replace(f'[{match}]', resolved_profiles[match])
-                resolved_profiles[key] = value
-        
-        logger.info(f"Loaded {len(resolved_profiles)} personality profiles from {config_path}")
-        return resolved_profiles
-    except FileNotFoundError:
-        logger.warning(f"Personality profiles file not found: {config_path}. Using default profiles.")
-        # Return a minimal default set
-        return {
-            "Simon": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor."
-        }
-    except json.JSONDecodeError as e:
-        logger.error(f"Error parsing personality profiles JSON: {e}. Using default profiles.")
-        return {
-            "Simon": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor."
-        }
-    except Exception as e:
-        logger.error(f"Error loading personality profiles: {e}. Using default profiles.")
-        return {
-            "Simon": "Professional, formal, and polished tone. Use standard business language and maintain a respectful, courteous demeanor."
-        }
-
-# Load personality profiles at startup
-personality_profiles = load_personality_profiles()
+# Personality profiles are now stored in user preferences in MongoDB
+# No longer loading from JSON file - all profiles come from user's appSettings.personalityProfiles
 
 # Model names mapping
 gpt_model = "gpt-4.1"
@@ -742,74 +700,111 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                     logger.warning(f"Could not read PDF from S3 or local filesystem. Using original resume string.")
                     resume_content = resume
     
-    # Get personality profile - check user's custom profiles first, then defaults
+    # Get personality profile from user's custom profiles (user_id or user_email required)
     selected_profile = None
-    profile_source = "default"
+    profile_source = "user_custom"
     
-    # Try to get user's custom personality profiles if user_id or user_email is provided
-    if user_id or user_email:
-        try:
-            from user_api import get_user_by_id, get_user_by_email
-            user = None
-            if user_id:
-                try:
-                    user = get_user_by_id(user_id)
-                except Exception as e:
-                    logger.debug(f"Could not get user by ID {user_id}: {e}")
-            elif user_email:
-                try:
-                    user = get_user_by_email(user_email)
-                except Exception as e:
-                    logger.debug(f"Could not get user by email {user_email}: {e}")
-            
-            if user:
-                # Check user's custom personality profiles
-                # user is a UserResponse Pydantic model, so access preferences as attribute
-                user_prefs = user.preferences if user.preferences else {}
-                if isinstance(user_prefs, dict):
-                    app_settings = user_prefs.get("appSettings", {})
-                    if isinstance(app_settings, dict):
-                        custom_profiles = app_settings.get("personalityProfiles", [])
-                    else:
-                        custom_profiles = []
-                else:
-                    custom_profiles = []
-                
-                logger.info(f"User preferences retrieved. Custom profiles count: {len(custom_profiles) if isinstance(custom_profiles, list) else 0}")
-                
-                if custom_profiles:
-                    logger.info(f"Found {len(custom_profiles)} custom personality profiles for user")
-                    # Try to find matching profile by name (case-insensitive) or ID
-                    for profile in custom_profiles:
-                        if isinstance(profile, dict):
-                            profile_name = profile.get("name", "").lower()
-                            profile_id = profile.get("id", "")
-                            profile_desc = profile.get("description", "")
-                            
-                            # Match by name (case-insensitive) or ID
-                            if tone.lower() == profile_name or tone == profile_id:
-                                selected_profile = profile_desc
-                                profile_source = "user_custom"
-                                logger.info(f"Using custom personality profile: '{profile.get('name')}' (ID: {profile_id})")
-                                logger.info(f"Custom profile text ({len(selected_profile)} chars): {selected_profile}")
-                                break
-        except Exception as e:
-            logger.warning(f"Error accessing user's custom personality profiles: {e}. Falling back to default profiles.")
+    # Require user_id or user_email to access personality profiles
+    if not user_id and not user_email:
+        logger.warning("No user_id or user_email provided. Cannot retrieve personality profiles.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id or user_email is required to access personality profiles"
+        )
     
-    # If no custom profile found, use default personality profiles
-    if not selected_profile:
-        selected_profile = personality_profiles.get(tone)
-        if selected_profile:
-            profile_source = "default"
-            logger.info(f"Using default personality profile: '{tone}'")
-            logger.info(f"Personality profile text ({len(selected_profile)} chars): {selected_profile}")
+    try:
+        from user_api import get_user_by_id, get_user_by_email
+        user = None
+        if user_id:
+            try:
+                user = get_user_by_id(user_id)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Could not get user by ID {user_id}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"User not found: {str(e)}"
+                )
+        elif user_email:
+            try:
+                user = get_user_by_email(user_email)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Could not get user by email {user_email}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"User not found: {str(e)}"
+                )
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Get user's custom personality profiles
+        # user is a UserResponse Pydantic model, so access preferences as attribute
+        user_prefs = user.preferences if user.preferences else {}
+        if isinstance(user_prefs, dict):
+            app_settings = user_prefs.get("appSettings", {})
+            if isinstance(app_settings, dict):
+                custom_profiles = app_settings.get("personalityProfiles", [])
+            else:
+                custom_profiles = []
         else:
-            # Fallback to first available profile or default
-            fallback_profile = list(personality_profiles.values())[0] if personality_profiles else 'Professional tone'
-            logger.warning(f"Personality profile '{tone}' not found. Available profiles: {list(personality_profiles.keys())}")
-            logger.info(f"Using fallback profile: {fallback_profile}")
-            selected_profile = fallback_profile
-            profile_source = "fallback"
+            custom_profiles = []
+        
+        logger.info(f"User preferences retrieved. Custom profiles count: {len(custom_profiles) if isinstance(custom_profiles, list) else 0}")
+        
+        if not custom_profiles:
+            logger.warning(f"No personality profiles found for user. Available profiles: []")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No personality profiles found for user. Please add personality profiles in your user preferences."
+            )
+        
+        logger.info(f"Found {len(custom_profiles)} custom personality profiles for user")
+        # Try to find matching profile by name (case-insensitive) or ID
+        profile_found = False
+        for profile in custom_profiles:
+            if isinstance(profile, dict):
+                profile_name = profile.get("name", "").lower()
+                profile_id = profile.get("id", "")
+                profile_desc = profile.get("description", "")
+                
+                # Match by name (case-insensitive) or ID
+                if tone.lower() == profile_name or tone == profile_id:
+                    selected_profile = profile_desc
+                    logger.info(f"Using custom personality profile: '{profile.get('name')}' (ID: {profile_id})")
+                    logger.info(f"Custom profile text ({len(selected_profile)} chars): {selected_profile}")
+                    profile_found = True
+                    break
+        
+        if not profile_found:
+            available_names = [p.get("name", "Unknown") for p in custom_profiles if isinstance(p, dict)]
+            logger.warning(f"Personality profile '{tone}' not found in user's profiles. Available profiles: {available_names}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Personality profile '{tone}' not found. Available profiles: {available_names}"
+            )
+            
+    except HTTPException:
+        # Re-raise HTTPException
+        raise
+    except Exception as e:
+        logger.error(f"Error accessing user's custom personality profiles: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving personality profiles: {str(e)}"
+        )
+    
+    if not selected_profile:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve personality profile"
+        )
     
     logger.info(f"Personality profile source: {profile_source}")
     
@@ -1074,13 +1069,59 @@ def get_llms():
     return {"llms": llm_options}
 
 @app.get("/api/personality-profiles")
-def get_personality_profiles():
-    """JSON API endpoint to get available personality profiles for the UI"""
-    # Reload profiles to get latest from file (useful if file is updated)
-    global personality_profiles
-    personality_profiles = load_personality_profiles()
-    # Return just the keys (profile names) for the dropdown
-    return {"profiles": [{"label": key, "value": key} for key in personality_profiles.keys()]}
+def get_personality_profiles(user_id: Optional[str] = None, user_email: Optional[str] = None):
+    """JSON API endpoint to get available personality profiles for the UI from user's preferences"""
+    if not user_id and not user_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id or user_email is required"
+        )
+    
+    try:
+        from user_api import get_user_by_id, get_user_by_email
+        user = None
+        if user_id:
+            user = get_user_by_id(user_id)
+        elif user_email:
+            user = get_user_by_email(user_email)
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Get user's custom personality profiles
+        user_prefs = user.preferences if user.preferences else {}
+        if isinstance(user_prefs, dict):
+            app_settings = user_prefs.get("appSettings", {})
+            if isinstance(app_settings, dict):
+                custom_profiles = app_settings.get("personalityProfiles", [])
+            else:
+                custom_profiles = []
+        else:
+            custom_profiles = []
+        
+        # Format profiles for the UI
+        profiles = []
+        for profile in custom_profiles:
+            if isinstance(profile, dict):
+                profiles.append({
+                    "label": profile.get("name", "Unknown"),
+                    "value": profile.get("name", "Unknown"),  # Use name as value for matching
+                    "id": profile.get("id", ""),
+                    "description": profile.get("description", "")
+                })
+        
+        return {"profiles": profiles}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving personality profiles: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving personality profiles: {str(e)}"
+        )
 
 @app.get("/api/system-prompt")
 def get_system_prompt():
