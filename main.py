@@ -502,6 +502,64 @@ def get_s3_client():
         logger.info("Using default AWS credentials (IAM role, credentials file, or environment)")
         return boto3.client('s3', region_name=aws_region)
 
+def ensure_user_s3_folder(user_id: str) -> bool:
+    """
+    Ensure a user's S3 folder exists. If it doesn't exist, create it.
+    In S3, folders are just prefixes, so we create a placeholder object.
+    Returns True if folder exists or was created successfully, False otherwise.
+    """
+    if not S3_AVAILABLE or not s3_bucket_name:
+        logger.warning("S3 is not available. Cannot ensure user folder.")
+        return False
+    
+    if not user_id:
+        logger.warning("user_id is required to ensure S3 folder.")
+        return False
+    
+    try:
+        s3_client = get_s3_client()
+        folder_prefix = f"{user_id}/"
+        placeholder_key = f"{user_id}/.folder_initialized"
+        
+        # Check if folder exists by trying to list objects with the prefix
+        try:
+            response = s3_client.list_objects_v2(
+                Bucket=s3_bucket_name,
+                Prefix=folder_prefix,
+                MaxKeys=1
+            )
+            
+            # If we get any objects (even the placeholder), folder exists
+            if 'Contents' in response and len(response['Contents']) > 0:
+                logger.info(f"User S3 folder already exists: {folder_prefix}")
+                return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == 'AccessDenied':
+                logger.warning(f"Cannot check if folder exists (AccessDenied): {e}")
+                # Continue to try creating it anyway
+            else:
+                logger.warning(f"Error checking folder existence: {error_code}")
+        
+        # Folder doesn't exist or we can't check, create placeholder
+        try:
+            s3_client.put_object(
+                Bucket=s3_bucket_name,
+                Key=placeholder_key,
+                Body=b'',
+                ContentType='text/plain'
+            )
+            logger.info(f"Created user S3 folder: {folder_prefix}")
+            return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            logger.error(f"Failed to create user S3 folder: {error_code} - {e}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Unexpected error ensuring user S3 folder: {e}")
+        return False
+
 def download_pdf_from_s3(s3_path: str) -> bytes:
     """Download PDF from S3 bucket and return as bytes"""
     if not S3_AVAILABLE:
@@ -1358,7 +1416,19 @@ async def register_user_endpoint(user_data: UserRegisterRequest):
 async def login_user_endpoint(login_data: UserLoginRequest):
     """Authenticate user login"""
     logger.info(f"Login attempt: {login_data.email}")
-    return login_user(login_data)
+    login_response = login_user(login_data)
+    
+    # After successful login, ensure user's S3 folder exists
+    if login_response.success and login_response.user:
+        user_id = login_response.user.id
+        logger.info(f"Ensuring S3 folder exists for user_id: {user_id}")
+        folder_created = ensure_user_s3_folder(user_id)
+        if folder_created:
+            logger.info(f"S3 folder verified/created for user_id: {user_id}")
+        else:
+            logger.warning(f"Could not ensure S3 folder for user_id: {user_id} (non-critical)")
+    
+    return login_response
 
 @app.get("/api/users/{user_id}", response_model=UserResponse)
 async def get_user_by_id_endpoint(user_id: str):
@@ -1429,6 +1499,9 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
         )
     
     try:
+        # Ensure user's S3 folder exists before listing
+        ensure_user_s3_folder(user_id)
+        
         s3_client = get_s3_client()
         
         # List objects with user_id prefix
@@ -1441,8 +1514,8 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
         files = []
         if 'Contents' in response:
             for obj in response['Contents']:
-                # Only return actual files (not folders/directories)
-                if not obj['Key'].endswith('/'):
+                # Only return actual files (not folders/directories or placeholder files)
+                if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
                     # Extract filename from key (remove user_id/ prefix)
                     filename = obj['Key'].replace(prefix, "")
                     files.append({
@@ -1511,6 +1584,9 @@ async def upload_file(request: FileUploadRequest):
             status_code=400,
             detail="user_id is required to upload files"
         )
+    
+    # Ensure user's S3 folder exists before uploading
+    ensure_user_s3_folder(user_id)
     
     try:
         # Decode base64 fileData

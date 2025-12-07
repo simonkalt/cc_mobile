@@ -489,6 +489,15 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
         }
     )
     
+    # Ensure user's S3 folder exists (create if it doesn't)
+    user_id = str(user["_id"])
+    try:
+        # Import the S3 function from main module
+        # We'll handle this in the endpoint to avoid circular imports
+        pass
+    except Exception as e:
+        logger.warning(f"Could not ensure S3 folder during login: {e}")
+    
     logger.info(f"User logged in: {login_data.email}")
     return UserLoginResponse(
         success=True,
