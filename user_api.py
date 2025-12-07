@@ -208,6 +208,18 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
                 },
                 "personalityProfiles": [],
                 "selectedModel": None
+            },
+            # Form field defaults - ensure all form fields start empty for new users
+            "formDefaults": {
+                "companyName": "",
+                "hiringManager": "",
+                "adSource": "",
+                "jobDescription": "",
+                "additionalInstructions": "",
+                "tone": "Professional",
+                "address": "",
+                "phoneNumber": "",
+                "resume": ""
             }
         }
     }

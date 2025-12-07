@@ -1410,7 +1410,22 @@ from user_api import (
 async def register_user_endpoint(user_data: UserRegisterRequest):
     """Register a new user"""
     logger.info(f"User registration request: {user_data.email}")
-    return register_user(user_data)
+    user_response = register_user(user_data)
+    
+    # Log that form fields have been cleared for new user
+    logger.info(f"✓ New user registered: {user_response.email} (ID: {user_response.id})")
+    logger.info(f"  Form fields initialized to empty/placeholder values")
+    logger.info(f"  - Company Name: ''")
+    logger.info(f"  - Hiring Manager: ''")
+    logger.info(f"  - Ad Source: ''")
+    logger.info(f"  - Job Description: ''")
+    logger.info(f"  - Additional Instructions: ''")
+    logger.info(f"  - Tone: 'Professional' (default)")
+    logger.info(f"  - Address: ''")
+    logger.info(f"  - Phone Number: ''")
+    logger.info(f"  - Resume: ''")
+    
+    return user_response
 
 @app.post("/api/users/login", response_model=UserLoginResponse)
 async def login_user_endpoint(login_data: UserLoginRequest):
