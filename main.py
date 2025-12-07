@@ -1418,15 +1418,86 @@ async def login_user_endpoint(login_data: UserLoginRequest):
     logger.info(f"Login attempt: {login_data.email}")
     login_response = login_user(login_data)
     
-    # After successful login, ensure user's S3 folder exists
+    # After successful login, ensure user's S3 folder exists and log details
     if login_response.success and login_response.user:
         user_id = login_response.user.id
-        logger.info(f"Ensuring S3 folder exists for user_id: {user_id}")
-        folder_created = ensure_user_s3_folder(user_id)
-        if folder_created:
-            logger.info(f"S3 folder verified/created for user_id: {user_id}")
+        user_name = login_response.user.name
+        user_email = login_response.user.email
+        
+        # Log successful login
+        logger.info("=" * 80)
+        logger.info(f"✓ USER LOGGED IN SUCCESSFULLY")
+        logger.info(f"  User ID: {user_id}")
+        logger.info(f"  Name: {user_name}")
+        logger.info(f"  Email: {user_email}")
+        logger.info("=" * 80)
+        
+        # Check and ensure S3 folder exists
+        logger.info(f"Checking AWS S3 folder for user_id: {user_id}")
+        folder_exists = False
+        file_count = 0
+        
+        if S3_AVAILABLE and s3_bucket_name:
+            try:
+                s3_client = get_s3_client()
+                folder_prefix = f"{user_id}/"
+                
+                # Check if folder exists by listing objects
+                try:
+                    response = s3_client.list_objects_v2(
+                        Bucket=s3_bucket_name,
+                        Prefix=folder_prefix,
+                        MaxKeys=1000  # Get up to 1000 files to count
+                    )
+                    
+                    if 'Contents' in response:
+                        # Count actual files (exclude placeholder)
+                        files = [obj for obj in response['Contents'] 
+                                if not obj['Key'].endswith('/') 
+                                and not obj['Key'].endswith('.folder_initialized')]
+                        file_count = len(files)
+                        folder_exists = True
+                        
+                        logger.info(f"✓ AWS S3 folder EXISTS: {folder_prefix}")
+                        logger.info(f"  Files in folder: {file_count}")
+                        if file_count > 0:
+                            logger.info(f"  Sample files (first 5):")
+                            for i, obj in enumerate(files[:5], 1):
+                                filename = obj['Key'].replace(folder_prefix, "")
+                                logger.info(f"    {i}. {filename} ({obj['Size']} bytes)")
+                    else:
+                        # Folder might exist but be empty, or doesn't exist
+                        folder_exists = False
+                        logger.info(f"⚠ AWS S3 folder appears empty or doesn't exist: {folder_prefix}")
+                        
+                except ClientError as e:
+                    error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                    if error_code == 'AccessDenied':
+                        logger.warning(f"⚠ Cannot check S3 folder (AccessDenied) - may need permissions")
+                    else:
+                        logger.warning(f"⚠ Error checking S3 folder: {error_code}")
+                
+                # Ensure folder exists (create if needed)
+                folder_created = ensure_user_s3_folder(user_id)
+                if folder_created and not folder_exists:
+                    logger.info(f"✓ Created new AWS S3 folder: {folder_prefix}")
+                    folder_exists = True
+                elif folder_created:
+                    logger.info(f"✓ AWS S3 folder verified: {folder_prefix}")
+                else:
+                    logger.warning(f"⚠ Could not ensure S3 folder for user_id: {user_id} (non-critical)")
+                    
+            except Exception as e:
+                logger.error(f"✗ Error checking/creating S3 folder: {str(e)}")
         else:
-            logger.warning(f"Could not ensure S3 folder for user_id: {user_id} (non-critical)")
+            logger.warning("⚠ S3 is not available - cannot check user folder")
+        
+        # Final summary log
+        logger.info("=" * 80)
+        logger.info(f"LOGIN SUMMARY for user_id: {user_id}")
+        logger.info(f"  AWS S3 Folder Exists: {'YES' if folder_exists else 'NO'}")
+        logger.info(f"  Files in Folder: {file_count}")
+        logger.info("=" * 80)
     
     return login_response
 
