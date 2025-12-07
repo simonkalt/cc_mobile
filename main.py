@@ -11,6 +11,8 @@ from datetime import datetime
 import os
 import json
 import datetime
+import base64
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 import anthropic
@@ -215,14 +217,32 @@ oci_region = os.getenv('OCI_REGION', 'us-phoenix-1')
 oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceya5zq6k7j3k4m5n6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0')
 
 # S3 configuration
-s3_bucket_name = 'custom-cover-user-resumes'
+# Parse S3_BUCKET_URI to extract bucket name
+# Format: s3://bucket-name/path/ or s3://bucket-name/
+# Note: The path portion (e.g., "PDF Resumes/") is ignored since we use user_id folders
+s3_bucket_uri = os.getenv('S3_BUCKET_URI', 's3://custom-cover-user-resumes/')
+if s3_bucket_uri.startswith('s3://'):
+    # Remove 's3://' prefix and split by '/'
+    uri_without_prefix = s3_bucket_uri[5:]  # Remove 's3://'
+    # Extract bucket name (first part before '/')
+    s3_bucket_name = uri_without_prefix.split('/')[0]
+else:
+    # Fallback if URI format is incorrect
+    s3_bucket_name = s3_bucket_uri.split('/')[0] if '/' in s3_bucket_uri else s3_bucket_uri
+
 # Resumes are organized by user_id folders: {user_id}/{filename}
 # The user_id folder is created automatically when files are uploaded to S3
 
-# AWS credentials (optional - can also use IAM role or AWS credentials file)
+# AWS credentials from environment variables
 aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID', '')
 aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY', '')
 aws_region = os.getenv('AWS_REGION', 'us-east-1')  # Default region
+
+# Log S3 configuration (without exposing secrets)
+if S3_AVAILABLE:
+    logger.info(f"S3 Configuration: bucket={s3_bucket_name}, region={aws_region}, credentials={'configured' if aws_access_key_id and aws_secret_access_key else 'using default/IAM'}")
+else:
+    logger.warning("S3 is not available - boto3 is not installed")
 
 # Load system prompt from JSON config file
 def load_system_prompt():
@@ -324,6 +344,14 @@ class JobInfoRequest(BaseModel):
     phone_number: str = ""
     user_id: Optional[str] = None  # Optional user ID to access custom personality profiles
     user_email: Optional[str] = None  # Optional user email to access custom personality profiles
+
+# Define the data model for file upload request
+class FileUploadRequest(BaseModel):
+    fileName: str
+    fileData: str  # base64 encoded
+    contentType: str = "application/pdf"
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
 
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
@@ -456,6 +484,24 @@ def read_pdf_from_bytes(pdf_bytes: bytes) -> str:
         logger.error(f"Error reading PDF: {str(e)}")
         return f"[Error reading PDF: {str(e)}]"
 
+def get_s3_client():
+    """Get S3 client with proper credentials"""
+    if not S3_AVAILABLE:
+        raise ImportError("boto3 is not installed. Cannot access S3.")
+    
+    # Create S3 client with credentials if provided, otherwise use default (IAM role, credentials file, etc.)
+    if aws_access_key_id and aws_secret_access_key:
+        logger.info("Using AWS credentials from environment variables")
+        return boto3.client(
+            's3',
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            region_name=aws_region
+        )
+    else:
+        logger.info("Using default AWS credentials (IAM role, credentials file, or environment)")
+        return boto3.client('s3', region_name=aws_region)
+
 def download_pdf_from_s3(s3_path: str) -> bytes:
     """Download PDF from S3 bucket and return as bytes"""
     if not S3_AVAILABLE:
@@ -476,18 +522,8 @@ def download_pdf_from_s3(s3_path: str) -> bytes:
         
         logger.info(f"Downloading PDF from S3: bucket={bucket_name}, key={object_key}")
         
-        # Create S3 client with credentials if provided, otherwise use default (IAM role, credentials file, etc.)
-        if aws_access_key_id and aws_secret_access_key:
-            logger.info("Using AWS credentials from environment variables")
-            s3_client = boto3.client(
-                's3',
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-                region_name=aws_region
-            )
-        else:
-            logger.info("Using default AWS credentials (IAM role, credentials file, or environment)")
-            s3_client = boto3.client('s3', region_name=aws_region)
+        # Get S3 client
+        s3_client = get_s3_client()
         
         # Download the object
         response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
@@ -623,30 +659,64 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     # Get today's date if not provided
     today_date = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
     
-    # Check if resume is a file path and read PDF if it is
+    # Check if resume is a file path, S3 key, or base64 data
     resume_content = resume
-    if resume and (resume.endswith('.pdf') or resume.endswith('.PDF')):
-        # Try to download from S3 first
-        if S3_AVAILABLE and s3_bucket_name:
-            # Require user_id for S3 operations - resumes are organized by user_id folders
-            if not user_id:
-                logger.warning("user_id is required for S3 resume operations. Skipping S3 download.")
+    
+    # First, check if it's base64 encoded data
+    if resume and len(resume) > 100 and not resume.endswith('.pdf') and not resume.endswith('.PDF'):
+        try:
+            # Try to decode as base64
+            pdf_bytes = base64.b64decode(resume)
+            # Verify it's a PDF by checking the header
+            if pdf_bytes.startswith(b'%PDF'):
+                logger.info("Detected base64 encoded PDF data, decoding...")
+                resume_content = read_pdf_from_bytes(pdf_bytes)
+                logger.info("Successfully decoded and extracted text from base64 PDF")
             else:
-                try:
-                    # Extract just the filename if path includes directory
-                    filename = os.path.basename(resume.replace('\\', '/'))
-                    
-                    # Construct S3 path organized by user_id: s3://bucket/user_id/filename
-                    # The user_id folder will be created automatically when files are uploaded
-                    s3_key = f"{user_id}/{filename}"
-                    s3_path = f"s3://{s3_bucket_name}/{s3_key}"
-                    
-                    logger.info(f"Downloading PDF from S3: {s3_path}")
-                    pdf_bytes = download_pdf_from_s3(s3_path)
-                    resume_content = read_pdf_from_bytes(pdf_bytes)
-                    logger.info("Successfully downloaded and extracted text from S3 PDF")
-                except Exception as e:
-                    logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
+                # Not base64 PDF, treat as regular text
+                logger.debug("Resume field appears to be text, not base64 PDF")
+        except Exception as e:
+            # Not base64, continue with other methods
+            logger.debug(f"Resume field is not base64 encoded: {str(e)}")
+    
+    # If not base64, check if it's an S3 key or file path
+    if resume_content == resume and resume:
+        # Check if it looks like an S3 key (contains '/' - format: user_id/filename or just filename)
+        # S3 keys from the client will be in format: user_id/filename.pdf
+        is_s3_key = '/' in resume
+        
+        # If it's an S3 key (contains '/'), try to retrieve from S3
+        # Also try if it's a PDF filename (ends with .pdf)
+        if is_s3_key or resume.endswith('.pdf') or resume.endswith('.PDF'):
+            # Try to download from S3 first
+            if S3_AVAILABLE and s3_bucket_name:
+                # Require user_id for S3 operations - resumes are organized by user_id folders
+                if not user_id:
+                    logger.warning("user_id is required for S3 resume operations. Skipping S3 download.")
+                else:
+                    try:
+                        # If it's already an S3 key (contains user_id/), use it directly
+                        if is_s3_key and resume.startswith(f"{user_id}/"):
+                            s3_key = resume
+                        elif is_s3_key:
+                            # It's an S3 key but doesn't start with user_id/, prepend user_id
+                            # This handles cases where client sends just the filename part
+                            filename = os.path.basename(resume.replace('\\', '/'))
+                            s3_key = f"{user_id}/{filename}"
+                        else:
+                            # Extract just the filename if path includes directory
+                            filename = os.path.basename(resume.replace('\\', '/'))
+                            # Construct S3 path organized by user_id: bucket/user_id/filename
+                            s3_key = f"{user_id}/{filename}"
+                        
+                        s3_path = f"s3://{s3_bucket_name}/{s3_key}"
+                        
+                        logger.info(f"Downloading PDF from S3: {s3_path}")
+                        pdf_bytes = download_pdf_from_s3(s3_path)
+                        resume_content = read_pdf_from_bytes(pdf_bytes)
+                        logger.info("Successfully downloaded and extracted text from S3 PDF")
+                    except Exception as e:
+                        logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
         
         # If S3 download failed or S3 not available, try local file paths
         if resume_content == resume:
@@ -1313,6 +1383,199 @@ async def delete_user_endpoint(user_id: str):
     """Delete user"""
     logger.info(f"Delete user request: {user_id}")
     return delete_user(user_id)
+
+# File API Endpoints (S3 Operations)
+@app.get("/api/files/list")
+async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = None):
+    """
+    List files from S3 bucket for the authenticated user.
+    Files are organized by user_id folders: {user_id}/{filename}
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email to list files
+    if not user_id and not user_email:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to list files"
+        )
+    
+    # If user_email is provided but not user_id, try to get user_id from email
+    if user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(user_email)
+                user_id = user.user_id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required to list files"
+        )
+    
+    try:
+        s3_client = get_s3_client()
+        
+        # List objects with user_id prefix
+        prefix = f"{user_id}/"
+        response = s3_client.list_objects_v2(
+            Bucket=s3_bucket_name,
+            Prefix=prefix
+        )
+        
+        files = []
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                # Only return actual files (not folders/directories)
+                if not obj['Key'].endswith('/'):
+                    # Extract filename from key (remove user_id/ prefix)
+                    filename = obj['Key'].replace(prefix, "")
+                    files.append({
+                        "key": obj['Key'],
+                        "name": filename,
+                        "size": obj['Size'],
+                        "lastModified": obj['LastModified'].isoformat()
+                    })
+        
+        # Sort by lastModified (newest first)
+        files.sort(key=lambda x: x['lastModified'], reverse=True)
+        
+        logger.info(f"Listed {len(files)} files for user_id: {user_id}")
+        return {"files": files}
+        
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Error listing files: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/api/files/upload")
+async def upload_file(request: FileUploadRequest):
+    """
+    Upload a file to S3 bucket on behalf of the user.
+    Files are organized by user_id folders: {user_id}/{filename}
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email to upload files
+    if not request.user_id and not request.user_email:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to upload files"
+        )
+    
+    # If user_email is provided but not user_id, try to get user_id from email
+    user_id = request.user_id
+    if request.user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(request.user_email)
+                user_id = user.user_id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {request.user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required to upload files"
+        )
+    
+    try:
+        # Decode base64 fileData
+        try:
+            file_bytes = base64.b64decode(request.fileData)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid base64 fileData: {str(e)}"
+            )
+        
+        # Validate file type (only PDFs for now)
+        if not request.fileName.lower().endswith('.pdf'):
+            raise HTTPException(
+                status_code=400,
+                detail="Only PDF files are allowed"
+            )
+        
+        # Validate file size (max 10MB)
+        max_size = 10 * 1024 * 1024  # 10MB
+        if len(file_bytes) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds maximum allowed size of {max_size / (1024 * 1024)}MB"
+            )
+        
+        # Sanitize filename
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', request.fileName)
+        
+        # Generate unique filename (timestamp + original filename)
+        timestamp = int(datetime.datetime.now().timestamp() * 1000)
+        unique_filename = f"{timestamp}_{safe_filename}"
+        
+        # Construct S3 key: user_id/filename
+        s3_key = f"{user_id}/{unique_filename}"
+        
+        # Upload to S3
+        s3_client = get_s3_client()
+        s3_client.put_object(
+            Bucket=s3_bucket_name,
+            Key=s3_key,
+            Body=file_bytes,
+            ContentType=request.contentType
+        )
+        
+        logger.info(f"Uploaded file to S3: {s3_key} ({len(file_bytes)} bytes)")
+        
+        return {
+            "success": True,
+            "key": s3_key,
+            "fileKey": s3_key,
+            "message": "File uploaded successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"S3 upload error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Upload failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 # --- Optional: To run this file directly ---
 # You would typically use the 'uvicorn' command below,
