@@ -216,7 +216,8 @@ oci_model_id = os.getenv('OCI_MODEL_ID', 'ocid1.generativeaimodel.oc1.phx.amaaaa
 
 # S3 configuration
 s3_bucket_name = 'custom-cover-user-resumes'
-s3_resume_prefix = 'PDF Resumes'  # Fixed prefix for resume files
+# Resumes are organized by user_id folders: {user_id}/{filename}
+# The user_id folder is created automatically when files are uploaded to S3
 
 # AWS credentials (optional - can also use IAM role or AWS credentials file)
 aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID', '')
@@ -627,20 +628,25 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
     if resume and (resume.endswith('.pdf') or resume.endswith('.PDF')):
         # Try to download from S3 first
         if S3_AVAILABLE and s3_bucket_name:
-            try:
-                # Extract just the filename if path includes directory
-                filename = os.path.basename(resume.replace('\\', '/'))
-                
-                # Construct simple S3 path: s3://bucket/prefix/filename
-                s3_key = f"{s3_resume_prefix}/{filename}" if s3_resume_prefix else filename
-                s3_path = f"s3://{s3_bucket_name}/{s3_key}"
-                
-                logger.info(f"Downloading PDF from S3: {s3_path}")
-                pdf_bytes = download_pdf_from_s3(s3_path)
-                resume_content = read_pdf_from_bytes(pdf_bytes)
-                logger.info("Successfully downloaded and extracted text from S3 PDF")
-            except Exception as e:
-                logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
+            # Require user_id for S3 operations - resumes are organized by user_id folders
+            if not user_id:
+                logger.warning("user_id is required for S3 resume operations. Skipping S3 download.")
+            else:
+                try:
+                    # Extract just the filename if path includes directory
+                    filename = os.path.basename(resume.replace('\\', '/'))
+                    
+                    # Construct S3 path organized by user_id: s3://bucket/user_id/filename
+                    # The user_id folder will be created automatically when files are uploaded
+                    s3_key = f"{user_id}/{filename}"
+                    s3_path = f"s3://{s3_bucket_name}/{s3_key}"
+                    
+                    logger.info(f"Downloading PDF from S3: {s3_path}")
+                    pdf_bytes = download_pdf_from_s3(s3_path)
+                    resume_content = read_pdf_from_bytes(pdf_bytes)
+                    logger.info("Successfully downloaded and extracted text from S3 PDF")
+                except Exception as e:
+                    logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
         
         # If S3 download failed or S3 not available, try local file paths
         if resume_content == resume:
@@ -1260,7 +1266,9 @@ async def handle_job_info(request: JobInfoRequest):
         additional_instructions=request.additional_instructions,
         tone=request.tone,
         address=request.address,
-        phone_number=request.phone_number
+        phone_number=request.phone_number,
+        user_id=request.user_id,
+        user_email=request.user_email
     )
     return result
 
