@@ -353,6 +353,32 @@ class FileUploadRequest(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
+# Define the data model for file rename request
+class FileRenameRequest(BaseModel):
+    oldKey: str  # Current S3 key (user_id/filename)
+    newFileName: str  # New filename (just the filename, not the full path)
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+# Define the data model for file delete request
+class FileDeleteRequest(BaseModel):
+    key: str  # S3 key (user_id/filename)
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+# Define the data model for file rename request
+class FileRenameRequest(BaseModel):
+    oldKey: str  # Current S3 key (user_id/filename)
+    newFileName: str  # New filename (just the filename, not the full path)
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+# Define the data model for file delete request
+class FileDeleteRequest(BaseModel):
+    key: str  # S3 key (user_id/filename)
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
     if model == "gpt-4.1":
@@ -1773,6 +1799,255 @@ async def upload_file(request: FileUploadRequest):
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         error_msg = f"Upload failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.put("/api/files/rename")
+async def rename_file(request: FileRenameRequest):
+    """
+    Rename a file in S3 bucket.
+    Files are organized by user_id folders: {user_id}/{filename}
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email
+    user_id = request.user_id
+    if request.user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(request.user_email)
+                user_id = user.id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {request.user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to rename files"
+        )
+    
+    try:
+        # Validate that the old key belongs to this user
+        if not request.oldKey.startswith(f"{user_id}/"):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot rename files that don't belong to this user"
+            )
+        
+        # Sanitize new filename
+        safe_filename = re.sub(r'[^a-zA-Z0-9._\-\s]', '_', request.newFileName)
+        safe_filename = safe_filename.strip('. ')
+        
+        if not safe_filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid filename"
+            )
+        
+        # Construct new S3 key
+        new_key = f"{user_id}/{safe_filename}"
+        
+        # If new key is same as old key, nothing to do
+        if new_key == request.oldKey:
+            logger.info(f"Filename unchanged: {request.oldKey}")
+            return {
+                "success": True,
+                "key": new_key,
+                "fileName": safe_filename,
+                "message": "Filename unchanged"
+            }
+        
+        # Check if new filename already exists
+        s3_client = get_s3_client()
+        try:
+            s3_client.head_object(Bucket=s3_bucket_name, Key=new_key)
+            raise HTTPException(
+                status_code=409,
+                detail=f"A file with the name '{safe_filename}' already exists"
+            )
+        except ClientError as e:
+            if e.response.get('Error', {}).get('Code') != '404':
+                raise
+        
+        # Copy object to new key
+        copy_source = {
+            'Bucket': s3_bucket_name,
+            'Key': request.oldKey
+        }
+        s3_client.copy_object(
+            CopySource=copy_source,
+            Bucket=s3_bucket_name,
+            Key=new_key
+        )
+        
+        # Delete old object
+        s3_client.delete_object(
+            Bucket=s3_bucket_name,
+            Key=request.oldKey
+        )
+        
+        logger.info(f"Renamed file from {request.oldKey} to {new_key}")
+        
+        # Get updated file list after rename
+        files = []
+        try:
+            prefix = f"{user_id}/"
+            response = s3_client.list_objects_v2(
+                Bucket=s3_bucket_name,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
+                        filename = obj['Key'].replace(prefix, "")
+                        files.append({
+                            "key": obj['Key'],
+                            "name": filename,
+                            "size": obj['Size'],
+                            "lastModified": obj['LastModified'].isoformat()
+                        })
+            
+            files.sort(key=lambda x: x['lastModified'], reverse=True)
+        except Exception as e:
+            logger.warning(f"Could not fetch updated file list: {e}")
+        
+        return {
+            "success": True,
+            "key": new_key,
+            "oldKey": request.oldKey,
+            "fileName": safe_filename,
+            "message": "File renamed successfully",
+            "files": files  # Return updated file list
+        }
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Rename failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.delete("/api/files/delete")
+async def delete_file_endpoint(request: FileDeleteRequest):
+    """
+    Delete a file from S3 bucket.
+    Files are organized by user_id folders: {user_id}/{filename}
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email
+    user_id = request.user_id
+    if request.user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(request.user_email)
+                user_id = user.id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {request.user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to delete files"
+        )
+    
+    try:
+        # Validate that the key belongs to this user
+        if not request.key.startswith(f"{user_id}/"):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot delete files that don't belong to this user"
+            )
+        
+        # Don't allow deleting the folder initialization file
+        if request.key.endswith('.folder_initialized'):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete system files"
+            )
+        
+        s3_client = get_s3_client()
+        
+        # Delete the object
+        s3_client.delete_object(
+            Bucket=s3_bucket_name,
+            Key=request.key
+        )
+        
+        logger.info(f"Deleted file: {request.key}")
+        
+        # Get updated file list after delete
+        files = []
+        try:
+            prefix = f"{user_id}/"
+            response = s3_client.list_objects_v2(
+                Bucket=s3_bucket_name,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
+                        filename = obj['Key'].replace(prefix, "")
+                        files.append({
+                            "key": obj['Key'],
+                            "name": filename,
+                            "size": obj['Size'],
+                            "lastModified": obj['LastModified'].isoformat()
+                        })
+            
+            files.sort(key=lambda x: x['lastModified'], reverse=True)
+        except Exception as e:
+            logger.warning(f"Could not fetch updated file list: {e}")
+        
+        return {
+            "success": True,
+            "key": request.key,
+            "message": "File deleted successfully",
+            "files": files  # Return updated file list
+        }
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Delete failed: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
