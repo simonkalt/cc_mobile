@@ -366,16 +366,11 @@ class FileDeleteRequest(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
-# Define the data model for file rename request
-class FileRenameRequest(BaseModel):
-    oldKey: str  # Current S3 key (user_id/filename)
-    newFileName: str  # New filename (just the filename, not the full path)
-    user_id: Optional[str] = None
-    user_email: Optional[str] = None
-
-# Define the data model for file delete request
-class FileDeleteRequest(BaseModel):
-    key: str  # S3 key (user_id/filename)
+# Define the data model for saving cover letter
+class SaveCoverLetterRequest(BaseModel):
+    coverLetterContent: str  # The cover letter content (markdown or HTML)
+    fileName: Optional[str] = None  # Optional custom filename (without extension)
+    contentType: str = "text/markdown"  # Content type: "text/markdown" or "text/html"
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
@@ -584,6 +579,66 @@ def ensure_user_s3_folder(user_id: str) -> bool:
             
     except Exception as e:
         logger.error(f"Unexpected error ensuring user S3 folder: {e}")
+        return False
+
+def ensure_cover_letter_subfolder(user_id: str) -> bool:
+    """
+    Ensure a user's generated_cover_letters subfolder exists. If it doesn't exist, create it.
+    Returns True if subfolder exists or was created successfully, False otherwise.
+    """
+    if not S3_AVAILABLE or not s3_bucket_name:
+        logger.warning("S3 is not available. Cannot ensure cover letter subfolder.")
+        return False
+    
+    if not user_id:
+        logger.warning("user_id is required to ensure cover letter subfolder.")
+        return False
+    
+    try:
+        # First ensure the main user folder exists
+        ensure_user_s3_folder(user_id)
+        
+        s3_client = get_s3_client()
+        subfolder_prefix = f"{user_id}/generated_cover_letters/"
+        placeholder_key = f"{user_id}/generated_cover_letters/.folder_initialized"
+        
+        # Check if subfolder exists by trying to list objects with the prefix
+        try:
+            response = s3_client.list_objects_v2(
+                Bucket=s3_bucket_name,
+                Prefix=subfolder_prefix,
+                MaxKeys=1
+            )
+            
+            # If we get any objects (even the placeholder), subfolder exists
+            if 'Contents' in response and len(response['Contents']) > 0:
+                logger.info(f"Cover letter subfolder already exists: {subfolder_prefix}")
+                return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == 'AccessDenied':
+                logger.warning(f"Cannot check if subfolder exists (AccessDenied): {e}")
+                # Continue to try creating it anyway
+            else:
+                logger.warning(f"Error checking subfolder existence: {error_code}")
+        
+        # Subfolder doesn't exist or we can't check, create placeholder
+        try:
+            s3_client.put_object(
+                Bucket=s3_bucket_name,
+                Key=placeholder_key,
+                Body=b'',
+                ContentType='text/plain'
+            )
+            logger.info(f"Created cover letter subfolder: {subfolder_prefix}")
+            return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            logger.error(f"Failed to create cover letter subfolder: {error_code} - {e}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Unexpected error ensuring cover letter subfolder: {e}")
         return False
 
 def download_pdf_from_s3(s3_path: str) -> bytes:
@@ -2115,6 +2170,110 @@ async def delete_file_endpoint(request: FileDeleteRequest):
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         error_msg = f"Delete failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/api/files/save-cover-letter")
+async def save_cover_letter(request: SaveCoverLetterRequest):
+    """
+    Save a generated cover letter to S3 bucket in the user's generated_cover_letters subfolder.
+    Files are organized by user_id: {user_id}/generated_cover_letters/{filename}
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email
+    user_id = request.user_id
+    if request.user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(request.user_email)
+                user_id = user.id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {request.user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to save cover letters"
+        )
+    
+    try:
+        # Ensure the generated_cover_letters subfolder exists
+        ensure_cover_letter_subfolder(user_id)
+        
+        # Generate filename if not provided
+        if request.fileName:
+            # Sanitize custom filename
+            safe_filename = re.sub(r'[^a-zA-Z0-9._\-\s]', '_', request.fileName)
+            safe_filename = safe_filename.strip('. ')
+            if not safe_filename:
+                safe_filename = "cover_letter"
+        else:
+            # Generate timestamped filename
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_filename = f"cover_letter_{timestamp}"
+        
+        # Determine file extension based on content type
+        if request.contentType == "text/html":
+            file_extension = ".html"
+        else:
+            file_extension = ".md"  # Default to markdown
+        
+        # Construct full filename with extension
+        if not safe_filename.endswith(('.md', '.html', '.txt')):
+            full_filename = f"{safe_filename}{file_extension}"
+        else:
+            full_filename = safe_filename
+        
+        # Construct S3 key: user_id/generated_cover_letters/filename
+        s3_key = f"{user_id}/generated_cover_letters/{full_filename}"
+        
+        # Convert content to bytes
+        content_bytes = request.coverLetterContent.encode('utf-8')
+        
+        # Upload to S3
+        s3_client = get_s3_client()
+        s3_client.put_object(
+            Bucket=s3_bucket_name,
+            Key=s3_key,
+            Body=content_bytes,
+            ContentType=request.contentType
+        )
+        
+        logger.info(f"Saved cover letter to S3: {s3_key} ({len(content_bytes)} bytes)")
+        logger.info(f"  Filename: {full_filename}")
+        logger.info(f"  Content type: {request.contentType}")
+        
+        return {
+            "success": True,
+            "key": s3_key,
+            "fileName": full_filename,
+            "message": "Cover letter saved successfully",
+            "fileSize": len(content_bytes)
+        }
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Save cover letter failed: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
