@@ -2437,6 +2437,8 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
     List all saved cover letters from the user's generated_cover_letters subfolder.
     Files are organized by user_id: {user_id}/generated_cover_letters/{filename}
     """
+    logger.info(f"Cover letters list request - user_id: {user_id}, user_email: {user_email}")
+    
     if not S3_AVAILABLE:
         raise HTTPException(
             status_code=503,
@@ -2445,6 +2447,7 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
     
     # Require user_id or user_email
     if not user_id and not user_email:
+        logger.warning("Cover letters list request missing both user_id and user_email")
         raise HTTPException(
             status_code=400,
             detail="user_id or user_email is required to list cover letters"
@@ -2452,17 +2455,21 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
     
     # If user_email is provided but not user_id, try to get user_id from email
     if user_email and not user_id:
+        logger.info(f"Resolving user_id from email: {user_email}")
         try:
             if MONGODB_AVAILABLE:
                 user = get_user_by_email(user_email)
                 user_id = user.id
+                logger.info(f"Successfully resolved user_id: {user_id} from email: {user_email}")
             else:
+                logger.error("MongoDB not available, cannot resolve user_id from email")
                 raise HTTPException(
                     status_code=503,
                     detail="MongoDB is not available. Cannot resolve user_id from email."
                 )
         except HTTPException:
             # Re-raise HTTPExceptions (like 503 or 404 from get_user_by_email) without modification
+            logger.warning(f"HTTPException raised during user lookup for email: {user_email}")
             raise
         except Exception as e:
             logger.error(f"Failed to get user_id from email: {str(e)}")
@@ -2472,10 +2479,13 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
             )
     
     if not user_id:
+        logger.error("user_id is still None after email resolution attempt")
         raise HTTPException(
             status_code=400,
             detail="user_id is required to list cover letters"
         )
+    
+    logger.info(f"Processing cover letters list request for user_id: {user_id}")
     
     try:
         # Ensure the generated_cover_letters subfolder exists
@@ -2515,6 +2525,9 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
         logger.info(f"Returning {len(files)} cover letters for user_id: {user_id}")
         return {"files": files}
         
+    except HTTPException:
+        # Re-raise HTTPExceptions without modification
+        raise
     except ClientError as e:
         error_code = e.response.get('Error', {}).get('Code', 'Unknown')
         error_msg = f"S3 error: {error_code} - {str(e)}"
