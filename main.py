@@ -1824,10 +1824,21 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
         )
         
         files = []
+        cover_letters_prefix = f"{user_id}/generated_cover_letters/"
         if 'Contents' in response:
             for obj in response['Contents']:
                 # Only return actual files (not folders/directories or placeholder files)
                 if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
+                    # Exclude files from the generated_cover_letters subfolder
+                    if obj['Key'].startswith(cover_letters_prefix):
+                        continue  # Skip files in the generated_cover_letters subfolder
+                    
+                    # Only include files directly in the user's main folder (not in any subfolder)
+                    # Check if the key has any additional path separators after user_id/
+                    key_after_prefix = obj['Key'][len(prefix):]
+                    if '/' in key_after_prefix:
+                        continue  # Skip files in subfolders
+                    
                     # Extract filename from key (remove user_id/ prefix)
                     filename = obj['Key'].replace(prefix, "")
                     files.append({
