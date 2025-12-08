@@ -1699,15 +1699,18 @@ async def upload_file(request: FileUploadRequest):
                 detail=f"File size exceeds maximum allowed size of {max_size / (1024 * 1024)}MB"
             )
         
-        # Sanitize filename
-        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', request.fileName)
+        # Sanitize filename to ensure it's safe for S3 (keep original name)
+        # Only replace characters that could cause issues, preserve the original structure
+        safe_filename = re.sub(r'[^a-zA-Z0-9._\-\s]', '_', request.fileName)
+        # Remove any leading/trailing spaces and dots
+        safe_filename = safe_filename.strip('. ')
         
-        # Generate unique filename (timestamp + original filename)
-        timestamp = int(datetime.datetime.now().timestamp() * 1000)
-        unique_filename = f"{timestamp}_{safe_filename}"
+        # Use original filename (sanitized) - no timestamp prefix
+        # If a file with the same name exists, S3 will overwrite it
+        original_filename = safe_filename
         
         # Construct S3 key: user_id/filename
-        s3_key = f"{user_id}/{unique_filename}"
+        s3_key = f"{user_id}/{original_filename}"
         
         # Upload to S3
         s3_client = get_s3_client()
@@ -1719,12 +1722,46 @@ async def upload_file(request: FileUploadRequest):
         )
         
         logger.info(f"Uploaded file to S3: {s3_key} ({len(file_bytes)} bytes)")
+        logger.info(f"  Original filename: {request.fileName}")
+        logger.info(f"  Stored as: {original_filename}")
+        
+        # Get updated file list after upload
+        files = []
+        try:
+            prefix = f"{user_id}/"
+            response = s3_client.list_objects_v2(
+                Bucket=s3_bucket_name,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    # Only return actual files (not folders/directories or placeholder files)
+                    if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
+                        # Extract filename from key (remove user_id/ prefix)
+                        filename = obj['Key'].replace(prefix, "")
+                        files.append({
+                            "key": obj['Key'],
+                            "name": filename,
+                            "size": obj['Size'],
+                            "lastModified": obj['LastModified'].isoformat()
+                        })
+            
+            # Sort by lastModified (newest first)
+            files.sort(key=lambda x: x['lastModified'], reverse=True)
+            logger.info(f"Returning updated file list with {len(files)} files")
+        except Exception as e:
+            logger.warning(f"Could not fetch updated file list: {e}")
+            # Continue without file list - upload was successful
         
         return {
             "success": True,
             "key": s3_key,
             "fileKey": s3_key,
-            "message": "File uploaded successfully"
+            "fileName": original_filename,
+            "originalFileName": request.fileName,
+            "message": "File uploaded successfully",
+            "files": files  # Return updated file list
         }
         
     except HTTPException:
