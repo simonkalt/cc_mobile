@@ -728,6 +728,30 @@ def get_oc_info(prompt: str):
         logger.error(error_msg)
         return json.dumps({"markdown": f"Error: {error_msg}", "html": f"<p>Error: {error_msg}</p>"})
 
+def normalize_llm_name(llm: str) -> str:
+    """
+    Normalize LLM name to a canonical form for tracking.
+    Maps display names and aliases to standard model names.
+    """
+    llm_lower = llm.lower()
+    
+    # Map display names and aliases to canonical model names
+    if "gemini" in llm_lower or llm == "gemini-2.5-flash":
+        return "gemini-2.5-flash"
+    elif "gpt" in llm_lower or llm == "gpt-4.1" or llm == "ChatGPT":
+        return "gpt-4.1"
+    elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
+        return "grok-4-fast-reasoning"
+    elif "claude" in llm_lower or llm == "claude-sonnet-4-20250514":
+        return "claude-sonnet-4-20250514"
+    elif "llama" in llm_lower or llm == "llama3.2":
+        return "llama3.2"
+    elif "oci" in llm_lower or llm == "oci-generative-ai":
+        return "oci-generative-ai"
+    else:
+        # Return as-is if no mapping found
+        return llm
+
 def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: str, 
                  ad_source: str, resume: str, jd: str, additional_instructions: str, 
                  tone: str, address: str = "", phone_number: str = "", 
@@ -1155,6 +1179,25 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         else:
             raise ValueError(f"Unsupported LLM: {llm}")
         
+        # Increment LLM usage count for the user (after successful LLM call)
+        if user_id:
+            normalized_llm = normalize_llm_name(llm)
+            try:
+                increment_llm_usage_count(user_id, normalized_llm)
+                logger.info(f"Incremented LLM usage count for {normalized_llm} (user_id: {user_id})")
+            except Exception as e:
+                logger.warning(f"Failed to increment LLM usage count: {e}")
+        elif user_email:
+            # Try to get user_id from email
+            try:
+                if MONGODB_AVAILABLE:
+                    user = get_user_by_email(user_email)
+                    normalized_llm = normalize_llm_name(llm)
+                    increment_llm_usage_count(user.id, normalized_llm)
+                    logger.info(f"Incremented LLM usage count for {normalized_llm} (user_email: {user_email})")
+            except Exception as e:
+                logger.warning(f"Failed to increment LLM usage count from email: {e}")
+        
         # Clean and parse the response
         r = r.replace("```json", "").replace("```", "").strip()
         
@@ -1374,6 +1417,29 @@ async def handle_chat(request: Request):
             chat_request = ChatRequest(**body)
             logger.info(f"Received chat request - prompt length: {len(chat_request.prompt)}, model: {chat_request.active_model}")
             response = post_to_llm(chat_request.prompt, chat_request.active_model)
+            
+            # Increment LLM usage count if user_id or user_email is provided
+            if response:  # Only increment if LLM call was successful
+                user_id_for_tracking = body.get('user_id')
+                user_email_for_tracking = body.get('user_email')
+                
+                if user_id_for_tracking:
+                    normalized_llm = normalize_llm_name(chat_request.active_model)
+                    try:
+                        increment_llm_usage_count(user_id_for_tracking, normalized_llm)
+                        logger.info(f"Incremented LLM usage count for {normalized_llm} (user_id: {user_id_for_tracking})")
+                    except Exception as e:
+                        logger.warning(f"Failed to increment LLM usage count: {e}")
+                elif user_email_for_tracking:
+                    try:
+                        if MONGODB_AVAILABLE:
+                            user = get_user_by_email(user_email_for_tracking)
+                            normalized_llm = normalize_llm_name(chat_request.active_model)
+                            increment_llm_usage_count(user.id, normalized_llm)
+                            logger.info(f"Incremented LLM usage count for {normalized_llm} (user_email: {user_email_for_tracking})")
+                    except Exception as e:
+                        logger.warning(f"Failed to increment LLM usage count from email: {e}")
+            
             return {
                 "response": response if response else f"Error: No response from LLM {chat_request.active_model}"
             }
@@ -1429,7 +1495,8 @@ async def handle_job_info(request: JobInfoRequest):
 # User API Endpoints
 from user_api import (
     UserRegisterRequest, UserUpdateRequest, UserResponse, UserLoginRequest, UserLoginResponse,
-    register_user, get_user_by_id, get_user_by_email, update_user, delete_user, login_user
+    register_user, get_user_by_id, get_user_by_email, update_user, delete_user, login_user,
+    increment_llm_usage_count
 )
 
 @app.post("/api/users/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

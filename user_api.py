@@ -187,6 +187,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         },
         "dateCreated": datetime.utcnow(),
         "dateUpdated": datetime.utcnow(),
+        "llm_counts": {},  # Initialize empty LLM usage counts object
         "preferences": user_data.preferences or {
             "newsletterOptIn": False,
             "theme": "light",
@@ -411,6 +412,69 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         )
 
 
+
+def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
+    """
+    Increment the usage count for a specific LLM in the user's record.
+    If the LLM doesn't exist in llm_counts, add it and set count to 1.
+    Returns True if successful, False otherwise.
+    """
+    if not is_connected():
+        logger.warning("Database connection unavailable. Cannot update LLM usage count.")
+        return False
+    
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        logger.warning("Failed to access users collection. Cannot update LLM usage count.")
+        return False
+    
+    try:
+        user_id_obj = ObjectId(user_id)
+    except Exception:
+        logger.warning(f"Invalid user ID format: {user_id}")
+        return False
+    
+    try:
+        # First, ensure llm_counts field exists
+        user = collection.find_one({"_id": user_id_obj})
+        if not user:
+            logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
+            return False
+        
+        # Initialize llm_counts if it doesn't exist
+        if "llm_counts" not in user:
+            collection.update_one(
+                {"_id": user_id_obj},
+                {"$set": {"llm_counts": {}}}
+            )
+        
+        # Use MongoDB's $inc operator to increment the count
+        # If the field doesn't exist, MongoDB will create it with value 1
+        result = collection.update_one(
+            {"_id": user_id_obj},
+            {
+                "$inc": {f"llm_counts.{llm_name}": 1},
+                "$set": {"dateUpdated": datetime.utcnow()}
+            }
+        )
+        
+        if result.matched_count > 0:
+            # Verify the increment worked (check if field was created or incremented)
+            updated_user = collection.find_one({"_id": user_id_obj})
+            if updated_user and "llm_counts" in updated_user:
+                count = updated_user["llm_counts"].get(llm_name, 0)
+                if count == 1:
+                    logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
+                else:
+                    logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
+            return True
+        else:
+            logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error incrementing LLM usage count: {e}")
+        return False
 
 def delete_user(user_id: str) -> dict:
     """Delete user"""
