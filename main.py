@@ -374,6 +374,12 @@ class SaveCoverLetterRequest(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
+# Define the data model for cover letter operations
+class CoverLetterRequest(BaseModel):
+    key: str  # S3 key (user_id/generated_cover_letters/filename)
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
     if model == "gpt-4.1":
@@ -2422,6 +2428,308 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         error_msg = f"Save cover letter failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/api/cover-letters/list")
+async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional[str] = None):
+    """
+    List all saved cover letters from the user's generated_cover_letters subfolder.
+    Files are organized by user_id: {user_id}/generated_cover_letters/{filename}
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email
+    if not user_id and not user_email:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to list cover letters"
+        )
+    
+    # If user_email is provided but not user_id, try to get user_id from email
+    if user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(user_email)
+                user_id = user.id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required to list cover letters"
+        )
+    
+    try:
+        # Ensure the generated_cover_letters subfolder exists
+        ensure_cover_letter_subfolder(user_id)
+        
+        s3_client = get_s3_client()
+        
+        # List objects in the generated_cover_letters subfolder
+        prefix = f"{user_id}/generated_cover_letters/"
+        response = s3_client.list_objects_v2(
+            Bucket=s3_bucket_name,
+            Prefix=prefix
+        )
+        
+        files = []
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                # Only return actual files (not folders/directories or placeholder files)
+                if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
+                    # Extract filename from key (remove user_id/generated_cover_letters/ prefix)
+                    filename = obj['Key'].replace(prefix, "")
+                    files.append({
+                        "key": obj['Key'],
+                        "name": filename,
+                        "size": obj['Size'],
+                        "lastModified": obj['LastModified'].isoformat()
+                    })
+        
+        # Sort by lastModified (newest first)
+        files.sort(key=lambda x: x['lastModified'], reverse=True)
+        
+        logger.info(f"Listed {len(files)} cover letters for user_id: {user_id}")
+        return {"files": files}
+        
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Error listing cover letters: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/api/cover-letters/download")
+async def download_cover_letter(key: str, user_id: Optional[str] = None, user_email: Optional[str] = None):
+    """
+    Download a cover letter from S3 for previewing.
+    Returns the file content with appropriate content type headers.
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email
+    if not user_id and not user_email:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to download cover letters"
+        )
+    
+    # If user_email is provided but not user_id, try to get user_id from email
+    if user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(user_email)
+                user_id = user.id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required to download cover letters"
+        )
+    
+    try:
+        # Validate that the key belongs to this user and is in generated_cover_letters
+        expected_prefix = f"{user_id}/generated_cover_letters/"
+        if not key.startswith(expected_prefix):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot download cover letters that don't belong to this user"
+            )
+        
+        s3_client = get_s3_client()
+        
+        # Get the object from S3
+        response = s3_client.get_object(
+            Bucket=s3_bucket_name,
+            Key=key
+        )
+        
+        # Read the file content
+        file_content = response['Body'].read()
+        
+        # Determine content type based on file extension
+        content_type = response.get('ContentType', 'application/octet-stream')
+        if not content_type or content_type == 'application/octet-stream':
+            # Try to determine from filename
+            if key.endswith('.pdf'):
+                content_type = 'application/pdf'
+            elif key.endswith('.html'):
+                content_type = 'text/html'
+            elif key.endswith('.md'):
+                content_type = 'text/markdown'
+        
+        # Get filename for Content-Disposition header
+        filename = key.split('/')[-1]
+        
+        logger.info(f"Downloaded cover letter: {key} ({len(file_content)} bytes)")
+        
+        # Return file content with appropriate headers
+        from fastapi.responses import Response
+        
+        headers = {
+            "Content-Disposition": f'inline; filename="{filename}"'
+        }
+        
+        return Response(
+            content=file_content,
+            media_type=content_type,
+            headers=headers
+        )
+        
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        if error_code == 'NoSuchKey':
+            raise HTTPException(
+                status_code=404,
+                detail="Cover letter not found"
+            )
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Download failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.delete("/api/cover-letters/delete")
+async def delete_cover_letter(request: CoverLetterRequest):
+    """
+    Delete a cover letter from S3 bucket.
+    Files are organized by user_id: {user_id}/generated_cover_letters/{filename}
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed."
+        )
+    
+    # Require user_id or user_email
+    user_id = request.user_id
+    if request.user_email and not user_id:
+        try:
+            if MONGODB_AVAILABLE:
+                user = get_user_by_email(request.user_email)
+                user_id = user.id
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MongoDB is not available. Cannot resolve user_id from email."
+                )
+        except Exception as e:
+            logger.error(f"Failed to get user_id from email: {str(e)}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"User not found for email: {request.user_email}"
+            )
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id or user_email is required to delete cover letters"
+        )
+    
+    try:
+        # Validate that the key belongs to this user and is in generated_cover_letters
+        expected_prefix = f"{user_id}/generated_cover_letters/"
+        if not request.key.startswith(expected_prefix):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot delete cover letters that don't belong to this user"
+            )
+        
+        # Don't allow deleting the folder initialization file
+        if request.key.endswith('.folder_initialized'):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete system files"
+            )
+        
+        s3_client = get_s3_client()
+        
+        # Delete the object
+        s3_client.delete_object(
+            Bucket=s3_bucket_name,
+            Key=request.key
+        )
+        
+        logger.info(f"Deleted cover letter: {request.key}")
+        
+        # Get updated file list after delete
+        files = []
+        try:
+            prefix = f"{user_id}/generated_cover_letters/"
+            response = s3_client.list_objects_v2(
+                Bucket=s3_bucket_name,
+                Prefix=prefix
+            )
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
+                        filename = obj['Key'].replace(prefix, "")
+                        files.append({
+                            "key": obj['Key'],
+                            "name": filename,
+                            "size": obj['Size'],
+                            "lastModified": obj['LastModified'].isoformat()
+                        })
+            
+            files.sort(key=lambda x: x['lastModified'], reverse=True)
+            logger.info(f"Returning updated cover letter list with {len(files)} files after delete")
+        except Exception as e:
+            logger.warning(f"Could not fetch updated cover letter list after delete: {e}")
+        
+        return {
+            "success": True,
+            "key": request.key,
+            "message": "Cover letter deleted successfully",
+            "files": files  # Return updated file list
+        }
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Delete failed: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
