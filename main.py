@@ -2461,6 +2461,9 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
                     status_code=503,
                     detail="MongoDB is not available. Cannot resolve user_id from email."
                 )
+        except HTTPException:
+            # Re-raise HTTPExceptions (like 503 or 404 from get_user_by_email) without modification
+            raise
         except Exception as e:
             logger.error(f"Failed to get user_id from email: {str(e)}")
             raise HTTPException(
@@ -2482,6 +2485,8 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
         
         # List objects in the generated_cover_letters subfolder
         prefix = f"{user_id}/generated_cover_letters/"
+        logger.info(f"Listing cover letters for user_id: {user_id}, prefix: {prefix}")
+        
         response = s3_client.list_objects_v2(
             Bucket=s3_bucket_name,
             Prefix=prefix
@@ -2489,6 +2494,7 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
         
         files = []
         if 'Contents' in response:
+            logger.info(f"Found {len(response['Contents'])} objects in S3 for prefix {prefix}")
             for obj in response['Contents']:
                 # Only return actual files (not folders/directories or placeholder files)
                 if not obj['Key'].endswith('/') and not obj['Key'].endswith('.folder_initialized'):
@@ -2500,11 +2506,13 @@ async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional
                         "size": obj['Size'],
                         "lastModified": obj['LastModified'].isoformat()
                     })
+        else:
+            logger.info(f"No objects found in S3 for prefix {prefix} (empty folder)")
         
         # Sort by lastModified (newest first)
         files.sort(key=lambda x: x['lastModified'], reverse=True)
         
-        logger.info(f"Listed {len(files)} cover letters for user_id: {user_id}")
+        logger.info(f"Returning {len(files)} cover letters for user_id: {user_id}")
         return {"files": files}
         
     except ClientError as e:
