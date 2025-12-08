@@ -368,9 +368,9 @@ class FileDeleteRequest(BaseModel):
 
 # Define the data model for saving cover letter
 class SaveCoverLetterRequest(BaseModel):
-    coverLetterContent: str  # The cover letter content (markdown or HTML)
+    coverLetterContent: str  # The cover letter content (markdown, HTML, or base64-encoded PDF)
     fileName: Optional[str] = None  # Optional custom filename (without extension)
-    contentType: str = "text/markdown"  # Content type: "text/markdown" or "text/html"
+    contentType: str = "text/markdown"  # Content type: "text/markdown", "text/html", or "application/pdf"
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
@@ -1329,6 +1329,84 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 def read_root():
     return {"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
 
+@app.get("/api/health")
+async def health_check():
+    """
+    Health check endpoint to verify server is ready to load user preferences.
+    Checks MongoDB connection and users collection accessibility.
+    This endpoint is designed to be called at intervals by the client.
+    """
+    health_status = {
+        "ready": False,
+        "mongodb": {
+            "available": False,
+            "connected": False,
+            "collection_accessible": False
+        },
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+    
+    # Check MongoDB availability
+    if not MONGODB_AVAILABLE:
+        health_status["mongodb"]["available"] = False
+        return JSONResponse(
+            status_code=503,
+            content=health_status
+        )
+    
+    health_status["mongodb"]["available"] = True
+    
+    # Check MongoDB connection
+    try:
+        from mongodb_client import is_connected, get_collection
+        
+        if not is_connected():
+            health_status["mongodb"]["connected"] = False
+            return JSONResponse(
+                status_code=503,
+                content=health_status
+            )
+        
+        health_status["mongodb"]["connected"] = True
+        
+        # Check if users collection is accessible
+        try:
+            collection = get_collection("users")
+            if collection is None:
+                health_status["mongodb"]["collection_accessible"] = False
+                return JSONResponse(
+                    status_code=503,
+                    content=health_status
+                )
+            
+            # Try a simple operation to verify collection access
+            # Use count_documents with limit=1 for a lightweight check
+            collection.count_documents({}, limit=1)
+            health_status["mongodb"]["collection_accessible"] = True
+            
+        except Exception as e:
+            logger.warning(f"Users collection not accessible: {e}")
+            health_status["mongodb"]["collection_accessible"] = False
+            return JSONResponse(
+                status_code=503,
+                content=health_status
+            )
+        
+        # All checks passed - server is ready
+        health_status["ready"] = True
+        return JSONResponse(
+            status_code=200,
+            content=health_status
+        )
+        
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        health_status["error"] = str(e)
+        return JSONResponse(
+            status_code=503,
+            content=health_status
+        )
+
 # Define the main endpoint your app will call
 
 @app.get("/api/llms")
@@ -2226,23 +2304,80 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_filename = f"cover_letter_{timestamp}"
         
+        # Normalize content type for comparison (case-insensitive)
+        content_type_lower = request.contentType.lower().strip() if request.contentType else ""
+        
+        # Log the received content type for debugging
+        logger.info(f"Save cover letter request - contentType: '{request.contentType}' (normalized: '{content_type_lower}')")
+        
         # Determine file extension based on content type
-        if request.contentType == "text/html":
+        if content_type_lower == "text/html" or content_type_lower == "html":
             file_extension = ".html"
+        elif content_type_lower == "application/pdf" or content_type_lower == "pdf":
+            file_extension = ".pdf"
         else:
             file_extension = ".md"  # Default to markdown
+            if content_type_lower and content_type_lower != "text/markdown":
+                logger.warning(f"Unknown content type '{request.contentType}', defaulting to .md")
         
         # Construct full filename with extension
-        if not safe_filename.endswith(('.md', '.html', '.txt')):
-            full_filename = f"{safe_filename}{file_extension}"
+        # If filename already has an extension, check if it matches the content type
+        if safe_filename.endswith(('.md', '.html', '.pdf', '.txt')):
+            # Filename already has an extension - verify it matches content type
+            existing_ext = None
+            if safe_filename.endswith('.pdf'):
+                existing_ext = '.pdf'
+            elif safe_filename.endswith('.html'):
+                existing_ext = '.html'
+            elif safe_filename.endswith('.md'):
+                existing_ext = '.md'
+            
+            # If existing extension doesn't match content type, replace it
+            if existing_ext and existing_ext != file_extension:
+                logger.warning(f"Filename extension '{existing_ext}' doesn't match content type '{content_type_lower}'. Replacing with '{file_extension}'")
+                # Remove old extension and add correct one
+                base_name = safe_filename.rsplit('.', 1)[0]
+                full_filename = f"{base_name}{file_extension}"
+            else:
+                full_filename = safe_filename
         else:
-            full_filename = safe_filename
+            # No extension, add the determined one
+            full_filename = f"{safe_filename}{file_extension}"
+        
+        logger.info(f"Determined file extension: {file_extension}, full filename: {full_filename}")
         
         # Construct S3 key: user_id/generated_cover_letters/filename
         s3_key = f"{user_id}/generated_cover_letters/{full_filename}"
         
-        # Convert content to bytes
-        content_bytes = request.coverLetterContent.encode('utf-8')
+        # Convert content to bytes based on content type
+        if content_type_lower == "application/pdf" or content_type_lower == "pdf":
+            # PDF content should be base64-encoded
+            try:
+                content_bytes = base64.b64decode(request.coverLetterContent)
+                # Validate it's actually a PDF by checking the header
+                if not content_bytes.startswith(b'%PDF'):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid PDF data: content does not appear to be a valid PDF file"
+                    )
+                logger.info("Successfully decoded base64 PDF data")
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid base64 PDF data: {str(e)}"
+                )
+        else:
+            # Markdown or HTML content - encode as UTF-8
+            content_bytes = request.coverLetterContent.encode('utf-8')
+            logger.info(f"Encoded text content as UTF-8 ({len(content_bytes)} bytes)")
+        
+        # Determine S3 ContentType based on file extension
+        if file_extension == ".pdf":
+            s3_content_type = "application/pdf"
+        elif file_extension == ".html":
+            s3_content_type = "text/html"
+        else:
+            s3_content_type = "text/markdown"
         
         # Upload to S3
         s3_client = get_s3_client()
@@ -2250,12 +2385,14 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
             Bucket=s3_bucket_name,
             Key=s3_key,
             Body=content_bytes,
-            ContentType=request.contentType
+            ContentType=s3_content_type
         )
         
         logger.info(f"Saved cover letter to S3: {s3_key} ({len(content_bytes)} bytes)")
         logger.info(f"  Filename: {full_filename}")
-        logger.info(f"  Content type: {request.contentType}")
+        logger.info(f"  Request content type: {request.contentType}")
+        logger.info(f"  Normalized content type: {content_type_lower}")
+        logger.info(f"  File extension used: {file_extension}")
         
         return {
             "success": True,
