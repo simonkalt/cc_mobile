@@ -3185,8 +3185,11 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
     
     try:
         # Check if Grok API key is configured
-    if not xai_api_key:
-        raise ValueError("Grok API key is not configured. Cannot analyze job URL.")
+        if not xai_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Grok API key is not configured. Cannot analyze job URL."
+            )
         
         # Extract job information using Grok
         job_info = extract_job_info_from_url(request.url)
