@@ -419,6 +419,12 @@ class GeneratePDFRequest(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
+# Define the data model for job URL analysis request
+class JobURLAnalysisRequest(BaseModel):
+    url: str  # URL to the job posting page
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
     if model == "gpt-4.1":
@@ -3023,6 +3029,181 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
         raise
     except Exception as e:
         error_msg = f"Failed to generate PDF: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+def extract_job_info_from_url(url: str) -> dict:
+    """
+    Use Grok to analyze a job posting URL and extract:
+    - Company name
+    - Job title
+    - Job description
+    
+    Args:
+        url: The URL to the job posting page
+    
+    Returns:
+        Dictionary with company, jobTitle, and jobDescription fields
+    """
+    if not xai_api_key:
+        raise ValueError("Grok API key is not configured. Cannot analyze job URL.")
+    
+    try:
+        # First, fetch the content from the URL
+        logger.info(f"Fetching content from URL: {url}")
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        page_response = requests.get(url, headers=headers, timeout=30)
+        page_response.raise_for_status()
+        page_content = page_response.text
+        
+        logger.info(f"Successfully fetched page content ({len(page_content)} characters)")
+        
+        # Create a prompt for Grok to extract job information
+        prompt = f"""Analyze the following job posting webpage content and extract the following information:
+1. Company name
+2. Job title
+3. Job description
+
+Return ONLY a valid JSON object with these exact fields:
+{{
+    "company": "Company Name",
+    "jobTitle": "Job Title",
+    "jobDescription": "Full job description text"
+}}
+
+Webpage content:
+{page_content[:50000]}  # Limit to first 50k characters to avoid token limits
+
+Important:
+- Extract the actual company name (not just from the URL)
+- Extract the complete job title
+- Extract the full job description including responsibilities, requirements, and qualifications
+- Return ONLY the JSON object, no additional text or markdown formatting
+- If any information is not found, use "Not specified" as the value
+"""
+        
+        # Call Grok API
+        logger.info("Calling Grok API to extract job information")
+        headers = {
+            "Authorization": f"Bearer {xai_api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": xai_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert at extracting structured information from job postings. Always return valid JSON only."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": 0.3  # Lower temperature for more consistent extraction
+        }
+        
+        response = requests.post(
+            "https://api.x.ai/v1/chat/completions",
+            json=data,
+            headers=headers,
+            timeout=120
+        )
+        response.raise_for_status()
+        result = response.json()
+        grok_response = result["choices"][0]["message"]["content"]
+        
+        logger.info(f"Grok response received ({len(grok_response)} characters)")
+        
+        # Parse the JSON response from Grok
+        # Remove markdown code blocks if present
+        cleaned_response = grok_response.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response[3:]
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]
+        cleaned_response = cleaned_response.strip()
+        
+        # Parse JSON
+        try:
+            job_info = json.loads(cleaned_response)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Grok JSON response: {e}")
+            logger.error(f"Response was: {grok_response[:500]}")
+            # Try to extract JSON from the response
+            import re
+            json_match = re.search(r'\{[^{}]*"company"[^{}]*\}', grok_response, re.DOTALL)
+            if json_match:
+                job_info = json.loads(json_match.group())
+            else:
+                raise ValueError(f"Failed to parse job information from Grok response. Response: {grok_response[:200]}")
+        
+        # Validate required fields
+        if "company" not in job_info:
+            job_info["company"] = "Not specified"
+        if "jobTitle" not in job_info:
+            job_info["jobTitle"] = "Not specified"
+        if "jobDescription" not in job_info:
+            job_info["jobDescription"] = "Not specified"
+        
+        logger.info(f"Successfully extracted job info: Company={job_info.get('company')}, Title={job_info.get('jobTitle')}")
+        return job_info
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching URL or calling Grok API: {str(e)}")
+        raise Exception(f"Failed to fetch or analyze job URL: {str(e)}")
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing JSON response: {str(e)}")
+        raise Exception(f"Failed to parse job information: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error extracting job info: {str(e)}")
+        raise
+
+@app.post("/api/job-url/analyze")
+async def analyze_job_url(request: JobURLAnalysisRequest):
+    """
+    Analyze a job posting URL and extract company name, job title, and job description using Grok.
+    
+    This endpoint:
+    1. Fetches the content from the provided URL
+    2. Uses Grok AI to analyze the content
+    3. Extracts structured information (company, job title, job description)
+    4. Returns the extracted information as JSON
+    """
+    logger.info(f"Job URL analysis request received - URL: {request.url}, user_id: {request.user_id}")
+    
+    # Validate URL format
+    if not request.url or not request.url.startswith(('http://', 'https://')):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid URL format. URL must start with http:// or https://"
+        )
+    
+    try:
+        # Check if Grok API key is configured
+    if not xai_api_key:
+        raise ValueError("Grok API key is not configured. Cannot analyze job URL.")
+        
+        # Extract job information using Grok
+        job_info = extract_job_info_from_url(request.url)
+        
+        logger.info(f"Job URL analysis completed successfully")
+        return {
+            "success": True,
+            "url": request.url,
+            "company": job_info.get("company", "Not specified"),
+            "jobTitle": job_info.get("jobTitle", "Not specified"),
+            "jobDescription": job_info.get("jobDescription", "Not specified")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Failed to analyze job URL: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
