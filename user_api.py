@@ -46,6 +46,7 @@ class AppSettings(BaseModel):
     printProperties: Optional[PrintProperties] = None
     personalityProfiles: Optional[List[PersonalityProfile]] = None
     selectedModel: Optional[str] = None
+    lastResumeUsed: Optional[str] = None
 
 
 class UserPreferences(BaseModel):
@@ -208,7 +209,8 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
                     }
                 },
                 "personalityProfiles": [],
-                "selectedModel": None
+                "selectedModel": None,
+                "lastResumeUsed": None
             },
             # Form field defaults - ensure all form fields start empty for new users
             "formDefaults": {
@@ -375,6 +377,9 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     # Update selectedModel
                     if "selectedModel" in app_settings:
                         update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]
+                    # Update lastResumeUsed
+                    if "lastResumeUsed" in app_settings:
+                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["lastResumeUsed"]
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]

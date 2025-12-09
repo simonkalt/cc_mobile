@@ -63,7 +63,8 @@ http://localhost:8000/api/users/693326c07fcdaab8e81cdd2f
           "description": "My name is Simon Kaltgrad..."
         }
       ],
-      "selectedModel": "ChatGPT"
+      "selectedModel": "ChatGPT",
+      "lastResumeUsed": "693326c07fcdaab8e81cdd2f/my_resume.pdf"
     }
   },
   "avatarUrl": null,

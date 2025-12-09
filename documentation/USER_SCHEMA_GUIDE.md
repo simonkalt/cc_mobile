@@ -53,7 +53,8 @@ This guide explains the updated user schema that supports app settings, print pr
           "description": "Get everything wrong. Seem confident in my confusion."
         }
       ],
-      "selectedModel": "gemini-2.5-flash"
+      "selectedModel": "gemini-2.5-flash",
+      "lastResumeUsed": "507f1f77bcf86cd799439011/my_resume.pdf"
     }
   }
 }
@@ -239,6 +240,16 @@ Array of custom personality profiles:
 The LLM model selected by the user:
 - Examples: `"gemini-2.5-flash"`, `"gpt-4.1"`, `"claude-sonnet-4-20250514"`, etc.
 
+### Last Resume Used
+
+The S3 key (path) of the resume file to use by default upon login:
+- **Type**: `string` (optional, can be `null`)
+- **Format**: S3 key path in format `{user_id}/{filename}`
+- **Example**: `"507f1f77bcf86cd799439011/my_resume.pdf"`
+- **Purpose**: Tracks which resume should be loaded automatically when the user logs in
+
+See [LAST_RESUME_USED_API.md](./LAST_RESUME_USED_API.md) for detailed usage examples.
+
 ## Default Values
 
 When a user is registered without specifying preferences, defaults are:
@@ -256,7 +267,8 @@ When a user is registered without specifying preferences, defaults are:
       "pageSize": { "width": 8.5, "height": 11.0 }
     },
     "personalityProfiles": [],
-    "selectedModel": null
+    "selectedModel": null,
+    "lastResumeUsed": null
   }
 }
 ```
