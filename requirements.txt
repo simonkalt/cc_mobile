@@ -20,3 +20,5 @@ pymongo
 bcrypt
 uvicorn
 email-validator
+markdown
+weasyprint

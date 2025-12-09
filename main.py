@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ValidationError, EmailStr
+from pydantic import BaseModel, ValidationError, EmailStr, Field
 from contextlib import asynccontextmanager
 from typing import Optional
 from bson import ObjectId
@@ -84,6 +84,21 @@ try:
 except ImportError:
     S3_AVAILABLE = False
     logger.warning("boto3 not available. S3 PDF reading will not work.")
+
+# Try to import markdown and weasyprint for PDF generation
+try:
+    import markdown
+    PDF_GENERATION_AVAILABLE = True
+except ImportError:
+    PDF_GENERATION_AVAILABLE = False
+    logger.warning("markdown not available. PDF generation will not work.")
+
+try:
+    from weasyprint import HTML
+    WEASYPRINT_AVAILABLE = True
+except ImportError:
+    WEASYPRINT_AVAILABLE = False
+    logger.warning("weasyprint not available. PDF generation will not work.")
 
 def send_ntfy_notification(message: str, title: str = "CoverLetter App"):
     """Send a notification to ntfy topic CustomCoverLetter"""
@@ -377,6 +392,30 @@ class SaveCoverLetterRequest(BaseModel):
 # Define the data model for cover letter operations
 class CoverLetterRequest(BaseModel):
     key: str  # S3 key (user_id/generated_cover_letters/filename)
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+# Define the data models for PDF generation
+class Margins(BaseModel):
+    top: float
+    right: float
+    bottom: float
+    left: float
+
+class PageSize(BaseModel):
+    width: float
+    height: float
+
+class PrintProperties(BaseModel):
+    margins: Margins
+    fontFamily: Optional[str] = "Times New Roman"
+    fontSize: Optional[float] = 12
+    lineHeight: Optional[float] = 1.6
+    pageSize: Optional[PageSize] = Field(default_factory=lambda: PageSize(width=8.5, height=11.0))
+
+class GeneratePDFRequest(BaseModel):
+    markdownContent: str
+    printProperties: PrintProperties
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
@@ -2751,6 +2790,235 @@ async def delete_cover_letter(request: CoverLetterRequest):
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         error_msg = f"Delete failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+def generate_pdf_from_markdown(markdown_content: str, print_properties: dict) -> str:
+    """
+    Generate a PDF from Markdown content with proper formatting support.
+    Uses WeasyPrint for PDF generation.
+    
+    Args:
+        markdown_content: The Markdown content to convert to PDF
+        print_properties: Dictionary containing print configuration:
+            - margins: dict with top, right, bottom, left (in inches)
+            - fontFamily: str (default: "Times New Roman")
+            - fontSize: float (default: 12)
+            - lineHeight: float (default: 1.6)
+            - pageSize: dict with width, height (in inches, default: 8.5 x 11)
+    
+    Returns:
+        Base64-encoded PDF data as a string (without data URI prefix)
+    """
+    if not PDF_GENERATION_AVAILABLE:
+        raise ImportError("markdown library is not installed. Cannot generate PDF.")
+    if not WEASYPRINT_AVAILABLE:
+        raise ImportError("weasyprint library is not installed. Cannot generate PDF.")
+    
+    try:
+        # Convert markdown to HTML
+        html_content = markdown.markdown(
+            markdown_content,
+            extensions=['extra', 'codehilite', 'tables', 'nl2br']
+        )
+        
+        # Extract print properties with defaults
+        margins = print_properties.get('margins', {})
+        font_family = print_properties.get('fontFamily', 'Times New Roman')
+        font_size = print_properties.get('fontSize', 12)
+        line_height = print_properties.get('lineHeight', 1.6)
+        page_size = print_properties.get('pageSize', {'width': 8.5, 'height': 11.0})
+        
+        # Create styled HTML document
+        styled_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                @page {{
+                    size: {page_size['width']}in {page_size['height']}in;
+                    margin: {margins.get('top', 1.0)}in
+                           {margins.get('right', 0.75)}in
+                           {margins.get('bottom', 0.25)}in
+                           {margins.get('left', 0.75)}in;
+                }}
+                body {{
+                    font-family: "{font_family}", serif;
+                    font-size: {font_size}pt;
+                    line-height: {line_height};
+                    margin: 0;
+                    padding: 0;
+                    color: #000;
+                }}
+                h1, h2, h3, h4, h5, h6 {{
+                    font-weight: bold;
+                    margin-top: 1em;
+                    margin-bottom: 0.5em;
+                    page-break-after: avoid;
+                }}
+                h1 {{ font-size: 2em; }}
+                h2 {{ font-size: 1.5em; }}
+                h3 {{ font-size: 1.25em; }}
+                h4 {{ font-size: 1.1em; }}
+                h5 {{ font-size: 1em; }}
+                h6 {{ font-size: 0.9em; }}
+                strong, b {{ font-weight: bold; }}
+                em, i {{ font-style: italic; }}
+                ul, ol {{
+                    margin: 1em 0;
+                    padding-left: 2em;
+                }}
+                li {{
+                    margin: 0.5em 0;
+                }}
+                p {{
+                    margin: 0.5em 0;
+                }}
+                code {{
+                    background-color: #f4f4f4;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                    font-family: "Courier New", monospace;
+                    font-size: 0.9em;
+                }}
+                pre {{
+                    background-color: #f4f4f4;
+                    padding: 10px;
+                    border-radius: 3px;
+                    overflow-x: auto;
+                    page-break-inside: avoid;
+                }}
+                pre code {{
+                    background-color: transparent;
+                    padding: 0;
+                }}
+                blockquote {{
+                    border-left: 4px solid #ddd;
+                    padding-left: 1em;
+                    margin: 1em 0;
+                    font-style: italic;
+                }}
+                table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 1em 0;
+                    page-break-inside: avoid;
+                }}
+                th, td {{
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                    text-align: left;
+                }}
+                th {{
+                    background-color: #f2f2f2;
+                    font-weight: bold;
+                }}
+                a {{
+                    color: #0066cc;
+                    text-decoration: underline;
+                }}
+                hr {{
+                    border: none;
+                    border-top: 1px solid #ddd;
+                    margin: 1em 0;
+                }}
+            </style>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
+        
+        # Generate PDF using WeasyPrint
+        pdf_bytes = HTML(string=styled_html).write_pdf()
+        
+        # Encode to base64
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        
+        logger.info(f"Successfully generated PDF from Markdown ({len(pdf_bytes)} bytes)")
+        return pdf_base64
+        
+    except Exception as e:
+        logger.error(f"Error generating PDF from Markdown: {str(e)}")
+        raise Exception(f"Failed to generate PDF: {str(e)}")
+
+@app.post("/api/files/generate-pdf")
+async def generate_pdf_endpoint(request: GeneratePDFRequest):
+    """
+    Generate a PDF from Markdown content with proper formatting support.
+    The PDF preserves all Markdown formatting including bold, italic, headings, lists, etc.
+    """
+    logger.info(f"PDF generation request received - user_id: {request.user_id}, user_email: {request.user_email}")
+    
+    # Check if PDF generation is available
+    if not PDF_GENERATION_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="PDF generation service is not available. markdown library is not installed."
+        )
+    
+    if not WEASYPRINT_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="PDF generation service is not available. weasyprint library is not installed."
+        )
+    
+    # Validate required fields
+    if not request.markdownContent:
+        raise HTTPException(
+            status_code=400,
+            detail="markdownContent is required"
+        )
+    
+    if not request.printProperties:
+        raise HTTPException(
+            status_code=400,
+            detail="printProperties is required"
+        )
+    
+    if not request.printProperties.margins:
+        raise HTTPException(
+            status_code=400,
+            detail="printProperties.margins is required"
+        )
+    
+    try:
+        # Convert Pydantic model to dict for the generation function
+        print_props_dict = {
+            'margins': {
+                'top': request.printProperties.margins.top,
+                'right': request.printProperties.margins.right,
+                'bottom': request.printProperties.margins.bottom,
+                'left': request.printProperties.margins.left
+            },
+            'fontFamily': request.printProperties.fontFamily,
+            'fontSize': request.printProperties.fontSize,
+            'lineHeight': request.printProperties.lineHeight,
+            'pageSize': {
+                'width': request.printProperties.pageSize.width,
+                'height': request.printProperties.pageSize.height
+            }
+        }
+        
+        # Generate PDF
+        pdf_base64 = generate_pdf_from_markdown(
+            request.markdownContent,
+            print_props_dict
+        )
+        
+        logger.info("PDF generated successfully")
+        return {
+            "success": True,
+            "pdfBase64": pdf_base64,
+            "message": "PDF generated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Failed to generate PDF: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
