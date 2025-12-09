@@ -78,8 +78,12 @@ import base64
 from markdown import markdown
 
 async def generate_pdf(markdown_content, print_properties):
+    # Normalize markdown content: replace escaped newlines with actual newlines
+    # This prevents backslashes from appearing in the PDF output
+    normalized_markdown = markdown_content.replace('\\n', '\n').replace('\\r', '\r')
+    
     # Convert markdown to HTML
-    html = markdown(markdown_content, extensions=['extra', 'codehilite'])
+    html = markdown(normalized_markdown, extensions=['extra', 'codehilite'])
 
     # Create styled HTML document
     styled_html = f"""
@@ -150,7 +154,11 @@ from markdown import markdown
 import base64
 
 def generate_pdf(markdown_content, print_properties):
-    html_content = markdown(markdown_content, extensions=['extra'])
+    # Normalize markdown content: replace escaped newlines with actual newlines
+    # This prevents backslashes from appearing in the PDF output
+    normalized_markdown = markdown_content.replace('\\n', '\n').replace('\\r', '\r')
+    
+    html_content = markdown(normalized_markdown, extensions=['extra'])
 
     styled_html = f"""
     <!DOCTYPE html>
@@ -231,9 +239,13 @@ class GeneratePDFRequest(BaseModel):
 @router.post("/api/files/generate-pdf")
 async def generate_pdf(request: GeneratePDFRequest):
     try:
+        # Normalize markdown content: replace escaped newlines with actual newlines
+        # This prevents backslashes from appearing in the PDF output
+        normalized_markdown = request.markdownContent.replace('\\n', '\n').replace('\\r', '\r')
+        
         # Generate PDF using your preferred library (Puppeteer, WeasyPrint, etc.)
         pdf_base64 = await generate_pdf_from_markdown(
-            request.markdownContent,
+            normalized_markdown,
             request.printProperties.dict()
         )
 
@@ -247,6 +259,13 @@ async def generate_pdf(request: GeneratePDFRequest):
 ```
 
 ## Notes
+
+- **Important**: The server should normalize the markdown content before processing:
+  ```python
+  # Replace escaped newlines with actual newlines to prevent backslashes in PDF
+  normalized_markdown = markdown_content.replace('\\n', '\n').replace('\\r', '\r')
+  ```
+  This ensures that if the client sends markdown with escaped newlines (like `"\\n"` as a string), they are converted to actual newline characters before processing.
 
 - The PDF should preserve all Markdown formatting including:
   - **Bold** and _italic_ text
