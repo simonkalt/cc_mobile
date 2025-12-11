@@ -16,6 +16,7 @@ https://your-domain.com  (production)
 **GET** `/api/health`
 
 Checks if the server is ready by verifying:
+
 - MongoDB module is available
 - MongoDB connection is active
 - Users collection is accessible
@@ -266,8 +267,12 @@ function App() {
     return (
       <View>
         <Text style={{ color: "red" }}>Server is not ready</Text>
-        <Text>MongoDB Available: {healthStatus?.mongodb?.available ? "Yes" : "No"}</Text>
-        <Text>MongoDB Connected: {healthStatus?.mongodb?.connected ? "Yes" : "No"}</Text>
+        <Text>
+          MongoDB Available: {healthStatus?.mongodb?.available ? "Yes" : "No"}
+        </Text>
+        <Text>
+          MongoDB Connected: {healthStatus?.mongodb?.connected ? "Yes" : "No"}
+        </Text>
       </View>
     );
   }
@@ -299,7 +304,7 @@ async function waitForServerReady(maxAttempts = 10, interval = 2000) {
       }
 
       console.log(`Attempt ${attempt}/${maxAttempts}: Server not ready yet...`);
-      
+
       if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, interval));
       }
@@ -348,18 +353,38 @@ async function loadUserPreferencesWithHealthCheck(userId) {
 
     // Server is ready, now load user preferences
     const userResponse = await fetch(`${API_BASE_URL}/api/users/${userId}`);
-    
+
     if (!userResponse.ok) {
       throw new Error("Failed to load user preferences");
     }
 
     const userData = await userResponse.json();
-    return userData.preferences;
+    // Return full user data including id and preferences
+    return userData;
   } catch (error) {
     console.error("Error loading user preferences:", error);
     throw error;
   }
 }
+```
+
+**Usage Example:**
+
+```javascript
+// Load user preferences with health check
+const userId = "693326c07fcdaab8e81cdd2f";
+const userData = await loadUserPreferencesWithHealthCheck(userId);
+
+// The function now returns the full user object including:
+// - userData.id (e.g., "693326c07fcdaab8e81cdd2f")
+// - userData.preferences
+// - userData.name
+// - userData.email
+// - etc.
+
+console.log("User ID:", userData.id); // "693326c07fcdaab8e81cdd2f"
+console.log("Preferences:", userData.preferences);
+console.log("App Settings:", userData.preferences?.appSettings);
 ```
 
 ---
@@ -421,4 +446,3 @@ Expected response when server is not ready:
 - Users collection accessibility is verified with a lightweight count operation
 - The endpoint returns detailed status information to help diagnose issues
 - All checks must pass for the server to be considered "ready"
-
