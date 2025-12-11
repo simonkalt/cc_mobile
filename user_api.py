@@ -122,8 +122,54 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 
+def normalize_personality_profile(profile: dict) -> dict:
+    """
+    Normalize a personality profile to ensure it only contains id, name, description.
+    Returns a dict with only these three fields.
+    """
+    if not isinstance(profile, dict):
+        return None
+    
+    return {
+        "id": profile.get("id", ""),
+        "name": profile.get("name", ""),
+        "description": profile.get("description", "")
+    }
+
+
+def normalize_personality_profiles(profiles: list) -> list:
+    """
+    Normalize a list of personality profiles to ensure each only contains id, name, description.
+    Filters out invalid profiles.
+    """
+    if not isinstance(profiles, list):
+        return []
+    
+    normalized = []
+    for profile in profiles:
+        normalized_profile = normalize_personality_profile(profile)
+        if normalized_profile and normalized_profile.get("id") and normalized_profile.get("name"):
+            normalized.append(normalized_profile)
+    
+    return normalized
+
+
 def user_doc_to_response(user_doc: dict) -> UserResponse:
     """Convert MongoDB user document to UserResponse"""
+    # Normalize preferences to ensure personalityProfiles have correct structure
+    # Create a copy to avoid mutating the original document
+    preferences = user_doc.get("preferences")
+    if preferences and isinstance(preferences, dict):
+        # Deep copy preferences to avoid mutating original
+        import copy
+        preferences = copy.deepcopy(preferences)
+        app_settings = preferences.get("appSettings", {})
+        if isinstance(app_settings, dict) and "personalityProfiles" in app_settings:
+            # Normalize personalityProfiles to ensure structure is {"id", "name", "description"} only
+            app_settings["personalityProfiles"] = normalize_personality_profiles(
+                app_settings.get("personalityProfiles", [])
+            )
+    
     return UserResponse(
         id=str(user_doc["_id"]),
         name=user_doc.get("name", ""),
@@ -133,7 +179,7 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         roles=user_doc.get("roles", ["user"]),
         phone=user_doc.get("phone"),
         address=user_doc.get("address"),
-        preferences=user_doc.get("preferences"),
+        preferences=preferences,
         avatarUrl=user_doc.get("avatarUrl"),
         dateCreated=user_doc.get("dateCreated"),
         dateUpdated=user_doc.get("dateUpdated"),
@@ -376,8 +422,70 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                                 for size_key, size_value in print_props["pageSize"].items():
                                     update_doc[f"preferences.appSettings.printProperties.pageSize.{size_key}"] = size_value
                     # Update personalityProfiles
+                    # Only update if explicitly provided and is a valid list
+                    # IMPORTANT: Only update if personalityProfiles is explicitly in the request
+                    # This prevents accidental deletion when updating other appSettings fields
                     if "personalityProfiles" in app_settings:
-                        update_doc["preferences.appSettings.personalityProfiles"] = app_settings["personalityProfiles"]
+                        personality_profiles = app_settings["personalityProfiles"]
+                        # Validate that it's a list
+                        if isinstance(personality_profiles, list):
+                            # Normalize and validate each profile to ensure correct structure: {"id", "name", "description"}
+                            normalized_profiles = []
+                            for idx, profile in enumerate(personality_profiles):
+                                if isinstance(profile, dict):
+                                    # Extract only id, name, description fields (ignore any extra fields)
+                                    normalized_profile = {
+                                        "id": profile.get("id", ""),
+                                        "name": profile.get("name", ""),
+                                        "description": profile.get("description", "")
+                                    }
+                                    # Validate required fields
+                                    if not normalized_profile["id"]:
+                                        logger.warning(f"Profile at index {idx} missing 'id' field, skipping")
+                                        continue
+                                    if not normalized_profile["name"]:
+                                        logger.warning(f"Profile at index {idx} missing 'name' field, skipping")
+                                        continue
+                                    if not normalized_profile["description"]:
+                                        logger.warning(f"Profile at index {idx} missing 'description' field, using empty string")
+                                    normalized_profiles.append(normalized_profile)
+                                else:
+                                    logger.warning(f"Profile at index {idx} is not a dict, skipping: {type(profile)}")
+                            
+                            # Check if user has existing profiles before clearing
+                            if len(normalized_profiles) == 0:
+                                # Get current user to check existing profiles
+                                try:
+                                    current_user = collection.find_one({"_id": user_id_obj})
+                                    if current_user:
+                                        existing_profiles = current_user.get("preferences", {}).get("appSettings", {}).get("personalityProfiles", [])
+                                        if existing_profiles and len(existing_profiles) > 0:
+                                            logger.warning(
+                                                f"⚠️ WARNING: Updating personalityProfiles to empty array for user {user_id}. "
+                                                f"This will DELETE {len(existing_profiles)} existing profile(s): {[p.get('name', 'Unknown') for p in existing_profiles if isinstance(p, dict)]}"
+                                            )
+                                        else:
+                                            logger.info(f"Setting personalityProfiles to empty array for user {user_id} (no existing profiles to delete)")
+                                except Exception as e:
+                                    logger.warning(f"Could not check existing profiles before update: {e}")
+                            
+                            # Save normalized profiles (only id, name, description)
+                            if len(normalized_profiles) > 0:
+                                update_doc["preferences.appSettings.personalityProfiles"] = normalized_profiles
+                                logger.info(f"Updated personalityProfiles for user {user_id}: {len(normalized_profiles)} profile(s) saved with structure {{id, name, description}}")
+                            else:
+                                # If all profiles were invalid, only update if explicitly clearing
+                                if len(personality_profiles) == 0:
+                                    update_doc["preferences.appSettings.personalityProfiles"] = []
+                                    logger.info(f"Cleared personalityProfiles for user {user_id}")
+                                else:
+                                    logger.warning(f"All personalityProfiles were invalid for user {user_id}. Not updating to preserve existing profiles.")
+                        elif personality_profiles is None:
+                            # If explicitly set to None, don't update (preserve existing)
+                            logger.warning(f"personalityProfiles set to None in update request for user {user_id}. Ignoring to preserve existing profiles.")
+                        else:
+                            # Invalid type - log error but don't update
+                            logger.error(f"Invalid personalityProfiles type for user {user_id}: {type(personality_profiles)}. Expected list. Ignoring update.")
                     # Update selectedModel
                     if "selectedModel" in app_settings:
                         update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]

@@ -1157,11 +1157,31 @@ def get_job_info(
 
         # Get user's custom personality profiles
         # user is a UserResponse Pydantic model, so access preferences as attribute
+        # Note: user_doc_to_response already normalizes personalityProfiles to {"id", "name", "description"} structure
         user_prefs = user.preferences if user.preferences else {}
         if isinstance(user_prefs, dict):
             app_settings = user_prefs.get("appSettings", {})
             if isinstance(app_settings, dict):
                 custom_profiles = app_settings.get("personalityProfiles", [])
+                # Ensure profiles are normalized (should already be normalized by user_doc_to_response, but double-check)
+                if custom_profiles:
+                    # Verify structure and filter out invalid profiles
+                    normalized_profiles = []
+                    for profile in custom_profiles:
+                        if (
+                            isinstance(profile, dict)
+                            and profile.get("id")
+                            and profile.get("name")
+                        ):
+                            # Extract only id, name, description
+                            normalized_profiles.append(
+                                {
+                                    "id": profile.get("id", ""),
+                                    "name": profile.get("name", ""),
+                                    "description": profile.get("description", ""),
+                                }
+                            )
+                    custom_profiles = normalized_profiles
             else:
                 custom_profiles = []
         else:
@@ -1184,11 +1204,13 @@ def get_job_info(
             f"Found {len(custom_profiles)} custom personality profiles for user"
         )
         # Try to find matching profile by name (case-insensitive) or ID
+        # Normalize profiles to ensure structure is {"id", "name", "description"} only
         profile_found = False
         for profile in custom_profiles:
             if isinstance(profile, dict):
-                profile_name = profile.get("name", "").lower()
+                # Normalize structure: extract only id, name, description
                 profile_id = profile.get("id", "")
+                profile_name = profile.get("name", "").lower()
                 profile_desc = profile.get("description", "")
 
                 # Match by name (case-insensitive) or ID
@@ -1204,8 +1226,11 @@ def get_job_info(
                     break
 
         if not profile_found:
+            # Normalize when getting available names
             available_names = [
-                p.get("name", "Unknown") for p in custom_profiles if isinstance(p, dict)
+                p.get("name", "Unknown")
+                for p in custom_profiles
+                if isinstance(p, dict) and p.get("name")
             ]
             logger.warning(
                 f"Personality profile '{tone}' not found in user's profiles. Available profiles: {available_names}"
@@ -1701,28 +1726,48 @@ def get_personality_profiles(
             )
 
         # Get user's custom personality profiles
+        # Note: user_doc_to_response already normalizes personalityProfiles to {"id", "name", "description"} structure
         user_prefs = user.preferences if user.preferences else {}
         if isinstance(user_prefs, dict):
             app_settings = user_prefs.get("appSettings", {})
             if isinstance(app_settings, dict):
                 custom_profiles = app_settings.get("personalityProfiles", [])
+                # Ensure profiles are normalized (should already be normalized, but verify)
+                if custom_profiles:
+                    normalized_profiles = []
+                    for profile in custom_profiles:
+                        if (
+                            isinstance(profile, dict)
+                            and profile.get("id")
+                            and profile.get("name")
+                        ):
+                            # Extract only id, name, description
+                            normalized_profiles.append(
+                                {
+                                    "id": profile.get("id", ""),
+                                    "name": profile.get("name", ""),
+                                    "description": profile.get("description", ""),
+                                }
+                            )
+                    custom_profiles = normalized_profiles
             else:
                 custom_profiles = []
         else:
             custom_profiles = []
 
         # Format profiles for the UI
+        # Structure is already normalized to {"id", "name", "description"}
         profiles = []
         for profile in custom_profiles:
-            if isinstance(profile, dict):
+            if isinstance(profile, dict) and profile.get("id") and profile.get("name"):
+                # Format for UI (add label and value for compatibility)
                 profiles.append(
                     {
-                        "label": profile.get("name", "Unknown"),
-                        "value": profile.get(
-                            "name", "Unknown"
-                        ),  # Use name as value for matching
                         "id": profile.get("id", ""),
+                        "name": profile.get("name", "Unknown"),
                         "description": profile.get("description", ""),
+                        "label": profile.get("name", "Unknown"),  # For UI compatibility
+                        "value": profile.get("name", "Unknown"),  # For UI compatibility
                     }
                 )
 
