@@ -49,7 +49,8 @@ http://localhost:8000/api/users/693326c07fcdaab8e81cdd2f
         "pageSize": {
           "width": 8.5,
           "height": 11.0
-        }
+        },
+        "useDefaultFonts": false
       },
       "personalityProfiles": [
         {

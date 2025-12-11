@@ -44,7 +44,8 @@ This guide explains the updated user schema that supports app settings, print pr
         "pageSize": {
           "width": 8.5,
           "height": 11.0
-        }
+        },
+        "useDefaultFonts": false
       },
       "personalityProfiles": [
         {

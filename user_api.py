@@ -34,6 +34,7 @@ class PrintProperties(BaseModel):
     fontSize: Optional[float] = 11.0
     lineHeight: Optional[float] = 1.15
     pageSize: Optional[PageSize] = None
+    useDefaultFonts: Optional[bool] = False
 
 
 class PersonalityProfile(BaseModel):
@@ -207,7 +208,8 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
                     "pageSize": {
                         "width": 8.5,
                         "height": 11.0
-                    }
+                    },
+                    "useDefaultFonts": False
                 },
                 "personalityProfiles": [],
                 "selectedModel": None,
@@ -366,7 +368,7 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                                 for margin_key, margin_value in print_props["margins"].items():
                                     update_doc[f"preferences.appSettings.printProperties.margins.{margin_key}"] = margin_value
                             # Update other printProperties fields
-                            for prop_key in ["fontFamily", "fontSize", "lineHeight"]:
+                            for prop_key in ["fontFamily", "fontSize", "lineHeight", "useDefaultFonts"]:
                                 if prop_key in print_props:
                                     update_doc[f"preferences.appSettings.printProperties.{prop_key}"] = print_props[prop_key]
                             # Update pageSize

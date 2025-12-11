@@ -462,6 +462,7 @@ class PrintProperties(BaseModel):
     pageSize: Optional[PageSize] = Field(
         default_factory=lambda: PageSize(width=8.5, height=11.0)
     )
+    useDefaultFonts: Optional[bool] = False
 
 
 class GeneratePDFRequest(BaseModel):
@@ -1525,7 +1526,63 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             markdown_content = markdown_content[9:]  # Remove "markdown " (9 characters)
             logger.info("Removed 'markdown ' prefix from Gemini response")
 
-        return {"markdown": markdown_content, "html": json_r.get("html", "")}
+        # Get raw HTML from LLM response
+        raw_html = json_r.get("html", "")
+
+        # Apply user's print settings to HTML
+        # Note: The user object was already retrieved earlier for personality profiles
+        # We'll retrieve it again here to access print settings (or reuse if available)
+        styled_html = raw_html
+        try:
+            # Retrieve user to get print settings
+            from user_api import get_user_by_id, get_user_by_email
+
+            user_for_styling = None
+            if user_id:
+                try:
+                    user_for_styling = get_user_by_id(user_id)
+                except Exception:
+                    pass  # If lookup fails, continue without styling
+            elif user_email:
+                try:
+                    user_for_styling = get_user_by_email(user_email)
+                except Exception:
+                    pass  # If lookup fails, continue without styling
+
+            if user_for_styling and user_for_styling.preferences:
+                app_settings = user_for_styling.preferences.get("appSettings", {})
+                if isinstance(app_settings, dict):
+                    print_props = app_settings.get("printProperties", {})
+                    if isinstance(print_props, dict) and print_props:
+                        # Check if user wants to use default fonts from LLM HTML
+                        use_default_fonts = print_props.get("useDefaultFonts", False)
+
+                        if use_default_fonts:
+                            # Don't apply font styling - let LLM HTML dictate formatting
+                            logger.info(
+                                "useDefaultFonts is True - skipping font styling, using raw LLM HTML"
+                            )
+                            styled_html = raw_html
+                        else:
+                            # Get print properties with defaults
+                            font_family = print_props.get(
+                                "fontFamily", "Times New Roman"
+                            )
+                            font_size = print_props.get("fontSize", 12)
+                            line_height = print_props.get("lineHeight", 1.6)
+
+                            # Wrap HTML with CSS styling using inline styles
+                            # Escape any quotes in font family name
+                            font_family_escaped = font_family.replace("'", "\\'")
+                            styled_html = f"""<div style="font-family: '{font_family_escaped}', serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
+                            logger.info(
+                                f"Applied print settings to HTML: fontFamily={font_family}, fontSize={font_size}pt, lineHeight={line_height}"
+                            )
+        except Exception as e:
+            logger.warning(f"Could not apply print settings to HTML: {e}")
+            # Continue with unstyled HTML if styling fails
+
+        return {"markdown": markdown_content, "html": styled_html}
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
