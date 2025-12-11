@@ -334,28 +334,87 @@ waitForServerReady(10, 2000).then((ready) => {
 
 ---
 
-## Integration with User Preferences Loading
+## Separate Functions for Health Check and User Preferences
 
-Here's how to integrate the health check with loading user preferences:
+### 1. Health Check Function
+
+A standalone function to check if the server is ready:
 
 ```javascript
-async function loadUserPreferencesWithHealthCheck(userId) {
+/**
+ * Check if the server is ready by calling the health check endpoint
+ * @returns {Promise<boolean>} True if server is ready, false otherwise
+ */
+async function checkServerHealth() {
   const API_BASE_URL = "http://localhost:8000";
 
-  // First, check if server is ready
   try {
-    const healthResponse = await fetch(`${API_BASE_URL}/api/health`);
-    const healthStatus = await healthResponse.json();
+    const response = await fetch(`${API_BASE_URL}/api/health`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
 
-    if (!healthStatus.ready) {
-      throw new Error("Server is not ready to load user preferences");
+    const healthStatus = await response.json();
+
+    if (response.ok && healthStatus.ready) {
+      return true;
+    } else {
+      console.warn("Server is not ready:", healthStatus);
+      return false;
     }
+  } catch (error) {
+    console.error("Error checking server health:", error);
+    return false;
+  }
+}
+```
 
-    // Server is ready, now load user preferences
-    const userResponse = await fetch(`${API_BASE_URL}/api/users/${userId}`);
+**Usage Example:**
+
+```javascript
+// Check server health
+const isReady = await checkServerHealth();
+if (isReady) {
+  console.log("Server is ready");
+} else {
+  console.log("Server is not ready");
+}
+```
+
+### 2. Load User Preferences Function
+
+A standalone function to load user preferences:
+
+```javascript
+/**
+ * Load user preferences by user ID
+ * @param {string} userId - The user's MongoDB ObjectId
+ * @returns {Promise<Object>} Full user data object including id, preferences, etc.
+ * @throws {Error} If the request fails or user is not found
+ */
+async function loadUserPreferences(userId) {
+  const API_BASE_URL = "http://localhost:8000";
+
+  try {
+    const userResponse = await fetch(`${API_BASE_URL}/api/users/${userId}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
 
     if (!userResponse.ok) {
-      throw new Error("Failed to load user preferences");
+      if (userResponse.status === 404) {
+        throw new Error("User not found");
+      } else if (userResponse.status === 503) {
+        throw new Error("Server is not available");
+      } else {
+        throw new Error(
+          `Failed to load user preferences: ${userResponse.statusText}`
+        );
+      }
     }
 
     const userData = await userResponse.json();
@@ -371,11 +430,11 @@ async function loadUserPreferencesWithHealthCheck(userId) {
 **Usage Example:**
 
 ```javascript
-// Load user preferences with health check
+// Load user preferences
 const userId = "693326c07fcdaab8e81cdd2f";
-const userData = await loadUserPreferencesWithHealthCheck(userId);
+const userData = await loadUserPreferences(userId);
 
-// The function now returns the full user object including:
+// The function returns the full user object including:
 // - userData.id (e.g., "693326c07fcdaab8e81cdd2f")
 // - userData.preferences
 // - userData.name
@@ -385,6 +444,55 @@ const userData = await loadUserPreferencesWithHealthCheck(userId);
 console.log("User ID:", userData.id); // "693326c07fcdaab8e81cdd2f"
 console.log("Preferences:", userData.preferences);
 console.log("App Settings:", userData.preferences?.appSettings);
+```
+
+### 3. Combined Usage Example
+
+You can use both functions together when you want to ensure the server is ready before loading preferences:
+
+```javascript
+/**
+ * Load user preferences with an optional health check
+ * @param {string} userId - The user's MongoDB ObjectId
+ * @param {boolean} checkHealthFirst - Whether to check server health before loading (default: false)
+ * @returns {Promise<Object>} Full user data object
+ */
+async function loadUserPreferencesWithHealthCheck(
+  userId,
+  checkHealthFirst = false
+) {
+  const API_BASE_URL = "http://localhost:8000";
+
+  // Optionally check health first
+  if (checkHealthFirst) {
+    const isReady = await checkServerHealth();
+    if (!isReady) {
+      throw new Error("Server is not ready to load user preferences");
+    }
+  }
+
+  // Load user preferences
+  return await loadUserPreferences(userId);
+}
+```
+
+**Usage Examples:**
+
+```javascript
+// Option 1: Load preferences without health check (faster)
+const userId = "693326c07fcdaab8e81cdd2f";
+const userData = await loadUserPreferences(userId);
+
+// Option 2: Check health first, then load preferences
+const isReady = await checkServerHealth();
+if (isReady) {
+  const userData = await loadUserPreferences(userId);
+  console.log("User ID:", userData.id);
+}
+
+// Option 3: Use the combined function with health check
+const userData = await loadUserPreferencesWithHealthCheck(userId, true);
+console.log("User ID:", userData.id);
 ```
 
 ---

@@ -283,6 +283,8 @@ The API returns standard HTTP status codes:
 
 ## Example: Complete Load Flow
 
+### Basic Flow (Without Health Check)
+
 ```javascript
 // 1. On app initialization
 const userId = localStorage.getItem('userId');
@@ -299,6 +301,45 @@ if (userId) {
   
   // 4. Use settings throughout your app
   // e.g., populate dropdowns, set default values, etc.
+}
+```
+
+### Flow with Health Check
+
+For a more robust implementation that checks server readiness first, see the [Health Check API Documentation](./HEALTH_CHECK_API.md) which provides:
+
+- `checkServerHealth()` - Standalone function to check if server is ready
+- `loadUserPreferences(userId)` - Standalone function to load user preferences
+- Combined usage examples
+
+**Example with Health Check:**
+
+```javascript
+import { checkServerHealth, loadUserPreferences } from './healthCheckUtils';
+
+// 1. On app initialization
+const userId = localStorage.getItem('userId');
+
+// 2. Check server health first (optional but recommended)
+if (userId) {
+  const isReady = await checkServerHealth();
+  
+  if (isReady) {
+    // 3. Load user preferences
+    const userData = await loadUserPreferences(userId);
+    
+    // 4. Populate your app state
+    const preferences = userData.preferences || {};
+    const appSettings = preferences.appSettings || {};
+    
+    setPersonalityProfiles(appSettings.personalityProfiles || []);
+    setSelectedModel(appSettings.selectedModel);
+    setTheme(preferences.theme || 'light');
+    setPrintProperties(appSettings.printProperties || {});
+  } else {
+    console.error('Server is not ready');
+    // Show error message or retry
+  }
 }
 ```
 

@@ -902,8 +902,8 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
         # If it's an S3 key (contains '/'), try to retrieve from S3
         # Also try if it's a PDF filename (ends with .pdf)
         if is_s3_key or resume.endswith('.pdf') or resume.endswith('.PDF'):
-            # Try to download from S3 first
-            if S3_AVAILABLE and s3_bucket_name:
+        # Try to download from S3 first
+        if S3_AVAILABLE and s3_bucket_name:
                 # Require user_id for S3 operations - resumes are organized by user_id folders
                 if not user_id:
                     logger.warning("user_id is required for S3 resume operations. Skipping S3 download.")
@@ -918,19 +918,19 @@ def get_job_info(llm: str, date_input: str, company_name: str, hiring_manager: s
                             filename = os.path.basename(resume.replace('\\', '/'))
                             s3_key = f"{user_id}/{filename}"
                         else:
-                            # Extract just the filename if path includes directory
-                            filename = os.path.basename(resume.replace('\\', '/'))
+                # Extract just the filename if path includes directory
+                filename = os.path.basename(resume.replace('\\', '/'))
                             # Construct S3 path organized by user_id: bucket/user_id/filename
                             s3_key = f"{user_id}/{filename}"
-                        
-                        s3_path = f"s3://{s3_bucket_name}/{s3_key}"
-                        
-                        logger.info(f"Downloading PDF from S3: {s3_path}")
-                        pdf_bytes = download_pdf_from_s3(s3_path)
-                        resume_content = read_pdf_from_bytes(pdf_bytes)
-                        logger.info("Successfully downloaded and extracted text from S3 PDF")
-                    except Exception as e:
-                        logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
+                
+                s3_path = f"s3://{s3_bucket_name}/{s3_key}"
+                
+                logger.info(f"Downloading PDF from S3: {s3_path}")
+                pdf_bytes = download_pdf_from_s3(s3_path)
+                resume_content = read_pdf_from_bytes(pdf_bytes)
+                logger.info("Successfully downloaded and extracted text from S3 PDF")
+            except Exception as e:
+                logger.warning(f"Failed to download from S3: {str(e)}. Will try local file paths.")
         
         # If S3 download failed or S3 not available, try local file paths
         if resume_content == resume:
