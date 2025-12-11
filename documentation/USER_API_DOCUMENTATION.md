@@ -60,7 +60,9 @@ Register a new user account.
   "avatarUrl": null,
   "dateCreated": "2024-04-27T00:00:00.000Z",
   "dateUpdated": "2024-04-27T00:00:00.000Z",
-  "lastLogin": null
+  "lastLogin": null,
+  "llm_counts": {},
+  "last_llm_used": null
 }
 ```
 
@@ -127,6 +129,11 @@ Retrieve user information by MongoDB ObjectId.
   "id": "507f1f77bcf86cd799439011",
   "name": "John Doe",
   "email": "john@example.com",
+  "llm_counts": {
+    "gpt-4.1": 15,
+    "claude-sonnet-4-20250514": 8
+  },
+  "last_llm_used": "gpt-4.1",
   ...
 }
 ```
@@ -152,6 +159,11 @@ Retrieve user information by email address.
   "id": "507f1f77bcf86cd799439011",
   "name": "John Doe",
   "email": "john@example.com",
+  "llm_counts": {
+    "gpt-4.1": 15,
+    "claude-sonnet-4-20250514": 8
+  },
+  "last_llm_used": "gpt-4.1",
   ...
 }
 ```
@@ -190,9 +202,12 @@ Update user information. Only provided fields will be updated.
     "newsletterOptIn": false,
     "theme": "light"
   },
-  "avatarUrl": "https://example.com/avatar.jpg"
+  "avatarUrl": "https://example.com/avatar.jpg",
+  "last_llm_used": "gpt-4.1"
 }
 ```
+
+**Note**: The `llm_counts` field cannot be manually updated through the API. It is automatically managed by the system when LLMs are called. You can manually set `last_llm_used` if needed, but it is also automatically updated when LLMs are used.
 
 **Response (200 OK):**
 ```json
@@ -367,6 +382,73 @@ const deleteUser = async (userId) => {
   }
 };
 ```
+
+## LLM Usage Tracking
+
+The system automatically tracks LLM (Large Language Model) usage for each user:
+
+### Automatic Tracking
+
+When an LLM is successfully called through the API (e.g., `POST /api/job-info` or `POST /chat`), the system automatically:
+- Increments the usage count for that LLM in `llm_counts`
+- Updates `last_llm_used` to the name of the LLM that was just used
+
+**Example**: After a successful call to `gpt-4.1`:
+```json
+{
+  "llm_counts": {
+    "gpt-4.1": 16  // Incremented from 15
+  },
+  "last_llm_used": "gpt-4.1"  // Updated
+}
+```
+
+### Fields
+
+- **llm_counts** (object): Dictionary of LLM names to usage counts
+  - Automatically managed by the system
+  - Cannot be manually updated through the API
+  - Initialized as empty object `{}` for new users
+  
+- **last_llm_used** (string or null): Name of the most recently used LLM
+  - Automatically updated when LLMs are called
+  - Can be manually updated via PUT request if needed
+  - Initialized as `null` for new users
+
+### Retrieving Usage Data
+
+Get user data including LLM usage statistics:
+```bash
+GET /api/users/{user_id}
+```
+
+Response includes:
+```json
+{
+  "id": "...",
+  "llm_counts": {
+    "gpt-4.1": 15,
+    "claude-sonnet-4-20250514": 8
+  },
+  "last_llm_used": "gpt-4.1"
+}
+```
+
+### Manual Update
+
+You can manually set `last_llm_used` (but not `llm_counts`):
+```bash
+PUT /api/users/{user_id}
+Content-Type: application/json
+
+{
+  "last_llm_used": "gemini-2.5-flash"
+}
+```
+
+**Note**: Manual updates to `last_llm_used` do not increment usage counts. Only actual LLM calls increment the counts.
+
+For detailed documentation, see [LLM_USAGE_TRACKING_API.md](./LLM_USAGE_TRACKING_API.md).
 
 ## Security Notes
 

@@ -27,6 +27,8 @@ This guide explains the updated user schema that supports app settings, print pr
   },
   "dateCreated": "datetime",
   "dateUpdated": "datetime",
+  "llm_counts": {},
+  "last_llm_used": "string or null",
   "preferences": {
     "newsletterOptIn": false,
     "theme": "light",
@@ -250,6 +252,23 @@ The S3 key (path) of the resume file to use by default upon login:
 - **Purpose**: Tracks which resume should be loaded automatically when the user logs in
 
 See [LAST_RESUME_USED_API.md](./LAST_RESUME_USED_API.md) for detailed usage examples.
+
+### LLM Usage Tracking
+
+Tracks LLM (Large Language Model) usage statistics:
+- **llm_counts**: Object containing usage counts for each LLM model
+  - **Type**: `object` (dictionary)
+  - **Structure**: Key-value pairs where key is the LLM name and value is the usage count
+  - **Example**: `{"gpt-4.1": 15, "claude-sonnet-4-20250514": 8}`
+  - **Initialization**: Empty object `{}` for new users
+  - **Auto-increment**: Automatically incremented when an LLM is successfully called
+- **last_llm_used**: The most recently used LLM model
+  - **Type**: `string` (optional, can be `null`)
+  - **Example**: `"gpt-4.1"`
+  - **Initialization**: `null` for new users
+  - **Auto-update**: Automatically updated when an LLM is successfully called
+
+See [LLM_USAGE_TRACKING_API.md](./LLM_USAGE_TRACKING_API.md) for detailed usage examples.
 
 ## Default Values
 

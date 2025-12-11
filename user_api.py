@@ -77,6 +77,7 @@ class UserUpdateRequest(BaseModel):
     address: Optional[dict] = None
     preferences: Optional[dict] = None
     avatarUrl: Optional[str] = None
+    last_llm_used: Optional[str] = None
 
 
 class UserResponse(BaseModel):
@@ -93,6 +94,8 @@ class UserResponse(BaseModel):
     dateCreated: datetime
     dateUpdated: datetime
     lastLogin: Optional[datetime] = None
+    llm_counts: Optional[dict] = None
+    last_llm_used: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -183,7 +186,9 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         avatarUrl=user_doc.get("avatarUrl"),
         dateCreated=user_doc.get("dateCreated"),
         dateUpdated=user_doc.get("dateUpdated"),
-        lastLogin=user_doc.get("lastLogin")
+        lastLogin=user_doc.get("lastLogin"),
+        llm_counts=user_doc.get("llm_counts"),
+        last_llm_used=user_doc.get("last_llm_used")
     )
 
 
@@ -237,6 +242,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "dateCreated": datetime.utcnow(),
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},  # Initialize empty LLM usage counts object
+        "last_llm_used": None,  # Initialize last LLM used field
         "preferences": user_data.preferences or {
             "newsletterOptIn": False,
             "theme": "light",
@@ -505,6 +511,8 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
             update_doc["preferences"] = updates.preferences
     if updates.avatarUrl is not None:
         update_doc["avatarUrl"] = updates.avatarUrl
+    if updates.last_llm_used is not None:
+        update_doc["last_llm_used"] = updates.last_llm_used
     
     try:
         result = collection.update_one(
@@ -537,6 +545,7 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
     """
     Increment the usage count for a specific LLM in the user's record.
     If the LLM doesn't exist in llm_counts, add it and set count to 1.
+    Also updates the last_llm_used field to track the most recently used LLM.
     Returns True if successful, False otherwise.
     """
     if not is_connected():
@@ -570,11 +579,15 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
         
         # Use MongoDB's $inc operator to increment the count
         # If the field doesn't exist, MongoDB will create it with value 1
+        # Also update last_llm_used field to track the most recently used LLM
         result = collection.update_one(
             {"_id": user_id_obj},
             {
                 "$inc": {f"llm_counts.{llm_name}": 1},
-                "$set": {"dateUpdated": datetime.utcnow()}
+                "$set": {
+                    "last_llm_used": llm_name,
+                    "dateUpdated": datetime.utcnow()
+                }
             }
         )
         
@@ -587,6 +600,9 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
                     logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
                 else:
                     logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
+                # Log last_llm_used update
+                if updated_user.get("last_llm_used") == llm_name:
+                    logger.debug(f"Updated last_llm_used to {llm_name} for user {user_id}")
             return True
         else:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")

@@ -1,21 +1,25 @@
 # Frontend API Guide - User Settings Retrieval
 
 ## Overview
+
 This guide shows how to retrieve user settings and preferences from the backend API when a user loads the application.
 
 ## API Endpoint
 
 ### Get User by ID
+
 Retrieves all user data including preferences, app settings, and personality profiles.
 
 **Endpoint:** `GET /api/users/{user_id}`
 
 **URL Example:**
+
 ```
 http://localhost:8000/api/users/693326c07fcdaab8e81cdd2f
 ```
 
 **Response Structure:**
+
 ```json
 {
   "id": "693326c07fcdaab8e81cdd2f",
@@ -71,7 +75,13 @@ http://localhost:8000/api/users/693326c07fcdaab8e81cdd2f
   "avatarUrl": null,
   "dateCreated": "2024-04-27T00:00:00.000Z",
   "dateUpdated": "2024-04-27T00:00:00.000Z",
-  "lastLogin": null
+  "lastLogin": null,
+  "llm_counts": {
+    "gpt-4.1": 15,
+    "claude-sonnet-4-20250514": 8,
+    "gemini-2.5-flash": 3
+  },
+  "last_llm_used": "gpt-4.1"
 }
 ```
 
@@ -84,11 +94,11 @@ http://localhost:8000/api/users/693326c07fcdaab8e81cdd2f
 async function fetchUserSettings(userId) {
   try {
     const response = await fetch(`http://localhost:8000/api/users/${userId}`, {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      credentials: 'include', // Include cookies if using session-based auth
+      credentials: "include", // Include cookies if using session-based auth
     });
 
     if (!response.ok) {
@@ -96,15 +106,19 @@ async function fetchUserSettings(userId) {
     }
 
     const userData = await response.json();
-    
+
     // Extract preferences and settings
     const preferences = userData.preferences || {};
     const appSettings = preferences.appSettings || {};
     const personalityProfiles = appSettings.personalityProfiles || [];
     const selectedModel = appSettings.selectedModel;
     const printProperties = appSettings.printProperties || {};
-    const theme = preferences.theme || 'light';
-    
+    const theme = preferences.theme || "light";
+
+    // Extract LLM usage tracking data
+    const llmCounts = userData.llm_counts || {};
+    const lastLLMUsed = userData.last_llm_used;
+
     return {
       user: userData,
       preferences,
@@ -113,16 +127,18 @@ async function fetchUserSettings(userId) {
       selectedModel,
       printProperties,
       theme,
+      llmCounts,
+      lastLLMUsed,
     };
   } catch (error) {
-    console.error('Error fetching user settings:', error);
+    console.error("Error fetching user settings:", error);
     throw error;
   }
 }
 
 // Usage in React component
 useEffect(() => {
-  const userId = localStorage.getItem('userId'); // or from your auth context
+  const userId = localStorage.getItem("userId"); // or from your auth context
   if (userId) {
     fetchUserSettings(userId)
       .then((settings) => {
@@ -131,9 +147,12 @@ useEffect(() => {
         setSelectedModel(settings.selectedModel);
         setTheme(settings.theme);
         setPrintProperties(settings.printProperties);
+        // Optionally store LLM usage data
+        console.log("LLM Usage:", settings.llmCounts);
+        console.log("Last LLM Used:", settings.lastLLMUsed);
       })
       .catch((error) => {
-        console.error('Failed to load user settings:', error);
+        console.error("Failed to load user settings:", error);
       });
   }
 }, []);
@@ -142,34 +161,37 @@ useEffect(() => {
 ### Using Axios
 
 ```javascript
-import axios from 'axios';
+import axios from "axios";
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = "http://localhost:8000";
 
 // Function to fetch user settings
 async function fetchUserSettings(userId) {
   try {
     const response = await axios.get(`${API_BASE_URL}/api/users/${userId}`);
     const userData = response.data;
-    
+
     // Extract and return structured settings
     return {
       user: userData,
       preferences: userData.preferences || {},
       appSettings: userData.preferences?.appSettings || {},
-      personalityProfiles: userData.preferences?.appSettings?.personalityProfiles || [],
+      personalityProfiles:
+        userData.preferences?.appSettings?.personalityProfiles || [],
       selectedModel: userData.preferences?.appSettings?.selectedModel,
       printProperties: userData.preferences?.appSettings?.printProperties || {},
-      theme: userData.preferences?.theme || 'light',
+      theme: userData.preferences?.theme || "light",
     };
   } catch (error) {
-    console.error('Error fetching user settings:', error);
+    console.error("Error fetching user settings:", error);
     if (error.response) {
       // Server responded with error status
-      throw new Error(`Failed to fetch user: ${error.response.data.detail || error.message}`);
+      throw new Error(
+        `Failed to fetch user: ${error.response.data.detail || error.message}`
+      );
     } else {
       // Network error
-      throw new Error('Network error: Could not connect to server');
+      throw new Error("Network error: Could not connect to server");
     }
   }
 }
@@ -178,7 +200,7 @@ async function fetchUserSettings(userId) {
 ### Complete React Hook Example
 
 ```javascript
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 
 function useUserSettings(userId) {
   const [settings, setSettings] = useState(null);
@@ -194,25 +216,29 @@ function useUserSettings(userId) {
     async function loadSettings() {
       try {
         setLoading(true);
-        const response = await fetch(`http://localhost:8000/api/users/${userId}`);
-        
+        const response = await fetch(
+          `http://localhost:8000/api/users/${userId}`
+        );
+
         if (!response.ok) {
           throw new Error(`Failed to fetch user: ${response.statusText}`);
         }
-        
+
         const userData = await response.json();
-        
+
         setSettings({
           user: userData,
-          personalityProfiles: userData.preferences?.appSettings?.personalityProfiles || [],
+          personalityProfiles:
+            userData.preferences?.appSettings?.personalityProfiles || [],
           selectedModel: userData.preferences?.appSettings?.selectedModel,
-          printProperties: userData.preferences?.appSettings?.printProperties || {},
-          theme: userData.preferences?.theme || 'light',
+          printProperties:
+            userData.preferences?.appSettings?.printProperties || {},
+          theme: userData.preferences?.theme || "light",
         });
         setError(null);
       } catch (err) {
         setError(err.message);
-        console.error('Error loading user settings:', err);
+        console.error("Error loading user settings:", err);
       } finally {
         setLoading(false);
       }
@@ -226,7 +252,7 @@ function useUserSettings(userId) {
 
 // Usage in component
 function MyComponent() {
-  const userId = localStorage.getItem('userId');
+  const userId = localStorage.getItem("userId");
   const { settings, loading, error } = useUserSettings(userId);
 
   if (loading) return <div>Loading settings...</div>;
@@ -236,7 +262,7 @@ function MyComponent() {
   return (
     <div>
       <h1>Welcome, {settings.user.name}</h1>
-      <p>Selected Model: {settings.selectedModel || 'None'}</p>
+      <p>Selected Model: {settings.selectedModel || "None"}</p>
       <p>Theme: {settings.theme}</p>
       <p>Personality Profiles: {settings.personalityProfiles.length}</p>
     </div>
@@ -251,8 +277,11 @@ If you prefer to use email instead of user ID:
 **Endpoint:** `GET /api/users/email/{email}`
 
 **Example:**
+
 ```javascript
-const response = await fetch(`http://localhost:8000/api/users/email/${userEmail}`);
+const response = await fetch(
+  `http://localhost:8000/api/users/email/${userEmail}`
+);
 const userData = await response.json();
 ```
 
@@ -266,6 +295,7 @@ The API returns standard HTTP status codes:
 - **503 Service Unavailable**: Database connection unavailable
 
 **Error Response Format:**
+
 ```json
 {
   "detail": "User not found"
@@ -288,18 +318,18 @@ The API returns standard HTTP status codes:
 
 ```javascript
 // 1. On app initialization
-const userId = localStorage.getItem('userId');
+const userId = localStorage.getItem("userId");
 
 // 2. Fetch user settings
 if (userId) {
   const settings = await fetchUserSettings(userId);
-  
+
   // 3. Populate your app state
   setPersonalityProfiles(settings.personalityProfiles);
   setSelectedModel(settings.selectedModel);
   setTheme(settings.theme);
   setPrintProperties(settings.printProperties);
-  
+
   // 4. Use settings throughout your app
   // e.g., populate dropdowns, set default values, etc.
 }
@@ -316,29 +346,29 @@ For a more robust implementation that checks server readiness first, see the [He
 **Example with Health Check:**
 
 ```javascript
-import { checkServerHealth, loadUserPreferences } from './healthCheckUtils';
+import { checkServerHealth, loadUserPreferences } from "./healthCheckUtils";
 
 // 1. On app initialization
-const userId = localStorage.getItem('userId');
+const userId = localStorage.getItem("userId");
 
 // 2. Check server health first (optional but recommended)
 if (userId) {
   const isReady = await checkServerHealth();
-  
+
   if (isReady) {
     // 3. Load user preferences
     const userData = await loadUserPreferences(userId);
-    
+
     // 4. Populate your app state
     const preferences = userData.preferences || {};
     const appSettings = preferences.appSettings || {};
-    
+
     setPersonalityProfiles(appSettings.personalityProfiles || []);
     setSelectedModel(appSettings.selectedModel);
-    setTheme(preferences.theme || 'light');
+    setTheme(preferences.theme || "light");
     setPrintProperties(appSettings.printProperties || {});
   } else {
-    console.error('Server is not ready');
+    console.error("Server is not ready");
     // Show error message or retry
   }
 }
@@ -349,4 +379,3 @@ if (userId) {
 - **Login**: `POST /api/users/login` - Returns user object on successful login
 - **Update User**: `PUT /api/users/{user_id}` - Update user preferences
 - **Register**: `POST /api/users/register` - Create new user account
-
