@@ -12,9 +12,10 @@ Analyze a job posting webpage and extract key information using Grok AI.
 
 This endpoint:
 1. Fetches the HTML content from the provided job posting URL
-2. Uses Grok AI to analyze the webpage content
-3. Extracts structured information (company name, job title, job description)
-4. Returns the extracted information as JSON
+2. Runs BeautifulSoup extraction (fast, site-specific parsers)
+3. Runs Grok AI extraction (comprehensive, AI-powered)
+4. Intelligently combines results from both methods
+5. Returns structured information (company, job_title, ad_source, full_description, hiring_manager)
 
 ## Request Body
 
@@ -39,8 +40,11 @@ This endpoint:
   "success": true,
   "url": "https://www.example.com/jobs/software-engineer",
   "company": "Example Corporation",
-  "jobTitle": "Senior Software Engineer",
-  "jobDescription": "We are seeking a Senior Software Engineer to join our team. Responsibilities include developing and maintaining web applications, collaborating with cross-functional teams, and contributing to technical design decisions. Requirements: 5+ years of experience, proficiency in Python and JavaScript, strong problem-solving skills."
+  "job_title": "Senior Software Engineer",
+  "ad_source": "linkedin",
+  "full_description": "We are seeking a Senior Software Engineer to join our team. Responsibilities include developing and maintaining web applications, collaborating with cross-functional teams, and contributing to technical design decisions. Requirements: 5+ years of experience, proficiency in Python and JavaScript, strong problem-solving skills.",
+  "hiring_manager": "John Smith",
+  "extractionMethod": "hybrid-bs-beautifulsoup-linkedin-grok"
 }
 ```
 
@@ -49,8 +53,11 @@ This endpoint:
 - `success`: Boolean indicating success (always `true` on success)
 - `url`: The analyzed URL (echoed back from request)
 - `company`: The company name extracted from the job posting
-- `jobTitle`: The job title/position name
-- `jobDescription`: The full job description including responsibilities, requirements, and qualifications
+- `job_title`: The job title/position name
+- `ad_source`: Source site detected from URL (`linkedin`, `indeed`, `glassdoor`, or `generic`)
+- `full_description`: The full job description including responsibilities, requirements, and qualifications
+- `hiring_manager`: Name of the hiring manager or recruiter (empty string `""` if not found in the posting)
+- `extractionMethod`: Method used for extraction (format: `hybrid-bs-{bs_method}-grok`)
 
 ## Error Responses
 
@@ -131,13 +138,16 @@ const handleAnalyzeJob = async () => {
   try {
     const jobInfo = await analyzeJobURL(jobURL);
     console.log('Company:', jobInfo.company);
-    console.log('Job Title:', jobInfo.jobTitle);
-    console.log('Description:', jobInfo.jobDescription);
+    console.log('Job Title:', jobInfo.job_title);
+    console.log('Ad Source:', jobInfo.ad_source);
+    console.log('Description:', jobInfo.full_description);
+    console.log('Hiring Manager:', jobInfo.hiring_manager || 'Not specified');
     
     // Populate form fields with extracted information
     setCompanyName(jobInfo.company);
-    setJobTitle(jobInfo.jobTitle);
-    setJobDescription(jobInfo.jobDescription);
+    setJobTitle(jobInfo.job_title);
+    setJobDescription(jobInfo.full_description);
+    setHiringManager(jobInfo.hiring_manager || '');
   } catch (error) {
     alert(`Failed to analyze job URL: ${error.message}`);
   }
@@ -187,8 +197,9 @@ function JobApplicationForm() {
       
       // Populate form fields
       setCompanyName(result.company);
-      setJobTitle(result.jobTitle);
-      setJobDescription(result.jobDescription);
+      setJobTitle(result.job_title);
+      setJobDescription(result.full_description);
+      setHiringManager(result.hiring_manager || '');
       
       alert('Job information extracted successfully!');
     } catch (err) {
@@ -340,8 +351,9 @@ async function generateCoverLetterFromJobURL(jobURL, resume, userId) {
     body: JSON.stringify({
       llm: 'grok-4-fast-reasoning',
       company_name: jobInfo.company,
-      jd: jobInfo.jobDescription,
+      jd: jobInfo.full_description,
       resume: resume,
+      hiring_manager: jobInfo.hiring_manager || '',
       user_id: userId,
       // ... other cover letter parameters
     })
@@ -382,8 +394,8 @@ async function analyzeJobURLWithErrorHandling(jobURL) {
     
     // Check if extraction was successful
     if (result.company === "Not specified" && 
-        result.jobTitle === "Not specified" && 
-        result.jobDescription === "Not specified") {
+        result.job_title === "Not specified" && 
+        result.full_description === "Not specified") {
       throw new Error('Failed to extract any information from the job posting');
     }
     
@@ -391,6 +403,8 @@ async function analyzeJobURLWithErrorHandling(jobURL) {
     if (result.company === "Not specified") {
       console.warn('Company name could not be extracted');
     }
+    
+    // Note: hiring_manager may be empty string if not found - this is normal
     
     return result;
   } catch (error) {

@@ -3546,9 +3546,10 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
                 "success": True,
                 "url": request.url,
                 "company": job_info.get("company", "Not specified"),
-                "job title": job_info.get("jobTitle", "Not specified"),
-                "ad source": ad_source,
+                "job_title": job_info.get("jobTitle", "Not specified"),
+                "ad_source": ad_source,
                 "full_description": job_info.get("jobDescription", "Not specified"),
+                "hiring_manager": "",  # Not available in legacy method
                 "extractionMethod": "grok-legacy"
             }
 

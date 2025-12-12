@@ -32,9 +32,10 @@ result = await analyze_job_url(
 
 # Response format
 print(result['company'])           # Company name
-print(result['job title'])         # Job title/position
-print(result['ad source'])         # 'linkedin', 'indeed', 'glassdoor', or 'generic'
+print(result['job_title'])         # Job title/position
+print(result['ad_source'])         # 'linkedin', 'indeed', 'glassdoor', or 'generic'
 print(result['full_description'])  # Complete job description
+print(result['hiring_manager'])    # Hiring manager name (may be empty string)
 print(result['extractionMethod'])  # 'hybrid-bs-beautifulsoup-linkedin-grok'
 ```
 
@@ -45,9 +46,10 @@ The analyzer returns a dictionary with the following fields:
 - `success` (bool): Always `true` on successful extraction
 - `url` (str): The analyzed URL
 - `company` (str): Company name extracted from the job posting
-- `job title` (str): Job title/position name
-- `ad source` (str): Source site detected from URL (`linkedin`, `indeed`, `glassdoor`, or `generic`)
+- `job_title` (str): Job title/position name
+- `ad_source` (str): Source site detected from URL (`linkedin`, `indeed`, `glassdoor`, or `generic`)
 - `full_description` (str): Complete job description including responsibilities, requirements, and qualifications
+- `hiring_manager` (str): Name of the hiring manager or recruiter (empty string `""` if not found in the posting)
 - `extractionMethod` (str): Method used (format: `hybrid-bs-{bs_method}-grok`)
 
 ### FastAPI Integration
@@ -89,12 +91,15 @@ async def analyze_job_url_endpoint(request: JobURLRequest):
   "success": true,
   "url": "https://www.linkedin.com/jobs/view/123456",
   "company": "Example Corporation",
-  "job title": "Senior Software Engineer",
-  "ad source": "linkedin",
+  "job_title": "Senior Software Engineer",
+  "ad_source": "linkedin",
   "full_description": "We are seeking a Senior Software Engineer...",
+  "hiring_manager": "John Smith",
   "extractionMethod": "hybrid-bs-beautifulsoup-linkedin-grok"
 }
 ```
+
+**Note**: The `hiring_manager` field will be an empty string `""` if no hiring manager is mentioned in the job posting.
 
 ## Architecture
 
@@ -125,7 +130,8 @@ The analyzer intelligently combines results from both extraction methods:
 1. **Company**: Prefers Grok result, falls back to BeautifulSoup if Grok is "Not specified"
 2. **Job Title**: Prefers Grok result, falls back to BeautifulSoup if Grok is "Not specified"
 3. **Full Description**: Prefers Grok result (usually more complete), falls back to BeautifulSoup
-4. **Ad Source**: Automatically detected from URL domain (linkedin, indeed, glassdoor, generic)
+4. **Hiring Manager**: Prefers Grok result, falls back to BeautifulSoup if available. Returns empty string `""` if not found
+5. **Ad Source**: Automatically detected from URL domain (linkedin, indeed, glassdoor, generic)
 
 This ensures the best possible extraction quality by leveraging the strengths of both methods:
 

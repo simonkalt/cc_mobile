@@ -35,6 +35,7 @@ class JobExtractionResult:
         self.company: Optional[str] = None
         self.job_title: Optional[str] = None
         self.job_description: Optional[str] = None
+        self.hiring_manager: Optional[str] = None
         self.method: Optional[str] = None  # 'beautifulsoup' or 'grok'
         self.is_complete: bool = False
     
@@ -43,9 +44,10 @@ class JobExtractionResult:
         return {
             "success": True,
             "company": self.company or "Not specified",
-            "job title": self.job_title or "Not specified",
-            "ad source": ad_source or "Not specified",
+            "job_title": self.job_title or "Not specified",
+            "ad_source": ad_source or "Not specified",
             "full_description": self.job_description or "Not specified",
+            "hiring_manager": self.hiring_manager or "",  # Empty string if not found
             "extractionMethod": self.method or "unknown"
         }
     
@@ -515,15 +517,18 @@ Please extract the following information and return ONLY valid JSON (no markdown
 1. company: The company name (not from URL, but from the actual job posting content)
 2. jobTitle: The complete job title/position name
 3. jobDescription: The full job description including responsibilities, requirements, and qualifications
+4. hiringManager: The name of the hiring manager or recruiter (if mentioned in the posting). Leave empty string "" if not found.
 
 Return format (JSON only):
 {{
     "company": "Company Name",
     "jobTitle": "Job Title",
-    "jobDescription": "Full job description text..."
+    "jobDescription": "Full job description text...",
+    "hiringManager": "Hiring Manager Name" or ""
 }}
 
-If any information cannot be extracted, use "Not specified" as the value."""
+If company, jobTitle, or jobDescription cannot be extracted, use "Not specified" as the value.
+For hiringManager, use empty string "" if not found."""
 
         # Call Grok API
         response = grok_client.chat.completions.create(
@@ -549,6 +554,7 @@ If any information cannot be extracted, use "Not specified" as the value."""
         result.company = data.get('company', 'Not specified')
         result.job_title = data.get('jobTitle', 'Not specified')
         result.job_description = data.get('jobDescription', 'Not specified')
+        result.hiring_manager = data.get('hiringManager', '') or ''  # Empty string if not found
         result.is_complete = result.has_minimum_data()
         
         logger.info(f"Grok extraction completed: complete={result.is_complete}")
@@ -641,6 +647,14 @@ async def analyze_job_url(
     else:
         combined_result.job_description = grok_result.job_description or bs_result.job_description or "Not specified"
     
+    # Hiring manager: prefer Grok, fallback to BeautifulSoup (may be empty)
+    if grok_result.hiring_manager and grok_result.hiring_manager.strip():
+        combined_result.hiring_manager = grok_result.hiring_manager
+    elif bs_result.hiring_manager and bs_result.hiring_manager.strip():
+        combined_result.hiring_manager = bs_result.hiring_manager
+    else:
+        combined_result.hiring_manager = ""  # Empty string if not found
+    
     # Check if we have minimum data
     combined_result.is_complete = combined_result.has_minimum_data()
     
@@ -650,7 +664,7 @@ async def analyze_job_url(
     
     logger.info(f"Final combined result: company={bool(combined_result.company)}, "
                 f"title={bool(combined_result.job_title)}, description={bool(combined_result.job_description)}, "
-                f"ad_source={ad_source}")
+                f"hiring_manager={bool(combined_result.hiring_manager)}, ad_source={ad_source}")
     
     return response_data
 
