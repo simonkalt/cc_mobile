@@ -52,12 +52,48 @@ The analyzer returns a dictionary with the following fields:
 
 ### FastAPI Integration
 
+The analyzer is integrated into the main FastAPI application at `/api/job-url/analyze`:
+
 ```python
 from fastapi import FastAPI
-from job_url_api_endpoint import router
+from job_url_analyzer import analyze_job_url
 
-app = FastAPI()
-app.include_router(router)
+@app.post("/api/job-url/analyze")
+async def analyze_job_url_endpoint(request: JobURLRequest):
+    result = await analyze_job_url(
+        url=str(request.url),
+        user_id=request.user_id,
+        user_email=request.user_email
+    )
+    return result
+```
+
+### API Endpoint Usage
+
+**Endpoint**: `POST /api/job-url/analyze`
+
+**Request Body**:
+
+```json
+{
+  "url": "https://www.linkedin.com/jobs/view/123456",
+  "user_id": "507f1f77bcf86cd799439011",
+  "user_email": "user@example.com"
+}
+```
+
+**Response**:
+
+```json
+{
+  "success": true,
+  "url": "https://www.linkedin.com/jobs/view/123456",
+  "company": "Example Corporation",
+  "job title": "Senior Software Engineer",
+  "ad source": "linkedin",
+  "full_description": "We are seeking a Senior Software Engineer...",
+  "extractionMethod": "hybrid-bs-beautifulsoup-linkedin-grok"
+}
 ```
 
 ## Architecture
@@ -92,6 +128,7 @@ The analyzer intelligently combines results from both extraction methods:
 4. **Ad Source**: Automatically detected from URL domain (linkedin, indeed, glassdoor, generic)
 
 This ensures the best possible extraction quality by leveraging the strengths of both methods:
+
 - **BeautifulSoup**: Fast, reliable for structured data, site-specific optimizations
 - **Grok**: Better at extracting complete descriptions, handles unstructured content, more comprehensive
 
@@ -116,12 +153,12 @@ class NewSiteParser(BaseJobParser):
     def parse(self, soup: BeautifulSoup, url: str) -> JobExtractionResult:
         result = JobExtractionResult()
         result.method = "beautifulsoup-newsite"
-        
+
         # Your extraction logic here
         result.company = soup.select_one('.company-name').get_text()
         result.job_title = soup.select_one('h1.title').get_text()
         result.job_description = soup.select_one('.description').get_text()
-        
+
         result.is_complete = result.has_minimum_data()
         return result
 ```
@@ -155,6 +192,7 @@ url = "https://company.com/careers/job/123"
 ### Why Both Methods?
 
 Running both extraction methods ensures:
+
 - **Speed**: BeautifulSoup provides quick initial results
 - **Completeness**: Grok fills in gaps and provides comprehensive descriptions
 - **Reliability**: If one method fails, the other can still provide results
@@ -163,11 +201,21 @@ Running both extraction methods ensures:
 ## Error Handling
 
 The module handles:
+
 - Network timeouts
 - Invalid HTML
 - Missing elements
 - Encoding issues
 - API failures (Grok)
+- Missing API keys
 
-All errors are logged and result in "Not specified" values rather than failing the entire request.
+**Graceful Degradation**: If one extraction method fails, the other method's results are still used. All errors are logged and result in "Not specified" values for individual fields rather than failing the entire request.
 
+### Error Scenarios
+
+1. **Grok API unavailable**: BeautifulSoup results are still returned
+2. **BeautifulSoup extraction fails**: Grok results are still returned
+3. **Both methods fail**: Returns "Not specified" for missing fields, but request succeeds
+4. **Network timeout**: Retries are handled, falls back to available method
+
+This ensures maximum reliability and uptime even when individual components fail.
