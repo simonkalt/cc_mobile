@@ -238,6 +238,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 hf_token = os.getenv("HF_TOKEN")
 google_api_key = os.getenv("GOOGLE_API_KEY")
+google_places_api_key = os.getenv("GOOGLE_PLACES_API_KEY")
 openai_api_key = os.getenv("OPENAI_API_KEY")
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -1794,7 +1795,7 @@ def get_system_prompt():
 @app.get("/api/config/google-places-key")
 def get_google_places_key():
     """JSON API endpoint to get the Google Places API key"""
-    return {"apiKey": google_api_key}
+    return {"apiKey": google_places_api_key}
 
 
 @app.get("/llm-selector", response_class=HTMLResponse)
