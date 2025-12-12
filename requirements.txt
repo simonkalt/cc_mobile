@@ -8,7 +8,7 @@ oci
 pydantic
 fastapi
 scikit-learn>=1.2.0
-xai-sdk
+xai
 ollama
 # xai dependencies (required by xai 0.3.0)
 cycler
