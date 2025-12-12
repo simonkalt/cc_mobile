@@ -1791,6 +1791,12 @@ def get_system_prompt():
     return {"system_prompt": system_message}
 
 
+@app.get("/api/config/google-places-key")
+def get_google_places_key():
+    """JSON API endpoint to get the Google Places API key"""
+    return {"apiKey": google_api_key}
+
+
 @app.get("/llm-selector", response_class=HTMLResponse)
 def llm_selector():
     llm_options = get_available_llms()
