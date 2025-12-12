@@ -30,9 +30,6 @@ try:
     MONGODB_AVAILABLE = True
 except ImportError:
     MONGODB_AVAILABLE = False
-    logger.warning(
-        "mongodb_client module not available. MongoDB features will be disabled."
-    )
 
 # Try to import ollama, make it optional
 try:
@@ -59,6 +56,16 @@ logger.setLevel(logging.INFO)
 # Configure uvicorn loggers
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
+# Import job URL analyzer (after logger is defined)
+try:
+    from job_url_analyzer import analyze_job_url as analyze_job_url_hybrid
+    JOB_URL_ANALYZER_AVAILABLE = True
+except ImportError:
+    JOB_URL_ANALYZER_AVAILABLE = False
+    logger.warning(
+        "job_url_analyzer module not available. Falling back to Grok-only extraction."
+    )
 
 XAI_SDK_AVAILABLE = False
 
@@ -3477,13 +3484,17 @@ Important:
 @app.post("/api/job-url/analyze")
 async def analyze_job_url(request: JobURLAnalysisRequest):
     """
-    Analyze a job posting URL and extract company name, job title, and job description using Grok.
+    Analyze a job posting URL and extract company name, job title, and job description.
+    
+    Uses hybrid approach:
+    1. First tries BeautifulSoup parsing (fast, free) for LinkedIn, Indeed, Glassdoor, and generic sites
+    2. Falls back to Grok AI if BeautifulSoup extraction is incomplete
 
     This endpoint:
     1. Fetches the content from the provided URL
-    2. Uses Grok AI to analyze the content
-    3. Extracts structured information (company, job title, job description)
-    4. Returns the extracted information as JSON
+    2. Attempts BeautifulSoup extraction first (site-specific parsers)
+    3. Falls back to Grok AI if needed
+    4. Returns the extracted information as JSON with extraction method
     """
     logger.info(
         f"Job URL analysis request received - URL: {request.url}, user_id: {request.user_id}"
@@ -3497,30 +3508,46 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
         )
 
     try:
-        # Check if Grok API key is configured
-        if not xai_api_key:
-            raise HTTPException(
-                status_code=503,
-                detail="Grok API key is not configured. Cannot analyze job URL.",
+        # Use hybrid analyzer if available, otherwise fall back to Grok-only
+        if JOB_URL_ANALYZER_AVAILABLE:
+            logger.info("Using hybrid BeautifulSoup + Grok analyzer")
+            result = await analyze_job_url_hybrid(
+                url=request.url,
+                user_id=request.user_id,
+                user_email=request.user_email,
+                use_grok_fallback=True
             )
-
-        # Extract job information using Grok
-        job_info = extract_job_info_from_url(request.url)
-
-        logger.info(f"Job URL analysis completed successfully")
-        return {
-            "success": True,
-            "url": request.url,
-            "company": job_info.get("company", "Not specified"),
-            "jobTitle": job_info.get("jobTitle", "Not specified"),
-            "jobDescription": job_info.get("jobDescription", "Not specified"),
-        }
+            logger.info(f"Job URL analysis completed successfully using {result.get('extractionMethod', 'unknown')}")
+            return result
+        else:
+            # Fallback to old Grok-only method
+            logger.info("Using Grok-only analyzer (hybrid analyzer not available)")
+            if not xai_api_key:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Grok API key is not configured. Cannot analyze job URL.",
+                )
+            
+            job_info = extract_job_info_from_url(request.url)
+            logger.info(f"Job URL analysis completed successfully")
+            return {
+                "success": True,
+                "url": request.url,
+                "company": job_info.get("company", "Not specified"),
+                "jobTitle": job_info.get("jobTitle", "Not specified"),
+                "jobDescription": job_info.get("jobDescription", "Not specified"),
+                "extractionMethod": "grok-legacy"
+            }
 
     except HTTPException:
         raise
+    except ValueError as e:
+        # Invalid URL format from analyzer
+        logger.warning(f"Invalid URL format: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         error_msg = f"Failed to analyze job URL: {str(e)}"
-        logger.error(error_msg)
+        logger.error(error_msg, exc_info=True)
         raise HTTPException(status_code=500, detail=error_msg)
 
 
