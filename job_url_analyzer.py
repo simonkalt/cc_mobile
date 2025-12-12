@@ -38,13 +38,14 @@ class JobExtractionResult:
         self.method: Optional[str] = None  # 'beautifulsoup' or 'grok'
         self.is_complete: bool = False
     
-    def to_dict(self) -> Dict:
+    def to_dict(self, ad_source: Optional[str] = None) -> Dict:
         """Convert to dictionary matching API response format"""
         return {
             "success": True,
             "company": self.company or "Not specified",
-            "jobTitle": self.job_title or "Not specified",
-            "jobDescription": self.job_description or "Not specified",
+            "job title": self.job_title or "Not specified",
+            "ad source": ad_source or "Not specified",
+            "full_description": self.job_description or "Not specified",
             "extractionMethod": self.method or "unknown"
         }
     
@@ -554,9 +555,11 @@ If any information cannot be extracted, use "Not specified" as the value."""
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Grok JSON response: {e}")
-        logger.debug(f"Grok response content: {content[:500]}")
+        if 'content' in locals():
+            logger.debug(f"Grok response content: {content[:500]}")
     except Exception as e:
         logger.error(f"Grok extraction error: {e}")
+        # Return empty result so BeautifulSoup results can still be used
     
     return result
 
@@ -570,16 +573,17 @@ async def analyze_job_url(
 ) -> Dict:
     """
     Analyze job URL using hybrid BeautifulSoup + Grok approach
+    Always runs both methods and combines results intelligently.
     
     Args:
         url: Job posting URL
         user_id: Optional user ID for logging
         user_email: Optional user email for logging
-        use_grok_fallback: Whether to use Grok if BeautifulSoup fails
+        use_grok_fallback: Whether to use Grok (always True - both methods always run)
         grok_client: Optional Grok client instance
     
     Returns:
-        Dictionary matching API response format
+        Dictionary with: company, job title, ad source, full_description
     """
     logger.info(f"Analyzing job URL: {url} (user_id={user_id}, user_email={user_email})")
     
@@ -587,36 +591,66 @@ async def analyze_job_url(
     if not url.startswith(('http://', 'https://')):
         raise ValueError("Invalid URL format. URL must start with http:// or https://")
     
-    # Step 1: Try BeautifulSoup first (fast, free)
-    logger.info("Attempting BeautifulSoup extraction...")
-    result = extract_with_beautifulsoup(url)
+    # Detect ad source (site)
+    ad_source = detect_site(url)
+    logger.info(f"Detected ad source: {ad_source}")
     
-    # Step 2: If BeautifulSoup didn't get complete data, try Grok
-    if not result.is_complete and use_grok_fallback:
-        logger.info("BeautifulSoup extraction incomplete, falling back to Grok...")
-        
-        # Fetch HTML for Grok (if not already fetched)
-        html, error = fetch_html(url)
-        if html and not error:
-            grok_result = extract_with_grok(html, grok_client)
-            
-            # Use Grok results if they're better
-            if grok_result.is_complete or (
-                not result.has_minimum_data() and grok_result.has_minimum_data()
-            ):
-                result = grok_result
-                logger.info("Using Grok extraction results")
-            else:
-                logger.info("Grok extraction also incomplete, using BeautifulSoup results")
-        else:
-            logger.warning(f"Failed to fetch HTML for Grok fallback: {error}")
+    # Step 1: Always run BeautifulSoup extraction first
+    logger.info("Running BeautifulSoup extraction...")
+    bs_result = extract_with_beautifulsoup(url)
     
-    # Prepare response
-    response_data = result.to_dict()
+    # Step 2: Always run Grok extraction (fetch HTML if needed)
+    logger.info("Running Grok extraction...")
+    html, error = fetch_html(url)
+    grok_result = JobExtractionResult()
+    grok_result.method = "grok"
+    
+    if html and not error:
+        grok_result = extract_with_grok(html, grok_client)
+        logger.info(f"Grok extraction completed: complete={grok_result.is_complete}")
+    else:
+        logger.warning(f"Failed to fetch HTML for Grok extraction: {error}")
+    
+    # Step 3: Combine results intelligently
+    # Prefer Grok for description (usually more complete), but use BeautifulSoup as fallback
+    # Prefer non-"Not specified" values
+    combined_result = JobExtractionResult()
+    combined_result.method = f"hybrid-bs-{bs_result.method}-grok"
+    
+    # Company: prefer Grok, fallback to BeautifulSoup
+    if grok_result.company and grok_result.company != "Not specified":
+        combined_result.company = grok_result.company
+    elif bs_result.company and bs_result.company != "Not specified":
+        combined_result.company = bs_result.company
+    else:
+        combined_result.company = grok_result.company or bs_result.company or "Not specified"
+    
+    # Job title: prefer Grok, fallback to BeautifulSoup
+    if grok_result.job_title and grok_result.job_title != "Not specified":
+        combined_result.job_title = grok_result.job_title
+    elif bs_result.job_title and bs_result.job_title != "Not specified":
+        combined_result.job_title = bs_result.job_title
+    else:
+        combined_result.job_title = grok_result.job_title or bs_result.job_title or "Not specified"
+    
+    # Full description: prefer Grok (usually more complete), fallback to BeautifulSoup
+    if grok_result.job_description and grok_result.job_description != "Not specified":
+        combined_result.job_description = grok_result.job_description
+    elif bs_result.job_description and bs_result.job_description != "Not specified":
+        combined_result.job_description = bs_result.job_description
+    else:
+        combined_result.job_description = grok_result.job_description or bs_result.job_description or "Not specified"
+    
+    # Check if we have minimum data
+    combined_result.is_complete = combined_result.has_minimum_data()
+    
+    # Prepare response with new format
+    response_data = combined_result.to_dict(ad_source=ad_source)
     response_data['url'] = url
     
-    logger.info(f"Final extraction result: method={result.method}, company={bool(result.company)}, "
-                f"title={bool(result.job_title)}, description={bool(result.job_description)}")
+    logger.info(f"Final combined result: company={bool(combined_result.company)}, "
+                f"title={bool(combined_result.job_title)}, description={bool(combined_result.job_description)}, "
+                f"ad_source={ad_source}")
     
     return response_data
 

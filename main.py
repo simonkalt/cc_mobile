@@ -3520,7 +3520,7 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
             logger.info(f"Job URL analysis completed successfully using {result.get('extractionMethod', 'unknown')}")
             return result
         else:
-            # Fallback to old Grok-only method
+            # Fallback to old Grok-only method (should not happen if job_url_analyzer is available)
             logger.info("Using Grok-only analyzer (hybrid analyzer not available)")
             if not xai_api_key:
                 raise HTTPException(
@@ -3528,14 +3528,27 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
                     detail="Grok API key is not configured. Cannot analyze job URL.",
                 )
             
+            # Detect ad source
+            from urllib.parse import urlparse
+            domain = urlparse(request.url).netloc.lower()
+            if 'linkedin.com' in domain:
+                ad_source = 'linkedin'
+            elif 'indeed.com' in domain:
+                ad_source = 'indeed'
+            elif 'glassdoor.com' in domain:
+                ad_source = 'glassdoor'
+            else:
+                ad_source = 'generic'
+            
             job_info = extract_job_info_from_url(request.url)
             logger.info(f"Job URL analysis completed successfully")
             return {
                 "success": True,
                 "url": request.url,
                 "company": job_info.get("company", "Not specified"),
-                "jobTitle": job_info.get("jobTitle", "Not specified"),
-                "jobDescription": job_info.get("jobDescription", "Not specified"),
+                "job title": job_info.get("jobTitle", "Not specified"),
+                "ad source": ad_source,
+                "full_description": job_info.get("jobDescription", "Not specified"),
                 "extractionMethod": "grok-legacy"
             }
 
