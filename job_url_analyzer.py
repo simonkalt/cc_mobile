@@ -147,24 +147,35 @@ class IndeedParser(BaseJobParser):
     def parse(self, soup: BeautifulSoup, url: str) -> JobExtractionResult:
         result = JobExtractionResult()
         result.method = "beautifulsoup-indeed"
+        logger.info(f"[IndeedParser] Starting extraction for URL: {url}")
 
         try:
             # Try JSON-LD structured data first
             json_ld_scripts = soup.find_all("script", type="application/ld+json")
+            logger.info(f"[IndeedParser] Found {len(json_ld_scripts)} JSON-LD scripts")
             for script in json_ld_scripts:
                 try:
                     data = json.loads(script.string)
                     if isinstance(data, dict) and data.get("@type") == "JobPosting":
+                        logger.info("[IndeedParser] Found JobPosting in JSON-LD")
                         result.company = data.get("hiringOrganization", {}).get("name")
                         result.job_title = data.get("title")
                         result.job_description = data.get("description")
+                        logger.info(
+                            f"[IndeedParser] JSON-LD extracted - Company: '{result.company}', Title: '{result.job_title}', Description: {len(result.job_description) if result.job_description else 0} chars"
+                        )
                         if result.has_minimum_data():
                             result.is_complete = True
+                            logger.info(
+                                "[IndeedParser] JSON-LD extraction successful, returning result"
+                            )
                             return result
-                except (json.JSONDecodeError, AttributeError):
+                except (json.JSONDecodeError, AttributeError) as e:
+                    logger.debug(f"[IndeedParser] JSON-LD parse error: {e}")
                     continue
 
             # Company name
+            logger.info("[IndeedParser] Trying CSS selectors for company name...")
             company_selectors = [
                 '[data-testid="job-poster-name"]',
                 '[data-testid="inlineHeader-companyName"]',
@@ -175,9 +186,17 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.company = element.get_text(strip=True)
+                    logger.info(
+                        f"[IndeedParser] Found company using selector '{selector}': '{result.company}'"
+                    )
                     break
+            if not result.company:
+                logger.warning(
+                    "[IndeedParser] Could not find company name with any selector"
+                )
 
             # Job title
+            logger.info("[IndeedParser] Trying CSS selectors for job title...")
             title_selectors = [
                 "h1.jobTitle",
                 'h1[data-testid="job-title"]',
@@ -187,9 +206,17 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.job_title = element.get_text(strip=True)
+                    logger.info(
+                        f"[IndeedParser] Found job title using selector '{selector}': '{result.job_title}'"
+                    )
                     break
+            if not result.job_title:
+                logger.warning(
+                    "[IndeedParser] Could not find job title with any selector"
+                )
 
             # Job description
+            logger.info("[IndeedParser] Trying CSS selectors for job description...")
             desc_selectors = [
                 "#jobDescriptionText",
                 '[data-testid="job-description"]',
@@ -199,12 +226,26 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.job_description = element.get_text(strip=True)
+                    logger.info(
+                        f"[IndeedParser] Found job description using selector '{selector}': {len(result.job_description)} chars"
+                    )
                     break
+            if not result.job_description:
+                logger.warning(
+                    "[IndeedParser] Could not find job description with any selector"
+                )
 
             result.is_complete = result.has_minimum_data()
 
+            logger.info(
+                f"[IndeedParser] Final extraction - Company: '{result.company or 'None'}', Title: '{result.job_title or 'None'}', Description: {len(result.job_description) if result.job_description else 0} chars"
+            )
+            logger.info(
+                f"[IndeedParser] Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
+            )
+
         except Exception as e:
-            logger.error(f"Indeed parser error: {e}")
+            logger.error(f"Indeed parser error: {e}", exc_info=True)
 
         return result
 
@@ -409,12 +450,127 @@ def detect_site(url: str) -> str:
         return "generic"
 
 
-def fetch_html(url: str, timeout: int = 10) -> Tuple[Optional[str], Optional[str]]:
+def detect_captcha(html: str) -> bool:
+    """
+    Detect if HTML content contains CAPTCHA or human verification
+
+    This function is smarter - it checks if the page actually contains job content.
+    If job content is present, CAPTCHA is likely already completed.
+
+    Returns:
+        True if CAPTCHA/human verification is detected, False otherwise
+    """
+    if not html:
+        return False
+
+    html_lower = html.lower()
+
+    # First, check if the page contains job-related content
+    # If it does, CAPTCHA is probably already completed
+    job_content_indicators = [
+        "job description",
+        "job title",
+        "apply now",
+        "job posting",
+        "hiring",
+        "qualifications",
+        "responsibilities",
+        "requirements",
+        "jobsearch-jobdescriptiontext",  # Indeed-specific
+        "job-poster-name",  # Indeed-specific
+        "job-title",  # Indeed-specific
+        "jobsearch-jobinfobullet",  # Indeed-specific
+    ]
+
+    has_job_content = any(
+        indicator in html_lower for indicator in job_content_indicators
+    )
+
+    # If we have job content, be more conservative about CAPTCHA detection
+    # Only detect CAPTCHA if there are strong indicators AND no job content
+    strong_captcha_indicators = [
+        "recaptcha",
+        "hcaptcha",
+        "cf-browser-verification",
+        "cf-challenge",
+        "challenge-platform",
+        "verify you are human",
+        "verify you're human",
+        "just a moment",
+        "checking your browser",
+        "challenge-form",
+        "turnstile",
+        "access denied",
+        "unusual traffic",
+        "verify you're not a robot",
+        "indeed.com/access-denied",
+        "indeed.com/verify",
+    ]
+
+    # Check for strong CAPTCHA indicators
+    has_strong_captcha = any(
+        indicator in html_lower for indicator in strong_captcha_indicators
+    )
+
+    # If we have job content, don't detect CAPTCHA (it's already completed)
+    if has_job_content:
+        logger.debug("Job content detected - assuming CAPTCHA already completed")
+        return False
+
+    # If no job content but strong CAPTCHA indicators, detect CAPTCHA
+    if has_strong_captcha:
+        logger.info(f"CAPTCHA detected: found strong indicator")
+        return True
+
+    # Check for common CAPTCHA iframe/div patterns (only if no job content)
+    captcha_patterns = [
+        r"iframe.*recaptcha",
+        r"div.*recaptcha",
+        r"iframe.*hcaptcha",
+        r"div.*hcaptcha",
+        r"data-sitekey",  # reCAPTCHA site key
+        r"data-callback.*captcha",
+    ]
+
+    for pattern in captcha_patterns:
+        if re.search(pattern, html_lower):
+            logger.info(f"CAPTCHA detected: found pattern '{pattern}'")
+            return True
+
+    # Weak indicators - only detect if no job content
+    weak_captcha_indicators = [
+        "captcha",
+        "cloudflare",
+        "human verification",
+        "please verify",
+        "security check",
+        "ddos protection",
+        "ray id",
+        "cf-ray",
+        "bot detection",
+        "security verification",
+    ]
+
+    # Only use weak indicators if we don't have job content
+    for indicator in weak_captcha_indicators:
+        if indicator in html_lower:
+            logger.info(
+                f"CAPTCHA detected: found weak indicator '{indicator}' (no job content)"
+            )
+            return True
+
+    return False
+
+
+def fetch_html(
+    url: str, timeout: int = 10
+) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
     """
     Fetch HTML content from URL
 
     Returns:
-        Tuple of (html_content, error_message)
+        Tuple of (html_content, error_message, captcha_detected)
+        captcha_detected is True if CAPTCHA is detected, False otherwise, None on error
     """
     try:
         headers = {
@@ -436,17 +592,183 @@ def fetch_html(url: str, timeout: int = 10) -> Tuple[Optional[str], Optional[str
         else:
             html = response.content.decode("utf-8", errors="ignore")
 
-        # Check status code
+        # Check for CAPTCHA BEFORE checking status code
+        # Some sites (like Indeed) may return 403 or redirect to CAPTCHA page
+        captcha_detected = detect_captcha(html)
+
+        # If CAPTCHA is detected, return it even if status is not 200
+        if captcha_detected:
+            logger.warning(
+                f"CAPTCHA detected for URL: {url} (status: {response.status_code})"
+            )
+            return html, None, captcha_detected
+
+        # For error status codes (403, 429, 503), check for CAPTCHA
+        # BUT: If the page contains job content, CAPTCHA was already completed
+        # Only mark as CAPTCHA if there's no job content
+        if response.status_code in [403, 429, 503]:
+            # First check if page has job content (CAPTCHA already completed)
+            html_lower_check = html.lower()
+            job_content_indicators = [
+                "job description",
+                "job title",
+                "apply now",
+                "job posting",
+                "hiring",
+                "qualifications",
+                "responsibilities",
+                "requirements",
+                "jobsearch-jobdescriptiontext",
+                "job-poster-name",
+                "job-title",
+            ]
+            has_job_content = any(
+                indicator in html_lower_check for indicator in job_content_indicators
+            )
+
+            if has_job_content:
+                # Page has job content despite error status - CAPTCHA was already completed
+                logger.info(
+                    f"Error status {response.status_code} but job content found - CAPTCHA already completed, proceeding"
+                )
+                return html, None, False  # No CAPTCHA needed
+
+            # No job content - check for CAPTCHA
+            captcha_detected = detect_captcha(html)
+            if captcha_detected:
+                logger.warning(
+                    f"CAPTCHA detected for URL: {url} (status: {response.status_code}, no job content)"
+                )
+                return html, None, captcha_detected
+
+            # Indeed specifically - 403 without job content likely means CAPTCHA needed
+            if "indeed.com" in url.lower() and response.status_code == 403:
+                logger.warning(
+                    f"Indeed 403 Forbidden for URL: {url} (no job content) - treating as CAPTCHA required"
+                )
+                return html, None, True
+
+            # For other sites with 403/429/503, check if HTML suggests CAPTCHA
+            # Look for common error pages that might indicate verification needed
+            if any(
+                indicator in html_lower_check
+                for indicator in [
+                    "access denied",
+                    "unusual traffic",
+                    "verify",
+                    "security",
+                ]
+            ):
+                logger.warning(
+                    f"Error status {response.status_code} with security indicators for URL: {url} (no job content) - treating as CAPTCHA"
+                )
+                return html, None, True
+
+            logger.warning(
+                f"Error status {response.status_code} for URL: {url} (no job content) - may require CAPTCHA"
+            )
+            # Return as CAPTCHA required to trigger modal
+            return html, None, True
+
+        # Now check status code (only if no CAPTCHA was detected and not error status)
         response.raise_for_status()
 
-        return html, None
+        return html, None, captcha_detected
 
     except requests.exceptions.Timeout:
-        return None, "Request timeout"
+        return None, "Request timeout", None
     except requests.exceptions.RequestException as e:
-        return None, f"Failed to fetch URL: {str(e)}"
+        return None, f"Failed to fetch URL: {str(e)}", None
     except Exception as e:
-        return None, f"Unexpected error fetching URL: {str(e)}"
+        return None, f"Unexpected error fetching URL: {str(e)}", None
+
+
+def extract_from_html(html: str, url: str) -> JobExtractionResult:
+    """
+    Extract job information from provided HTML content using BeautifulSoup
+
+    Args:
+        html: HTML content to parse
+        url: URL for site detection and logging
+
+    Returns:
+        JobExtractionResult object
+    """
+    result = JobExtractionResult()
+
+    if not html:
+        result.method = "beautifulsoup-failed"
+        return result
+
+    # Parse HTML
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception as e:
+        logger.error(f"Failed to parse HTML: {e}")
+        result.method = "beautifulsoup-parse-error"
+        return result
+
+    # Detect site and use appropriate parser
+    site = detect_site(url)
+    logger.info(f"Detected site: {site} for URL: {url}")
+
+    parsers = {
+        "linkedin": LinkedInParser(),
+        "indeed": IndeedParser(),
+        "glassdoor": GlassdoorParser(),
+        "generic": GenericParser(),
+    }
+
+    parser = parsers.get(site, GenericParser())
+    logger.info(f"Using {site} parser for extraction...")
+    result = parser.parse(soup, url)
+
+    # Log extraction details
+    logger.info(
+        f"Parser result - Company: {result.company or 'None'}, Title: {result.job_title or 'None'}, Description length: {len(result.job_description) if result.job_description else 0}"
+    )
+    logger.info(
+        f"Parser result - Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
+    )
+
+    # Set ad_source based on detected site
+    result.ad_source = site
+
+    # Try to extract hiring manager (common patterns)
+    try:
+        # Look for hiring manager patterns in the HTML
+        hiring_manager_patterns = [
+            soup.find(string=re.compile(r"hiring manager", re.I)),
+            soup.find(string=re.compile(r"recruiter", re.I)),
+            soup.find(string=re.compile(r"contact.*name", re.I)),
+        ]
+
+        for pattern_match in hiring_manager_patterns:
+            if pattern_match:
+                # Try to find the name near the pattern
+                parent = (
+                    pattern_match.parent if hasattr(pattern_match, "parent") else None
+                )
+                if parent:
+                    # Look for name-like text nearby
+                    text = parent.get_text(strip=True)
+                    # Simple heuristic: look for capitalized words after "hiring manager" or "recruiter"
+                    match = re.search(
+                        r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+                        text,
+                        re.I,
+                    )
+                    if match:
+                        result.hiring_manager = match.group(1).strip()
+                        break
+    except Exception as e:
+        logger.debug(f"Could not extract hiring manager: {e}")
+        # Leave as None/empty string
+
+    logger.info(
+        f"BeautifulSoup extraction from HTML: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
+    )
+    return result
 
 
 def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
@@ -457,13 +779,21 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
         JobExtractionResult object
     """
     # Fetch HTML
-    html, error = fetch_html(url)
+    logger.info(f"[extract_with_beautifulsoup] Fetching HTML from URL: {url}")
+    html, error, captcha_detected = fetch_html(url)
 
     if error or not html:
         logger.warning(f"Failed to fetch HTML: {error}")
         result = JobExtractionResult()
         result.method = "beautifulsoup-failed"
         return result
+
+    logger.info(
+        f"[extract_with_beautifulsoup] HTML fetched successfully - Length: {len(html)} chars, CAPTCHA detected: {captcha_detected}"
+    )
+    logger.debug(
+        f"[extract_with_beautifulsoup] HTML preview (first 500 chars): {html[:500]}"
+    )
 
     # Parse HTML
     try:
@@ -486,10 +816,40 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     }
 
     parser = parsers.get(site, GenericParser())
+    logger.info(f"Using {site} parser for extraction...")
     result = parser.parse(soup, url)
+
+    # Log extraction details
+    logger.info(
+        f"Parser result - Company: {result.company or 'None'}, Title: {result.job_title or 'None'}, Description length: {len(result.job_description) if result.job_description else 0}"
+    )
+    logger.info(
+        f"Parser result - Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
+    )
 
     # Set ad_source based on detected site
     result.ad_source = site
+
+    # If CAPTCHA was detected, check if we still got valid job data
+    # If we did, use it (CAPTCHA was already completed - don't show modal)
+    # If we didn't, mark as captcha-required (show modal for NEW CAPTCHA)
+    if captcha_detected:
+        logger.info(
+            f"CAPTCHA indicators found for URL: {url}, checking if job data can be extracted..."
+        )
+        if result.has_minimum_data():
+            logger.info(
+                f"✅ Successfully extracted job data - CAPTCHA was already completed (no modal needed)"
+            )
+            # CAPTCHA was detected but we got valid data, so it's already completed
+            # Return the result normally (don't mark as captcha-required, don't show modal)
+            # The detect_captcha function should have caught this, but this is a safety check
+        else:
+            logger.warning(
+                f"❌ CAPTCHA detected and no valid job data extracted - NEW CAPTCHA required (show modal)"
+            )
+            result.method = "captcha-required"
+            return result
 
     # Try to extract hiring manager (common patterns)
     try:
@@ -626,6 +986,7 @@ async def analyze_job_url(
     user_email: Optional[str] = None,
     use_grok_fallback: bool = True,
     grok_client: Optional[Grok] = None,
+    html_content: Optional[str] = None,
 ) -> Dict:
     """
     Analyze job URL using hybrid BeautifulSoup + Grok approach
@@ -636,37 +997,80 @@ async def analyze_job_url(
         user_email: Optional user email for logging
         use_grok_fallback: Whether to use Grok if BeautifulSoup fails
         grok_client: Optional Grok client instance
+        html_content: Optional HTML content (from CAPTCHA completion) - if provided, skips fetching
 
     Returns:
         Dictionary matching API response format
     """
     logger.info(
-        f"Analyzing job URL: {url} (user_id={user_id}, user_email={user_email})"
+        f"Analyzing job URL: {url} (user_id={user_id}, user_email={user_email}, has_html={bool(html_content)})"
     )
 
-    # Validate URL format
+    # Validate URL
     if not url.startswith(("http://", "https://")):
         raise ValueError("Invalid URL format. URL must start with http:// or https://")
 
-    # Validate LinkedIn URL
-    if "linkedin.com/jobs" not in url.lower():
-        raise ValueError(
-            "Only LinkedIn job posting URLs are supported. Please provide a LinkedIn job URL (e.g., https://www.linkedin.com/jobs/view/...)"
-        )
-
-    # Detect ad_source from URL (should always be "linkedin" after validation)
+    # Detect ad_source from URL (needed for both methods)
     ad_source = detect_site(url)
 
     # Step 1: Try BeautifulSoup first (fast, free)
-    logger.info("Attempting BeautifulSoup extraction...")
-    result = extract_with_beautifulsoup(url)
+    # If HTML content is provided, use it directly (from CAPTCHA completion)
+    if html_content:
+        logger.info("Using provided HTML content for extraction...")
+        result = extract_from_html(html_content, url)
+    else:
+        logger.info("Attempting BeautifulSoup extraction...")
+        result = extract_with_beautifulsoup(url)
+
+    # Check if CAPTCHA is required (only if extraction failed AND HTML was not provided)
+    # If HTML was provided, it's already from a verified page, so don't return captcha_required
+    if result.method == "captcha-required":
+        if html_content:
+            # HTML was provided, so CAPTCHA is already completed - don't return captcha_required
+            logger.warning(
+                "Extraction failed even with provided HTML content - resetting method and continuing"
+            )
+            # Reset method to indicate failure, not CAPTCHA requirement
+            result.method = "beautifulsoup-failed"
+            # Continue with Grok fallback instead of returning early
+        else:
+            # No HTML provided, so CAPTCHA is actually required
+            logger.info(
+                "CAPTCHA required and extraction failed - returning special response"
+            )
+            return {
+                "success": False,
+                "captcha_required": True,
+                "url": url,
+                "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+                "company": "Not specified",
+                "job_title": "Not specified",
+                "ad_source": ad_source,
+                "full_description": "Not specified",
+                "hiring_manager": "",
+                "extractionMethod": "error",
+            }
 
     # Step 2: If BeautifulSoup didn't get complete data, try Grok
     if not result.is_complete and use_grok_fallback:
         logger.info("BeautifulSoup extraction incomplete, falling back to Grok...")
 
-        # Fetch HTML for Grok
-        html, error = fetch_html(url)
+        # Use provided HTML if available, otherwise fetch it
+        if html_content:
+            html = html_content
+            error = None
+            captcha_detected = False
+        else:
+            # Fetch HTML for Grok (if not already fetched)
+            html, error, captcha_detected = fetch_html(url)
+
+        # Check for CAPTCHA again before using Grok (only if we fetched)
+        # But try Grok extraction anyway - CAPTCHA might already be completed
+        if captcha_detected:
+            logger.warning(
+                "CAPTCHA detected during Grok fallback, but attempting extraction anyway..."
+            )
+            # Continue with Grok extraction - if it succeeds, CAPTCHA was already completed
 
         if html and not error:
             grok_result = extract_with_grok(html, grok_client)
@@ -674,14 +1078,56 @@ async def analyze_job_url(
             # Set ad_source for Grok result
             grok_result.ad_source = ad_source
 
+            # If CAPTCHA was detected but Grok got valid data, CAPTCHA was already completed
+            if captcha_detected and grok_result.has_minimum_data():
+                logger.info(
+                    "✅ Successfully extracted job data with Grok despite CAPTCHA detection - CAPTCHA appears to be already completed"
+                )
+                # Use Grok results directly
+                result = grok_result
             # Combine results intelligently: prefer Grok for better quality, but keep BS if Grok fails
-            if grok_result.is_complete or (
+            elif grok_result.is_complete or (
                 not result.has_minimum_data() and grok_result.has_minimum_data()
             ):
                 # Use Grok results, but preserve BeautifulSoup ad_source
                 grok_result.ad_source = result.ad_source or ad_source
                 result = grok_result
                 logger.info("Using Grok extraction results")
+            # If CAPTCHA was detected and Grok also failed, mark as captcha-required
+            # BUT only if HTML was not provided (if HTML was provided, it's already verified)
+            elif (
+                captcha_detected
+                and not grok_result.has_minimum_data()
+                and not html_content
+            ):
+                logger.warning(
+                    "❌ CAPTCHA detected and Grok extraction also failed - CAPTCHA required"
+                )
+                result.method = "captcha-required"
+                return {
+                    "success": False,
+                    "captcha_required": True,
+                    "url": url,
+                    "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+                    "company": "Not specified",
+                    "job_title": "Not specified",
+                    "ad_source": ad_source,
+                    "full_description": "Not specified",
+                    "hiring_manager": "",
+                    "extractionMethod": "error",
+                }
+            # If HTML was provided but Grok extraction failed, just return the failed result
+            elif not grok_result.has_minimum_data() and html_content:
+                logger.warning(
+                    "❌ Grok extraction failed even with provided HTML content"
+                )
+                # Use whatever data we have, even if incomplete
+                if grok_result.has_minimum_data():
+                    result = grok_result
+                # Otherwise keep the BeautifulSoup result (even if incomplete)
+                # Ensure method is not set to captcha-required when HTML was provided
+                if result.method == "captcha-required":
+                    result.method = "grok-failed"
             else:
                 # Combine: use Grok values where BS has "Not specified"
                 if (
@@ -717,10 +1163,43 @@ async def analyze_job_url(
     has_valid_data = result.has_minimum_data()
     response_data["success"] = has_valid_data
 
+    # If HTML was provided, never return captcha_required (HTML is already verified)
+    # This is a safety check - we should have already handled this above, but ensure it here too
+    if html_content:
+        # Remove any captcha_required flag that might have been set
+        if "captcha_required" in response_data:
+            logger.warning(
+                "Removing captcha_required flag since HTML was provided from verified page"
+            )
+            del response_data["captcha_required"]
+        # If extraction failed, add a helpful message but don't set captcha_required
+        if not has_valid_data:
+            response_data["message"] = (
+                "Unable to extract job data from the provided HTML. The page may not contain a valid job posting, or the structure may have changed."
+            )
+
+    # Detailed logging for debugging
+    logger.info("=" * 80)
+    logger.info("FINAL EXTRACTION RESULT")
+    logger.info("=" * 80)
+    logger.info(f"URL: {url}")
+    logger.info(f"Method: {result.method}")
+    logger.info(f"Ad Source: {result.ad_source}")
+    logger.info(f"Success: {has_valid_data}")
     logger.info(
-        f"Final extraction result: method={result.method}, company={bool(result.company)}, "
-        f"title={bool(result.job_title)}, description={bool(result.job_description)}, "
-        f"ad_source={result.ad_source}, hiring_manager={bool(result.hiring_manager)}"
+        f"Company: {result.company or 'None'} (valid: {bool(result.company and result.company != 'Not specified')})"
     )
+    logger.info(
+        f"Job Title: {result.job_title or 'None'} (valid: {bool(result.job_title and result.job_title != 'Not specified')})"
+    )
+    logger.info(
+        f"Description: {'Present' if result.job_description else 'None'} (length: {len(result.job_description) if result.job_description else 0}, valid: {bool(result.job_description and result.job_description != 'Not specified')})"
+    )
+    logger.info(f"Hiring Manager: {result.hiring_manager or 'None'}")
+    logger.info(f"Has Minimum Data: {result.has_minimum_data()}")
+    logger.info(f"HTML Provided: {bool(html_content)}")
+    logger.info(f"Response Success: {response_data.get('success')}")
+    logger.info(f"Response Message: {response_data.get('message', 'None')}")
+    logger.info("=" * 80)
 
     return response_data
