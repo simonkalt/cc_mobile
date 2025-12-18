@@ -3376,17 +3376,10 @@ def extract_job_info_from_url(url: str) -> dict:
         }
         page_response = requests.get(url, headers=headers, timeout=30)
         
-        # Check for 403/429 errors (often indicate bot detection/CAPTCHA required)
+        # Check for 403/429 errors
         if page_response.status_code in [403, 429]:
-            logger.warning(f"Received {page_response.status_code} from {url} - likely bot detection/CAPTCHA required")
-            page_content = page_response.text
-            # Check if it's a CAPTCHA page
-            content_lower = page_content.lower()
-            captcha_indicators = ['captcha', 'verify you are human', 'access denied', 'unusual traffic', 'security check']
-            if any(indicator in content_lower for indicator in captcha_indicators):
-                raise ValueError("CAPTCHA or human verification required. The website is blocking automated access.")
-            else:
-                raise ValueError(f"Access forbidden ({page_response.status_code}). The website may be blocking automated requests.")
+            logger.warning(f"Received {page_response.status_code} from {url} - access forbidden")
+            raise ValueError(f"Access forbidden ({page_response.status_code}). The website may be blocking automated requests.")
         
         page_response.raise_for_status()
         page_content = page_response.text
@@ -3495,7 +3488,7 @@ Important:
     except requests.exceptions.HTTPError as e:
         if e.response and e.response.status_code in [403, 429]:
             logger.error(f"Access forbidden ({e.response.status_code}) for URL: {url}")
-            raise ValueError("CAPTCHA or human verification required. The website is blocking automated access.")
+            raise ValueError(f"Access forbidden ({e.response.status_code}). The website may be blocking automated requests.")
         logger.error(f"HTTP error fetching URL: {str(e)}")
         raise Exception(f"Failed to fetch or analyze job URL: {str(e)}")
     except requests.exceptions.RequestException as e:
@@ -3505,7 +3498,7 @@ Important:
         logger.error(f"Error parsing JSON response: {str(e)}")
         raise Exception(f"Failed to parse job information: {str(e)}")
     except ValueError:
-        # Re-raise ValueError (CAPTCHA errors) as-is
+        # Re-raise ValueError as-is
         raise
     except Exception as e:
         logger.error(f"Unexpected error extracting job info: {str(e)}")
@@ -3515,17 +3508,18 @@ Important:
 @app.post("/api/job-url/analyze")
 async def analyze_job_url(request: JobURLAnalysisRequest):
     """
-    Analyze a job posting URL and extract company name, job title, and job description.
+    Analyze a LinkedIn job posting URL and extract company name, job title, and job description.
     
     Uses hybrid approach:
-    1. First tries BeautifulSoup parsing (fast, free) for LinkedIn, Indeed, Glassdoor, and generic sites
+    1. First tries BeautifulSoup parsing (fast, free) for LinkedIn job postings
     2. Falls back to Grok AI if BeautifulSoup extraction is incomplete
 
     This endpoint:
-    1. Fetches the content from the provided URL
-    2. Attempts BeautifulSoup extraction first (site-specific parsers)
-    3. Falls back to Grok AI if needed
-    4. Returns the extracted information as JSON with extraction method
+    1. Validates that the URL is a LinkedIn job posting URL
+    2. Fetches the content from the provided URL
+    3. Attempts BeautifulSoup extraction first (LinkedIn-specific parser)
+    4. Falls back to Grok AI if needed
+    5. Returns the extracted information as JSON with extraction method
     """
     logger.info(
         f"Job URL analysis request received - URL: {request.url}, user_id: {request.user_id}"
@@ -3587,35 +3581,9 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
     except HTTPException:
         raise
     except ValueError as e:
-        # Invalid URL format or CAPTCHA required
+        # Invalid URL format or LinkedIn validation failed
         error_msg = str(e)
-        if "CAPTCHA" in error_msg or "verification" in error_msg or "blocking" in error_msg:
-            logger.warning(f"CAPTCHA/verification required: {error_msg}")
-            # Detect ad source for error response
-            from urllib.parse import urlparse
-            domain = urlparse(request.url).netloc.lower()
-            if 'linkedin.com' in domain:
-                ad_source = 'linkedin'
-            elif 'indeed.com' in domain:
-                ad_source = 'indeed'
-            elif 'glassdoor.com' in domain:
-                ad_source = 'glassdoor'
-            else:
-                ad_source = 'generic'
-            
-            return {
-                "success": False,
-                "captcha_required": True,
-                "url": request.url,
-                "message": error_msg,
-                "company": "Not specified",
-                "job_title": "Not specified",
-                "ad_source": ad_source,
-                "full_description": "Not specified",
-                "hiring_manager": "",
-                "extractionMethod": "error"
-            }
-        logger.warning(f"Invalid URL format: {error_msg}")
+        logger.warning(f"Invalid URL or validation error: {error_msg}")
         raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
         error_msg = f"Failed to analyze job URL: {str(e)}"
