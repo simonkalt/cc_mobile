@@ -26,7 +26,7 @@ class JobURLRequest(BaseModel):
 async def analyze_job_url_endpoint(request: JobURLRequest):
     """
     Analyze a job posting URL and extract structured information.
-    
+
     Uses hybrid approach:
     1. First tries BeautifulSoup (fast, free)
     2. Falls back to Grok AI if BeautifulSoup fails
@@ -34,31 +34,29 @@ async def analyze_job_url_endpoint(request: JobURLRequest):
     try:
         # Convert HttpUrl to string
         url_str = str(request.url)
-        
+
         # Call the analyzer
         result = await analyze_job_url(
             url=url_str,
             user_id=request.user_id,
             user_email=request.user_email,
-            use_grok_fallback=True  # Enable Grok fallback
+            use_grok_fallback=True,  # Enable Grok fallback
         )
-        
+
         # If CAPTCHA is required, return 200 with special response (not an error)
         if result.get("captcha_required"):
             return result
-        
+
         return result
-        
+
     except ValueError as e:
         # Invalid URL format
         logger.warning(f"Invalid URL format: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-        
+
     except Exception as e:
         # Other errors
         logger.error(f"Failed to analyze job URL: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch or analyze job URL: {str(e)}"
+            status_code=500, detail=f"Failed to fetch or analyze job URL: {str(e)}"
         )
-

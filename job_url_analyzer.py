@@ -22,22 +22,7 @@ from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-
-# Try to import Grok, make it optional
-try:
-    from xai import Grok
-
-    GROK_AVAILABLE = True
-except ImportError:
-    GROK_AVAILABLE = False
-
-    # Create a dummy Grok class for type hints
-    class Grok:
-        def __init__(self, *args, **kwargs):
-            raise ImportError(
-                "xai package not available. Install with: pip install xai"
-            )
-
+from xai import Grok
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -457,6 +442,14 @@ def detect_captcha(html: str) -> bool:
         "cf-ray",
         "challenge-form",
         "turnstile",  # Cloudflare Turnstile
+        # Indeed-specific indicators
+        "access denied",
+        "unusual traffic",
+        "verify you're not a robot",
+        "bot detection",
+        "security verification",
+        "indeed.com/access-denied",
+        "indeed.com/verify",
     ]
 
     # Check for CAPTCHA indicators in HTML
@@ -506,7 +499,6 @@ def fetch_html(
         response = requests.get(
             url, headers=headers, timeout=timeout, allow_redirects=True
         )
-        response.raise_for_status()
 
         # Try to detect encoding
         if response.encoding:
@@ -514,8 +506,59 @@ def fetch_html(
         else:
             html = response.content.decode("utf-8", errors="ignore")
 
-        # Check for CAPTCHA
+        # Check for CAPTCHA BEFORE checking status code
+        # Some sites (like Indeed) may return 403 or redirect to CAPTCHA page
         captcha_detected = detect_captcha(html)
+
+        # If CAPTCHA is detected, return it even if status is not 200
+        if captcha_detected:
+            logger.warning(
+                f"CAPTCHA detected for URL: {url} (status: {response.status_code})"
+            )
+            return html, None, captcha_detected
+
+        # For error status codes (403, 429, 503), check again for CAPTCHA
+        # These often indicate rate limiting or verification needed
+        if response.status_code in [403, 429, 503]:
+            captcha_detected = detect_captcha(html)
+            if captcha_detected:
+                logger.warning(
+                    f"CAPTCHA detected for URL: {url} (status: {response.status_code})"
+                )
+                return html, None, captcha_detected
+
+            # Indeed specifically - 403 almost always means CAPTCHA/verification needed
+            if "indeed.com" in url.lower() and response.status_code == 403:
+                logger.warning(
+                    f"Indeed 403 Forbidden for URL: {url} - treating as CAPTCHA required"
+                )
+                return html, None, True
+
+            # For other sites with 403/429/503, check if HTML suggests CAPTCHA
+            # Look for common error pages that might indicate verification needed
+            html_lower_check = html.lower()
+            if any(
+                indicator in html_lower_check
+                for indicator in [
+                    "access denied",
+                    "unusual traffic",
+                    "verify",
+                    "security",
+                ]
+            ):
+                logger.warning(
+                    f"Error status {response.status_code} with security indicators for URL: {url} - treating as CAPTCHA"
+                )
+                return html, None, True
+
+            logger.warning(
+                f"Error status {response.status_code} for URL: {url} - may require CAPTCHA"
+            )
+            # Return as CAPTCHA required to trigger modal
+            return html, None, True
+
+        # Now check status code (only if no CAPTCHA was detected and not error status)
+        response.raise_for_status()
 
         return html, None, captcha_detected
 
@@ -628,10 +671,6 @@ def extract_with_grok(
     """
     result = JobExtractionResult()
     result.method = "grok"
-
-    if not GROK_AVAILABLE:
-        logger.error("Grok (xai package) not available. Cannot extract with Grok.")
-        return result
 
     try:
         # Limit HTML size to avoid token limits
