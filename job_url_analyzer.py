@@ -76,25 +76,38 @@ class LinkedInParser(BaseJobParser):
     def parse(self, soup: BeautifulSoup, url: str) -> JobExtractionResult:
         result = JobExtractionResult()
         result.method = "beautifulsoup-linkedin"
+        logger.info(f"[LinkedInParser] Starting extraction for URL: {url}")
 
         try:
             # Try JSON-LD structured data first
             json_ld_scripts = soup.find_all("script", type="application/ld+json")
+            logger.info(
+                f"[LinkedInParser] Found {len(json_ld_scripts)} JSON-LD scripts"
+            )
             for script in json_ld_scripts:
                 try:
                     data = json.loads(script.string)
                     if isinstance(data, dict) and data.get("@type") == "JobPosting":
+                        logger.info("[LinkedInParser] Found JobPosting in JSON-LD")
                         result.company = data.get("hiringOrganization", {}).get("name")
                         result.job_title = data.get("title")
                         result.job_description = data.get("description")
+                        logger.info(
+                            f"[LinkedInParser] JSON-LD extracted - Company: '{result.company}', Title: '{result.job_title}', Description: {len(result.job_description) if result.job_description else 0} chars"
+                        )
                         if result.has_minimum_data():
                             result.is_complete = True
+                            logger.info(
+                                "[LinkedInParser] JSON-LD extraction successful, returning result"
+                            )
                             return result
-                except (json.JSONDecodeError, AttributeError):
+                except (json.JSONDecodeError, AttributeError) as e:
+                    logger.debug(f"[LinkedInParser] JSON-LD parse error: {e}")
                     continue
 
             # Try CSS selectors
             # Company name
+            logger.info("[LinkedInParser] Trying CSS selectors for company name...")
             company_selectors = [
                 '[data-testid="job-poster-name"]',
                 'a[data-tracking-control-name="job_poster_name"]',
@@ -105,9 +118,17 @@ class LinkedInParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.company = element.get_text(strip=True)
+                    logger.info(
+                        f"[LinkedInParser] Found company using selector '{selector}': '{result.company}'"
+                    )
                     break
+            if not result.company:
+                logger.warning(
+                    "[LinkedInParser] Could not find company name with any selector"
+                )
 
             # Job title
+            logger.info("[LinkedInParser] Trying CSS selectors for job title...")
             title_selectors = [
                 "h1.job-title",
                 'h1[data-testid="job-title"]',
@@ -118,25 +139,131 @@ class LinkedInParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.job_title = element.get_text(strip=True)
+                    logger.info(
+                        f"[LinkedInParser] Found job title using selector '{selector}': '{result.job_title}'"
+                    )
                     break
+            if not result.job_title:
+                logger.warning(
+                    "[LinkedInParser] Could not find job title with any selector"
+                )
 
-            # Job description
+            # Job description - LinkedIn uses "About the job" section
+            # Try multiple strategies to find the full job description
             desc_selectors = [
+                # Modern LinkedIn selectors
+                '[data-testid="job-description"]',
+                ".jobs-description-content__text",
+                ".jobs-box__html-content",
+                ".jobs-description__text",
+                # Look for "About the job" section specifically
+                'section[aria-labelledby*="job-details"]',
+                'div[data-testid="job-details"]',
+                # Generic fallbacks
                 ".description__text",
                 "#job-details",
-                ".jobs-description__text",
-                '[data-testid="job-description"]',
             ]
+
+            # First try direct selectors
             for selector in desc_selectors:
-                element = soup.select_one(selector)
-                if element:
-                    result.job_description = element.get_text(strip=True)
-                    break
+                try:
+                    element = soup.select_one(selector)
+                    if element:
+                        text = element.get_text(strip=True)
+                        if (
+                            text and len(text) > 100
+                        ):  # Ensure we got substantial content
+                            result.job_description = text
+                            logger.info(
+                                f"[LinkedInParser] Found description using selector '{selector}': {len(text)} chars"
+                            )
+                            break
+                except Exception as e:
+                    logger.debug(f"[LinkedInParser] Selector '{selector}' failed: {e}")
+                    continue
+
+            # If not found, try finding "About the job" heading and get following content
+            if not result.job_description:
+                logger.info(
+                    "[LinkedInParser] Trying to find 'About the job' section..."
+                )
+                # Find heading containing "About the job" - try multiple approaches
+                headings = soup.find_all(
+                    ["h2", "h3", "h4"], string=re.compile(r"about the job", re.I)
+                )
+                if not headings:
+                    # Try finding by aria-label or other attributes
+                    headings = soup.find_all(
+                        ["h2", "h3", "h4"],
+                        attrs={"aria-label": re.compile(r"about", re.I)},
+                    )
+
+                # Also try finding by text content in any element
+                if not headings:
+                    all_elements = soup.find_all(["h2", "h3", "h4", "div", "span"])
+                    for elem in all_elements:
+                        if elem.string and re.search(
+                            r"about the job", elem.string, re.I
+                        ):
+                            headings.append(elem)
+                            break
+
+                for heading in headings:
+                    # Get the next sibling div or section
+                    next_sibling = heading.find_next_sibling(["div", "section"])
+                    if next_sibling:
+                        text = next_sibling.get_text(strip=True)
+                        if text and len(text) > 100:
+                            result.job_description = text
+                            logger.info(
+                                f"[LinkedInParser] Found description after 'About the job' heading: {len(text)} chars"
+                            )
+                            break
+
+                    # Also try parent's next sibling
+                    parent = heading.parent
+                    if parent:
+                        next_parent = parent.find_next_sibling(["div", "section"])
+                        if next_parent:
+                            text = next_parent.get_text(strip=True)
+                            if text and len(text) > 100:
+                                result.job_description = text
+                                logger.info(
+                                    f"[LinkedInParser] Found description in parent's next sibling: {len(text)} chars"
+                                )
+                                break
+
+                    # Try finding the description container within the same parent
+                    if parent:
+                        desc_container = parent.find(
+                            ["div", "section"],
+                            class_=re.compile(r"description|content|text", re.I),
+                        )
+                        if desc_container:
+                            text = desc_container.get_text(strip=True)
+                            if text and len(text) > 100:
+                                result.job_description = text
+                                logger.info(
+                                    f"[LinkedInParser] Found description in parent container: {len(text)} chars"
+                                )
+                                break
+
+            if not result.job_description:
+                logger.warning(
+                    "[LinkedInParser] Could not find job description with any selector"
+                )
 
             result.is_complete = result.has_minimum_data()
 
+            logger.info(
+                f"[LinkedInParser] Final extraction - Company: '{result.company or 'None'}', Title: '{result.job_title or 'None'}', Description: {len(result.job_description) if result.job_description else 0} chars"
+            )
+            logger.info(
+                f"[LinkedInParser] Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
+            )
+
         except Exception as e:
-            logger.error(f"LinkedIn parser error: {e}")
+            logger.error(f"LinkedIn parser error: {e}", exc_info=True)
 
         return result
 
@@ -925,18 +1052,29 @@ HTML Content:
 {html_content}
 
 Please extract the following information and return ONLY valid JSON (no markdown, no code blocks):
+
+IMPORTANT: For LinkedIn job postings, the full job description is typically found in the "About the job" section. Look for this section specifically and extract all the text content including:
+- Job responsibilities and duties
+- Required qualifications and experience
+- Preferred qualifications
+- Company information
+- Any other relevant job details
+
+Extract:
 1. company: The company name (not from URL, but from the actual job posting content)
 2. job_title: The complete job title/position name
-3. full_description: The full job description including responsibilities, requirements, and qualifications
+3. full_description: The FULL job description text. For LinkedIn, this should be the complete content from the "About the job" section, including all responsibilities, requirements, qualifications, and any other relevant details. Include everything - this is the most important field.
 4. hiring_manager: The name of the hiring manager or recruiter if mentioned (return empty string "" if not found)
 
 Return format (JSON only):
 {{
     "company": "Company Name",
     "job_title": "Job Title",
-    "full_description": "Full job description text...",
+    "full_description": "Full job description text including all responsibilities, requirements, qualifications, and details from the 'About the job' section...",
     "hiring_manager": "Hiring Manager Name" or ""
 }}
+
+CRITICAL: The full_description field must contain the complete job description. If you see an "About the job" section, extract ALL of its content. Do not truncate or summarize - include the full text.
 
 If any information cannot be extracted, use "Not specified" as the value (except hiring_manager which should be empty string "" if not found)."""
 
