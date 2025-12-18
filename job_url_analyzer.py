@@ -150,8 +150,10 @@ class LinkedInParser(BaseJobParser):
 
             # Job description - LinkedIn uses "About the job" section
             # Try multiple strategies to find the full job description
+            # IMPORTANT: We want the actual readable text, not metadata or structured data
+
             desc_selectors = [
-                # Modern LinkedIn selectors
+                # Modern LinkedIn selectors - these should contain the actual description text
                 '[data-testid="job-description"]',
                 ".jobs-description-content__text",
                 ".jobs-box__html-content",
@@ -164,20 +166,36 @@ class LinkedInParser(BaseJobParser):
                 "#job-details",
             ]
 
-            # First try direct selectors
+            # First try direct selectors - but filter out script/JSON-LD content
             for selector in desc_selectors:
                 try:
                     element = soup.select_one(selector)
                     if element:
-                        text = element.get_text(strip=True)
+                        # Skip if this is a script tag or contains JSON-LD
+                        if element.name == "script" or "application/ld+json" in str(
+                            element
+                        ):
+                            continue
+
+                        # Get text but exclude script and style tags
+                        for script in element(["script", "style", "noscript"]):
+                            script.decompose()
+
+                        text = element.get_text(separator="\n", strip=True)
+                        # Ensure we got substantial content and it's not just metadata
                         if (
-                            text and len(text) > 100
-                        ):  # Ensure we got substantial content
-                            result.job_description = text
-                            logger.info(
-                                f"[LinkedInParser] Found description using selector '{selector}': {len(text)} chars"
-                            )
-                            break
+                            text and len(text) > 200
+                        ):  # Increased threshold to avoid metadata
+                            # Check if it looks like actual description (has sentences, not just keywords)
+                            if (
+                                any(char in text for char in [".", "!", "?"])
+                                or len(text.split()) > 30
+                            ):
+                                result.job_description = text
+                                logger.info(
+                                    f"[LinkedInParser] Found description using selector '{selector}': {len(text)} chars"
+                                )
+                                break
                 except Exception as e:
                     logger.debug(f"[LinkedInParser] Selector '{selector}' failed: {e}")
                     continue
@@ -212,8 +230,18 @@ class LinkedInParser(BaseJobParser):
                     # Get the next sibling div or section
                     next_sibling = heading.find_next_sibling(["div", "section"])
                     if next_sibling:
-                        text = next_sibling.get_text(strip=True)
-                        if text and len(text) > 100:
+                        # Remove script/style tags
+                        for script in next_sibling(["script", "style", "noscript"]):
+                            script.decompose()
+                        text = next_sibling.get_text(separator="\n", strip=True)
+                        if (
+                            text
+                            and len(text) > 200
+                            and (
+                                any(char in text for char in [".", "!", "?"])
+                                or len(text.split()) > 30
+                            )
+                        ):
                             result.job_description = text
                             logger.info(
                                 f"[LinkedInParser] Found description after 'About the job' heading: {len(text)} chars"
@@ -225,8 +253,17 @@ class LinkedInParser(BaseJobParser):
                     if parent:
                         next_parent = parent.find_next_sibling(["div", "section"])
                         if next_parent:
-                            text = next_parent.get_text(strip=True)
-                            if text and len(text) > 100:
+                            for script in next_parent(["script", "style", "noscript"]):
+                                script.decompose()
+                            text = next_parent.get_text(separator="\n", strip=True)
+                            if (
+                                text
+                                and len(text) > 200
+                                and (
+                                    any(char in text for char in [".", "!", "?"])
+                                    or len(text.split()) > 30
+                                )
+                            ):
                                 result.job_description = text
                                 logger.info(
                                     f"[LinkedInParser] Found description in parent's next sibling: {len(text)} chars"
@@ -240,8 +277,19 @@ class LinkedInParser(BaseJobParser):
                             class_=re.compile(r"description|content|text", re.I),
                         )
                         if desc_container:
-                            text = desc_container.get_text(strip=True)
-                            if text and len(text) > 100:
+                            for script in desc_container(
+                                ["script", "style", "noscript"]
+                            ):
+                                script.decompose()
+                            text = desc_container.get_text(separator="\n", strip=True)
+                            if (
+                                text
+                                and len(text) > 200
+                                and (
+                                    any(char in text for char in [".", "!", "?"])
+                                    or len(text.split()) > 30
+                                )
+                            ):
                                 result.job_description = text
                                 logger.info(
                                     f"[LinkedInParser] Found description in parent container: {len(text)} chars"
@@ -252,6 +300,78 @@ class LinkedInParser(BaseJobParser):
                 logger.warning(
                     "[LinkedInParser] Could not find job description with any selector"
                 )
+
+            # Try to extract hiring manager from "Meet the hiring team" section
+            try:
+                logger.info(
+                    "[LinkedInParser] Looking for 'Meet the hiring team' section..."
+                )
+                # Find heading or text containing "Meet the hiring team"
+                hiring_team_heading = soup.find(
+                    string=re.compile(r"meet the hiring team", re.I)
+                )
+                if not hiring_team_heading:
+                    hiring_team_heading = soup.find(
+                        string=re.compile(r"hiring team", re.I)
+                    )
+
+                if hiring_team_heading:
+                    logger.info("[LinkedInParser] Found 'Meet the hiring team' section")
+                    # Get parent element
+                    parent = (
+                        hiring_team_heading.parent
+                        if hasattr(hiring_team_heading, "parent")
+                        else None
+                    )
+                    if not parent:
+                        # Try finding the element
+                        parent = soup.find(
+                            string=re.compile(r"meet the hiring team", re.I)
+                        )
+                        if parent and hasattr(parent, "parent"):
+                            parent = parent.parent
+
+                    if parent:
+                        # Look for name patterns in the same section
+                        # LinkedIn typically shows names in links or specific divs
+                        name_elements = parent.find_all(
+                            ["a", "span", "div"],
+                            class_=re.compile(r"name|profile|person", re.I),
+                        )
+                        for elem in name_elements:
+                            text = elem.get_text(strip=True)
+                            # Look for name-like patterns (capitalized words)
+                            name_match = re.search(
+                                r"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", text
+                            )
+                            if (
+                                name_match and len(name_match.group(1).split()) <= 4
+                            ):  # Reasonable name length
+                                result.hiring_manager = name_match.group(1).strip()
+                                logger.info(
+                                    f"[LinkedInParser] Found hiring manager: '{result.hiring_manager}'"
+                                )
+                                break
+
+                        # If not found in class-based search, try finding links with profile URLs
+                        if not result.hiring_manager:
+                            profile_links = parent.find_all(
+                                "a", href=re.compile(r"/in/|/profile/", re.I)
+                            )
+                            for link in profile_links:
+                                text = link.get_text(strip=True)
+                                if (
+                                    text
+                                    and len(text.split()) <= 4
+                                    and re.match(r"^[A-Z]", text)
+                                ):
+                                    result.hiring_manager = text
+                                    logger.info(
+                                        f"[LinkedInParser] Found hiring manager from profile link: '{result.hiring_manager}'"
+                                    )
+                                    break
+            except Exception as e:
+                logger.debug(f"[LinkedInParser] Could not extract hiring manager: {e}")
 
             result.is_complete = result.has_minimum_data()
 
@@ -979,35 +1099,44 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
             return result
 
     # Try to extract hiring manager (common patterns)
-    try:
-        # Look for hiring manager patterns in the HTML
-        hiring_manager_patterns = [
-            soup.find(string=re.compile(r"hiring manager", re.I)),
-            soup.find(string=re.compile(r"recruiter", re.I)),
-            soup.find(string=re.compile(r"contact.*name", re.I)),
-        ]
+    # Note: LinkedIn hiring manager extraction is handled in LinkedInParser
+    # This is a fallback for other sites or if LinkedInParser didn't find it
+    if not result.hiring_manager:
+        try:
+            # Look for hiring manager patterns in the HTML
+            hiring_manager_patterns = [
+                soup.find(string=re.compile(r"meet the hiring team", re.I)),
+                soup.find(string=re.compile(r"hiring manager", re.I)),
+                soup.find(string=re.compile(r"recruiter", re.I)),
+                soup.find(string=re.compile(r"contact.*name", re.I)),
+            ]
 
-        for pattern_match in hiring_manager_patterns:
-            if pattern_match:
-                # Try to find the name near the pattern
-                parent = (
-                    pattern_match.parent if hasattr(pattern_match, "parent") else None
-                )
-                if parent:
-                    # Look for name-like text nearby
-                    text = parent.get_text(strip=True)
-                    # Simple heuristic: look for capitalized words after "hiring manager" or "recruiter"
-                    match = re.search(
-                        r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-                        text,
-                        re.I,
+            for pattern_match in hiring_manager_patterns:
+                if pattern_match:
+                    # Try to find the name near the pattern
+                    parent = (
+                        pattern_match.parent
+                        if hasattr(pattern_match, "parent")
+                        else None
                     )
-                    if match:
-                        result.hiring_manager = match.group(1).strip()
-                        break
-    except Exception as e:
-        logger.debug(f"Could not extract hiring manager: {e}")
-        # Leave as None/empty string
+                    if parent:
+                        # Look for name-like text nearby
+                        text = parent.get_text(strip=True)
+                        # Simple heuristic: look for capitalized words after "hiring manager", "recruiter", or "meet the hiring team"
+                        match = re.search(
+                            r"(?:meet the hiring team|hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+                            text,
+                            re.I,
+                        )
+                        if match:
+                            result.hiring_manager = match.group(1).strip()
+                            logger.info(
+                                f"[extract_with_beautifulsoup] Found hiring manager: '{result.hiring_manager}'"
+                            )
+                            break
+        except Exception as e:
+            logger.debug(f"Could not extract hiring manager: {e}")
+            # Leave as None/empty string
 
     logger.info(
         f"BeautifulSoup extraction result: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
@@ -1053,37 +1182,47 @@ HTML Content:
 
 Please extract the following information and return ONLY valid JSON (no markdown, no code blocks):
 
-IMPORTANT: For LinkedIn job postings, the full job description is typically found in the "About the job" section. Look for this section specifically and extract all the text content including:
-- Job responsibilities and duties
-- Required qualifications and experience
-- Preferred qualifications
-- Company information
-- Any other relevant job details
+IMPORTANT FOR LINKEDIN JOB POSTINGS:
+
+1. FULL DESCRIPTION: The full job description is found in the "About the job" section. This section contains the actual job description text with responsibilities, requirements, qualifications, etc. 
+   - Look for the "About the job" heading or section
+   - Extract ALL the text content from that section - this is the main job description
+   - DO NOT extract metadata, structured data, or JSON-LD content
+   - DO NOT extract just a summary - get the complete, full text description
+   - Include all paragraphs, bullet points, and details from the "About the job" section
+
+2. HIRING MANAGER: For LinkedIn, look for the "Meet the hiring team" section. This section typically shows the hiring manager or recruiter's name and profile information.
+   - Search for text containing "Meet the hiring team" or "hiring team"
+   - Extract the person's name from that section
+   - Look for names, profile links, or contact information in that area
+   - If no name is found in "Meet the hiring team", return empty string ""
 
 Extract:
 1. company: The company name (not from URL, but from the actual job posting content)
 2. job_title: The complete job title/position name
-3. full_description: The FULL job description text. For LinkedIn, this should be the complete content from the "About the job" section, including all responsibilities, requirements, qualifications, and any other relevant details. Include everything - this is the most important field.
-4. hiring_manager: The name of the hiring manager or recruiter if mentioned (return empty string "" if not found)
+3. full_description: The COMPLETE, FULL job description text from the "About the job" section. This must be the actual readable job description content, not metadata or structured data. Include all responsibilities, requirements, qualifications, company information, and any other job details. This is the most important field - extract everything.
+4. hiring_manager: For LinkedIn, look in the "Meet the hiring team" section. Extract the hiring manager or recruiter's name if shown. Return empty string "" if not found or if no name is provided.
 
 Return format (JSON only):
 {{
     "company": "Company Name",
     "job_title": "Job Title",
-    "full_description": "Full job description text including all responsibilities, requirements, qualifications, and details from the 'About the job' section...",
+    "full_description": "Complete full job description text from the 'About the job' section including all responsibilities, requirements, qualifications, and details...",
     "hiring_manager": "Hiring Manager Name" or ""
 }}
 
-CRITICAL: The full_description field must contain the complete job description. If you see an "About the job" section, extract ALL of its content. Do not truncate or summarize - include the full text.
+CRITICAL INSTRUCTIONS:
+- full_description: Must be the complete, readable job description text from "About the job" section. Do NOT include JSON-LD, metadata, or structured data. Extract the actual human-readable description content.
+- hiring_manager: For LinkedIn, specifically check the "Meet the hiring team" section. Extract the person's name if available. If the section exists but no name is shown, return empty string "".
 
 If any information cannot be extracted, use "Not specified" as the value (except hiring_manager which should be empty string "" if not found)."""
 
-        # Call Grok API
+        # Call Grok API - increased max_tokens to handle longer descriptions
         response = grok_client.chat.completions.create(
             model="grok-beta",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=4000,
+            max_tokens=8000,  # Increased to handle full job descriptions
         )
 
         # Parse response
