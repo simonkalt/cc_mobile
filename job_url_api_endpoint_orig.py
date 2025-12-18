@@ -43,10 +43,6 @@ async def analyze_job_url_endpoint(request: JobURLRequest):
             use_grok_fallback=True  # Enable Grok fallback
         )
         
-        # If CAPTCHA is required, return 200 with special response (not an error)
-        if result.get("captcha_required"):
-            return result
-        
         return result
         
     except ValueError as e:
