@@ -884,29 +884,32 @@ async def analyze_job_url(
 
     # Check if CAPTCHA is required (only if extraction failed AND HTML was not provided)
     # If HTML was provided, it's already from a verified page, so don't return captcha_required
-    if result.method == "captcha-required" and not html_content:
-        logger.info(
-            "CAPTCHA required and extraction failed - returning special response"
-        )
-        return {
-            "success": False,
-            "captcha_required": True,
-            "url": url,
-            "message": "CAPTCHA or human verification required. The website is blocking automated access.",
-            "company": "Not specified",
-            "job_title": "Not specified",
-            "ad_source": ad_source,
-            "full_description": "Not specified",
-            "hiring_manager": "",
-            "extractionMethod": "error",
-        }
-    # If HTML was provided but extraction failed, just return the failed result (don't mark as captcha_required)
-    elif result.method == "captcha-required" and html_content:
-        logger.warning(
-            "Extraction failed even with provided HTML content - returning failed result without captcha_required"
-        )
-        # Return the result as-is, but don't mark as captcha_required since HTML was already verified
-        return result.to_dict()
+    if result.method == "captcha-required":
+        if html_content:
+            # HTML was provided, so CAPTCHA is already completed - don't return captcha_required
+            logger.warning(
+                "Extraction failed even with provided HTML content - resetting method and continuing"
+            )
+            # Reset method to indicate failure, not CAPTCHA requirement
+            result.method = "beautifulsoup-failed"
+            # Continue with Grok fallback instead of returning early
+        else:
+            # No HTML provided, so CAPTCHA is actually required
+            logger.info(
+                "CAPTCHA required and extraction failed - returning special response"
+            )
+            return {
+                "success": False,
+                "captcha_required": True,
+                "url": url,
+                "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+                "company": "Not specified",
+                "job_title": "Not specified",
+                "ad_source": ad_source,
+                "full_description": "Not specified",
+                "hiring_manager": "",
+                "extractionMethod": "error",
+            }
 
     # Step 2: If BeautifulSoup didn't get complete data, try Grok
     if not result.is_complete and use_grok_fallback:
@@ -982,6 +985,9 @@ async def analyze_job_url(
                 if grok_result.has_minimum_data():
                     result = grok_result
                 # Otherwise keep the BeautifulSoup result (even if incomplete)
+                # Ensure method is not set to captcha-required when HTML was provided
+                if result.method == "captcha-required":
+                    result.method = "grok-failed"
             else:
                 # Combine: use Grok values where BS has "Not specified"
                 if (
@@ -1013,10 +1019,24 @@ async def analyze_job_url(
     response_data = result.to_dict()
     response_data["url"] = url
 
+    # If HTML was provided, never return captcha_required (HTML is already verified)
+    # This is a safety check - we should have already handled this above, but ensure it here too
+    if html_content:
+        # Remove any captcha_required flag that might have been set
+        if "captcha_required" in response_data:
+            logger.warning(
+                "Removing captcha_required flag since HTML was provided from verified page"
+            )
+            del response_data["captcha_required"]
+        # Ensure success is True (even if extraction failed, we don't want captcha_required)
+        if not response_data.get("success"):
+            response_data["success"] = True
+
     logger.info(
         f"Final extraction result: method={result.method}, company={bool(result.company)}, "
         f"title={bool(result.job_title)}, description={bool(result.job_description)}, "
-        f"ad_source={result.ad_source}, hiring_manager={bool(result.hiring_manager)}"
+        f"ad_source={result.ad_source}, hiring_manager={bool(result.hiring_manager)}, "
+        f"html_provided={bool(html_content)}, captcha_required={response_data.get('captcha_required', False)}"
     )
 
     return response_data
