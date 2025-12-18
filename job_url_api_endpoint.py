@@ -20,6 +20,7 @@ class JobURLRequest(BaseModel):
     url: HttpUrl
     user_id: Optional[str] = None
     user_email: Optional[str] = None
+    html_content: Optional[str] = None  # HTML content from CAPTCHA completion
 
 
 @router.post("/api/job-url/analyze")
@@ -41,6 +42,7 @@ async def analyze_job_url_endpoint(request: JobURLRequest):
             user_id=request.user_id,
             user_email=request.user_email,
             use_grok_fallback=True,  # Enable Grok fallback
+            html_content=request.html_content,  # Pass HTML content if provided
         )
 
         # If CAPTCHA is required, return 200 with special response (not an error)

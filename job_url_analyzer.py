@@ -570,6 +570,85 @@ def fetch_html(
         return None, f"Unexpected error fetching URL: {str(e)}", None
 
 
+def extract_from_html(html: str, url: str) -> JobExtractionResult:
+    """
+    Extract job information from provided HTML content using BeautifulSoup
+
+    Args:
+        html: HTML content to parse
+        url: URL for site detection and logging
+
+    Returns:
+        JobExtractionResult object
+    """
+    result = JobExtractionResult()
+
+    if not html:
+        result.method = "beautifulsoup-failed"
+        return result
+
+    # Parse HTML
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception as e:
+        logger.error(f"Failed to parse HTML: {e}")
+        result.method = "beautifulsoup-parse-error"
+        return result
+
+    # Detect site and use appropriate parser
+    site = detect_site(url)
+    logger.info(f"Detected site: {site} for URL: {url}")
+
+    parsers = {
+        "linkedin": LinkedInParser(),
+        "indeed": IndeedParser(),
+        "glassdoor": GlassdoorParser(),
+        "generic": GenericParser(),
+    }
+
+    parser = parsers.get(site, GenericParser())
+    result = parser.parse(soup, url)
+
+    # Set ad_source based on detected site
+    result.ad_source = site
+
+    # Try to extract hiring manager (common patterns)
+    try:
+        # Look for hiring manager patterns in the HTML
+        hiring_manager_patterns = [
+            soup.find(string=re.compile(r"hiring manager", re.I)),
+            soup.find(string=re.compile(r"recruiter", re.I)),
+            soup.find(string=re.compile(r"contact.*name", re.I)),
+        ]
+
+        for pattern_match in hiring_manager_patterns:
+            if pattern_match:
+                # Try to find the name near the pattern
+                parent = (
+                    pattern_match.parent if hasattr(pattern_match, "parent") else None
+                )
+                if parent:
+                    # Look for name-like text nearby
+                    text = parent.get_text(strip=True)
+                    # Simple heuristic: look for capitalized words after "hiring manager" or "recruiter"
+                    match = re.search(
+                        r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+                        text,
+                        re.I,
+                    )
+                    if match:
+                        result.hiring_manager = match.group(1).strip()
+                        break
+    except Exception as e:
+        logger.debug(f"Could not extract hiring manager: {e}")
+        # Leave as None/empty string
+
+    logger.info(
+        f"BeautifulSoup extraction from HTML: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
+    )
+    return result
+
+
 def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     """
     Extract job information using BeautifulSoup
@@ -754,6 +833,7 @@ async def analyze_job_url(
     user_email: Optional[str] = None,
     use_grok_fallback: bool = True,
     grok_client: Optional[Grok] = None,
+    html_content: Optional[str] = None,
 ) -> Dict:
     """
     Analyze job URL using hybrid BeautifulSoup + Grok approach
@@ -764,12 +844,13 @@ async def analyze_job_url(
         user_email: Optional user email for logging
         use_grok_fallback: Whether to use Grok if BeautifulSoup fails
         grok_client: Optional Grok client instance
+        html_content: Optional HTML content (from CAPTCHA completion) - if provided, skips fetching
 
     Returns:
         Dictionary matching API response format
     """
     logger.info(
-        f"Analyzing job URL: {url} (user_id={user_id}, user_email={user_email})"
+        f"Analyzing job URL: {url} (user_id={user_id}, user_email={user_email}, has_html={bool(html_content)})"
     )
 
     # Validate URL
@@ -780,8 +861,13 @@ async def analyze_job_url(
     ad_source = detect_site(url)
 
     # Step 1: Try BeautifulSoup first (fast, free)
-    logger.info("Attempting BeautifulSoup extraction...")
-    result = extract_with_beautifulsoup(url)
+    # If HTML content is provided, use it directly (from CAPTCHA completion)
+    if html_content:
+        logger.info("Using provided HTML content for extraction...")
+        result = extract_from_html(html_content, url)
+    else:
+        logger.info("Attempting BeautifulSoup extraction...")
+        result = extract_with_beautifulsoup(url)
 
     # Check if CAPTCHA is required
     if result.method == "captcha-required":
@@ -790,17 +876,29 @@ async def analyze_job_url(
             "success": False,
             "captcha_required": True,
             "url": url,
-            "message": "Human verification required. Please complete the CAPTCHA.",
+            "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+            "company": "Not specified",
+            "job_title": "Not specified",
+            "ad_source": ad_source,
+            "full_description": "Not specified",
+            "hiring_manager": "",
+            "extractionMethod": "error",
         }
 
     # Step 2: If BeautifulSoup didn't get complete data, try Grok
     if not result.is_complete and use_grok_fallback:
         logger.info("BeautifulSoup extraction incomplete, falling back to Grok...")
 
-        # Fetch HTML for Grok (if not already fetched)
-        html, error, captcha_detected = fetch_html(url)
+        # Use provided HTML if available, otherwise fetch it
+        if html_content:
+            html = html_content
+            error = None
+            captcha_detected = False
+        else:
+            # Fetch HTML for Grok (if not already fetched)
+            html, error, captcha_detected = fetch_html(url)
 
-        # Check for CAPTCHA again before using Grok
+        # Check for CAPTCHA again before using Grok (only if we fetched)
         if captcha_detected:
             logger.info(
                 "CAPTCHA detected during Grok fallback - returning special response"
@@ -809,7 +907,13 @@ async def analyze_job_url(
                 "success": False,
                 "captcha_required": True,
                 "url": url,
-                "message": "Human verification required. Please complete the CAPTCHA.",
+                "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+                "company": "Not specified",
+                "job_title": "Not specified",
+                "ad_source": ad_source,
+                "full_description": "Not specified",
+                "hiring_manager": "",
+                "extractionMethod": "error",
             }
 
         if html and not error:
