@@ -1206,14 +1206,37 @@ Return format (JSON only):
     "ad_source": "linkedin" or "indeed" or "glassdoor" or "generic"
 }}
 
-Notes:
-- company: Extract the company name from the job posting
-- job_title: Extract the complete job title/position name
-- full_description: Extract the complete, full job description text (for LinkedIn, this is typically in the "About the job" section)
-- hiring_manager: Extract the hiring manager or recruiter's name if shown (for LinkedIn, check "Meet the hiring team" section). Return empty string "" if not found.
-- ad_source: Determine the job board source (linkedin, indeed, glassdoor, or generic) based on the URL or page content
+IMPORTANT EXTRACTION INSTRUCTIONS:
+
+1. company: Extract the company name from the job posting (not from the URL)
+
+2. job_title: Extract the complete job title/position name
+
+3. full_description: Extract the complete, full job description text. For LinkedIn job postings, this is typically found in the "About the job" section. Include all responsibilities, requirements, qualifications, and any other job details.
+
+4. hiring_manager: CRITICAL - For LinkedIn job postings, look for a section titled "Meet the hiring team" or "Hiring team". In this section, extract the name of the person shown (this could be a hiring manager, recruiter, or team member). The name is typically displayed as:
+   - Text near "Meet the hiring team" heading
+   - Profile names or links in that section
+   - Names associated with profile pictures or cards in that area
+   - Look for capitalized names (First Last format) in the "Meet the hiring team" section
+   If you find the "Meet the hiring team" section but no name is displayed, return empty string "". If the section doesn't exist, return empty string "".
+
+5. ad_source: Determine the job board source based on the URL or page content:
+   - "linkedin" if URL contains linkedin.com
+   - "indeed" if URL contains indeed.com
+   - "glassdoor" if URL contains glassdoor.com
+   - "generic" for any other source
 
 If any information cannot be extracted, use "Not specified" as the value (except hiring_manager which should be empty string "" if not found, and ad_source which should be "generic" if uncertain)."""
+
+        # Log the prompt being sent to Grok
+        logger.info("=" * 80)
+        logger.info("GROK PROMPT BEING SENT:")
+        logger.info("=" * 80)
+        logger.info(prompt)
+        logger.info("=" * 80)
+        logger.info(f"Prompt length: {len(prompt)} characters")
+        logger.info(f"HTML content length: {len(html_content)} characters")
 
         # Call Grok API - increased max_tokens to handle longer descriptions
         response = grok_client.chat.completions.create(
@@ -1223,8 +1246,20 @@ If any information cannot be extracted, use "Not specified" as the value (except
             max_tokens=8000,  # Increased to handle full job descriptions
         )
 
+        # Log the raw response from Grok
+        raw_response = response.choices[0].message.content.strip()
+        logger.info("=" * 80)
+        logger.info("GROK RAW RESPONSE:")
+        logger.info("=" * 80)
+        logger.info(raw_response[:2000])  # Log first 2000 chars
+        if len(raw_response) > 2000:
+            logger.info(
+                f"... (truncated, total length: {len(raw_response)} characters)"
+            )
+        logger.info("=" * 80)
+
         # Parse response
-        content = response.choices[0].message.content.strip()
+        content = raw_response
 
         # Remove markdown code blocks if present
         if content.startswith("```"):
@@ -1233,6 +1268,17 @@ If any information cannot be extracted, use "Not specified" as the value (except
 
         # Parse JSON
         data = json.loads(content)
+
+        # Log the parsed data
+        logger.info("=" * 80)
+        logger.info("GROK PARSED EXTRACTION RESULTS:")
+        logger.info("=" * 80)
+        logger.info(f"Company: {data.get('company', 'Not found')}")
+        logger.info(f"Job Title: {data.get('job_title', 'Not found')}")
+        logger.info(f"Full Description: {len(data.get('full_description', ''))} chars")
+        logger.info(f"Hiring Manager: '{data.get('hiring_manager', '')}'")
+        logger.info(f"Ad Source: {data.get('ad_source', 'Not found')}")
+        logger.info("=" * 80)
 
         result.company = data.get("company", "Not specified")
         result.job_title = data.get("job_title") or data.get(
@@ -1245,7 +1291,9 @@ If any information cannot be extracted, use "Not specified" as the value (except
         result.ad_source = data.get("ad_source", "generic") or "generic"
         result.is_complete = result.has_minimum_data()
 
-        logger.info(f"Grok extraction completed: complete={result.is_complete}")
+        logger.info(
+            f"Grok extraction completed: complete={result.is_complete}, hiring_manager='{result.hiring_manager}'"
+        )
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse Grok JSON response: {e}")
