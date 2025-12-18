@@ -26,6 +26,7 @@ from xai import Grok
 
 # Configure logging
 logger = logging.getLogger(__name__)
+token_limit = 100000
 
 
 class JobExtractionResult:
@@ -1177,7 +1178,7 @@ def extract_with_grok(
 
     try:
         # Limit HTML size to avoid token limits
-        html_content = html[:50000] if len(html) > 50000 else html
+        html_content = html[:token_limit] if len(html) > token_limit else html
 
         # Create Grok client if not provided
         if grok_client is None:
