@@ -882,8 +882,9 @@ async def analyze_job_url(
         logger.info("Attempting BeautifulSoup extraction...")
         result = extract_with_beautifulsoup(url)
 
-    # Check if CAPTCHA is required (only if extraction failed)
-    if result.method == "captcha-required":
+    # Check if CAPTCHA is required (only if extraction failed AND HTML was not provided)
+    # If HTML was provided, it's already from a verified page, so don't return captcha_required
+    if result.method == "captcha-required" and not html_content:
         logger.info(
             "CAPTCHA required and extraction failed - returning special response"
         )
@@ -899,6 +900,13 @@ async def analyze_job_url(
             "hiring_manager": "",
             "extractionMethod": "error",
         }
+    # If HTML was provided but extraction failed, just return the failed result (don't mark as captcha_required)
+    elif result.method == "captcha-required" and html_content:
+        logger.warning(
+            "Extraction failed even with provided HTML content - returning failed result without captcha_required"
+        )
+        # Return the result as-is, but don't mark as captcha_required since HTML was already verified
+        return result.to_dict()
 
     # Step 2: If BeautifulSoup didn't get complete data, try Grok
     if not result.is_complete and use_grok_fallback:
@@ -943,7 +951,12 @@ async def analyze_job_url(
                 result = grok_result
                 logger.info("Using Grok extraction results")
             # If CAPTCHA was detected and Grok also failed, mark as captcha-required
-            elif captcha_detected and not grok_result.has_minimum_data():
+            # BUT only if HTML was not provided (if HTML was provided, it's already verified)
+            elif (
+                captcha_detected
+                and not grok_result.has_minimum_data()
+                and not html_content
+            ):
                 logger.warning(
                     "❌ CAPTCHA detected and Grok extraction also failed - CAPTCHA required"
                 )
@@ -960,6 +973,15 @@ async def analyze_job_url(
                     "hiring_manager": "",
                     "extractionMethod": "error",
                 }
+            # If HTML was provided but Grok extraction failed, just return the failed result
+            elif not grok_result.has_minimum_data() and html_content:
+                logger.warning(
+                    "❌ Grok extraction failed even with provided HTML content"
+                )
+                # Use whatever data we have, even if incomplete
+                if grok_result.has_minimum_data():
+                    result = grok_result
+                # Otherwise keep the BeautifulSoup result (even if incomplete)
             else:
                 # Combine: use Grok values where BS has "Not specified"
                 if (
