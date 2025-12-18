@@ -1190,7 +1190,7 @@ def extract_with_grok(
             grok_client = Grok(api_key=api_key)
 
         # Create simplified prompt for Grok - let the LLM figure it out
-        prompt = f"""Scan the provided HTML content and retrieve the following fields: "Company Name", "Job Title", "Hiring Manager", "Ad Source", and "Job Description".
+        prompt = f"""Scan the provided HTML content and retrieve the following fields: "Company Name", "Job Title", "Hiring Manager", "Ad Source", and "Job Description". The job description should include all responsibilities, requirements, qualifications, and details. It should be the full job description text including all responsibilities, requirements, qualifications, and details. The hiring manager should be the name of the person who is hiring for the job. The ad source should be the source of the job posting. The company name should be the name of the company that is hiring for the job. The job title should be the title of the job. The hiring manager may be called a human resources manager, recruiter, hiring manager, or "meet the hiring team". 
 
 HTML Content:
 {html_content}
