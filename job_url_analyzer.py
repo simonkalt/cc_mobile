@@ -413,6 +413,9 @@ def detect_captcha(html: str) -> bool:
     """
     Detect if HTML content contains CAPTCHA or human verification
 
+    This function is smarter - it checks if the page actually contains job content.
+    If job content is present, CAPTCHA is likely already completed.
+
     Returns:
         True if CAPTCHA/human verification is detected, False otherwise
     """
@@ -421,44 +424,64 @@ def detect_captcha(html: str) -> bool:
 
     html_lower = html.lower()
 
-    # Common CAPTCHA indicators
-    captcha_indicators = [
-        "captcha",
+    # First, check if the page contains job-related content
+    # If it does, CAPTCHA is probably already completed
+    job_content_indicators = [
+        "job description",
+        "job title",
+        "apply now",
+        "job posting",
+        "hiring",
+        "qualifications",
+        "responsibilities",
+        "requirements",
+        "jobsearch-jobdescriptiontext",  # Indeed-specific
+        "job-poster-name",  # Indeed-specific
+        "job-title",  # Indeed-specific
+        "jobsearch-jobinfobullet",  # Indeed-specific
+    ]
+
+    has_job_content = any(
+        indicator in html_lower for indicator in job_content_indicators
+    )
+
+    # If we have job content, be more conservative about CAPTCHA detection
+    # Only detect CAPTCHA if there are strong indicators AND no job content
+    strong_captcha_indicators = [
         "recaptcha",
         "hcaptcha",
-        "cloudflare",
-        "challenge-platform",
         "cf-browser-verification",
         "cf-challenge",
-        "human verification",
+        "challenge-platform",
         "verify you are human",
         "verify you're human",
-        "please verify",
-        "security check",
         "just a moment",
         "checking your browser",
-        "ddos protection",
-        "ray id",  # Cloudflare Ray ID
-        "cf-ray",
         "challenge-form",
-        "turnstile",  # Cloudflare Turnstile
-        # Indeed-specific indicators
+        "turnstile",
         "access denied",
         "unusual traffic",
         "verify you're not a robot",
-        "bot detection",
-        "security verification",
         "indeed.com/access-denied",
         "indeed.com/verify",
     ]
 
-    # Check for CAPTCHA indicators in HTML
-    for indicator in captcha_indicators:
-        if indicator in html_lower:
-            logger.info(f"CAPTCHA detected: found indicator '{indicator}'")
-            return True
+    # Check for strong CAPTCHA indicators
+    has_strong_captcha = any(
+        indicator in html_lower for indicator in strong_captcha_indicators
+    )
 
-    # Check for common CAPTCHA iframe/div patterns
+    # If we have job content, don't detect CAPTCHA (it's already completed)
+    if has_job_content:
+        logger.debug("Job content detected - assuming CAPTCHA already completed")
+        return False
+
+    # If no job content but strong CAPTCHA indicators, detect CAPTCHA
+    if has_strong_captcha:
+        logger.info(f"CAPTCHA detected: found strong indicator")
+        return True
+
+    # Check for common CAPTCHA iframe/div patterns (only if no job content)
     captcha_patterns = [
         r"iframe.*recaptcha",
         r"div.*recaptcha",
@@ -471,6 +494,28 @@ def detect_captcha(html: str) -> bool:
     for pattern in captcha_patterns:
         if re.search(pattern, html_lower):
             logger.info(f"CAPTCHA detected: found pattern '{pattern}'")
+            return True
+
+    # Weak indicators - only detect if no job content
+    weak_captcha_indicators = [
+        "captcha",
+        "cloudflare",
+        "human verification",
+        "please verify",
+        "security check",
+        "ddos protection",
+        "ray id",
+        "cf-ray",
+        "bot detection",
+        "security verification",
+    ]
+
+    # Only use weak indicators if we don't have job content
+    for indicator in weak_captcha_indicators:
+        if indicator in html_lower:
+            logger.info(
+                f"CAPTCHA detected: found weak indicator '{indicator}' (no job content)"
+            )
             return True
 
     return False
