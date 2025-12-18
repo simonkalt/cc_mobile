@@ -562,26 +562,53 @@ def fetch_html(
             )
             return html, None, captcha_detected
 
-        # For error status codes (403, 429, 503), check again for CAPTCHA
-        # These often indicate rate limiting or verification needed
+        # For error status codes (403, 429, 503), check for CAPTCHA
+        # BUT: If the page contains job content, CAPTCHA was already completed
+        # Only mark as CAPTCHA if there's no job content
         if response.status_code in [403, 429, 503]:
+            # First check if page has job content (CAPTCHA already completed)
+            html_lower_check = html.lower()
+            job_content_indicators = [
+                "job description",
+                "job title",
+                "apply now",
+                "job posting",
+                "hiring",
+                "qualifications",
+                "responsibilities",
+                "requirements",
+                "jobsearch-jobdescriptiontext",
+                "job-poster-name",
+                "job-title",
+            ]
+            has_job_content = any(
+                indicator in html_lower_check for indicator in job_content_indicators
+            )
+
+            if has_job_content:
+                # Page has job content despite error status - CAPTCHA was already completed
+                logger.info(
+                    f"Error status {response.status_code} but job content found - CAPTCHA already completed, proceeding"
+                )
+                return html, None, False  # No CAPTCHA needed
+
+            # No job content - check for CAPTCHA
             captcha_detected = detect_captcha(html)
             if captcha_detected:
                 logger.warning(
-                    f"CAPTCHA detected for URL: {url} (status: {response.status_code})"
+                    f"CAPTCHA detected for URL: {url} (status: {response.status_code}, no job content)"
                 )
                 return html, None, captcha_detected
 
-            # Indeed specifically - 403 almost always means CAPTCHA/verification needed
+            # Indeed specifically - 403 without job content likely means CAPTCHA needed
             if "indeed.com" in url.lower() and response.status_code == 403:
                 logger.warning(
-                    f"Indeed 403 Forbidden for URL: {url} - treating as CAPTCHA required"
+                    f"Indeed 403 Forbidden for URL: {url} (no job content) - treating as CAPTCHA required"
                 )
                 return html, None, True
 
             # For other sites with 403/429/503, check if HTML suggests CAPTCHA
             # Look for common error pages that might indicate verification needed
-            html_lower_check = html.lower()
             if any(
                 indicator in html_lower_check
                 for indicator in [
@@ -592,12 +619,12 @@ def fetch_html(
                 ]
             ):
                 logger.warning(
-                    f"Error status {response.status_code} with security indicators for URL: {url} - treating as CAPTCHA"
+                    f"Error status {response.status_code} with security indicators for URL: {url} (no job content) - treating as CAPTCHA"
                 )
                 return html, None, True
 
             logger.warning(
-                f"Error status {response.status_code} for URL: {url} - may require CAPTCHA"
+                f"Error status {response.status_code} for URL: {url} (no job content) - may require CAPTCHA"
             )
             # Return as CAPTCHA required to trigger modal
             return html, None, True
@@ -737,21 +764,22 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     result.ad_source = site
 
     # If CAPTCHA was detected, check if we still got valid job data
-    # If we did, use it (CAPTCHA was already completed)
-    # If we didn't, mark as captcha-required
+    # If we did, use it (CAPTCHA was already completed - don't show modal)
+    # If we didn't, mark as captcha-required (show modal for NEW CAPTCHA)
     if captcha_detected:
-        logger.warning(
-            f"CAPTCHA detected for URL: {url}, but attempting extraction anyway"
+        logger.info(
+            f"CAPTCHA indicators found for URL: {url}, checking if job data can be extracted..."
         )
         if result.has_minimum_data():
             logger.info(
-                f"✅ Successfully extracted job data despite CAPTCHA detection - CAPTCHA appears to be already completed"
+                f"✅ Successfully extracted job data - CAPTCHA was already completed (no modal needed)"
             )
             # CAPTCHA was detected but we got valid data, so it's already completed
-            # Return the result normally (don't mark as captcha-required)
+            # Return the result normally (don't mark as captcha-required, don't show modal)
+            # The detect_captcha function should have caught this, but this is a safety check
         else:
             logger.warning(
-                f"❌ CAPTCHA detected and no valid job data extracted - CAPTCHA required"
+                f"❌ CAPTCHA detected and no valid job data extracted - NEW CAPTCHA required (show modal)"
             )
             result.method = "captcha-required"
             return result
