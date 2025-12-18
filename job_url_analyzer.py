@@ -659,13 +659,6 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     # Fetch HTML
     html, error, captcha_detected = fetch_html(url)
 
-    # Check for CAPTCHA first
-    if captcha_detected:
-        logger.warning(f"CAPTCHA detected for URL: {url}")
-        result = JobExtractionResult()
-        result.method = "captcha-required"
-        return result
-
     if error or not html:
         logger.warning(f"Failed to fetch HTML: {error}")
         result = JobExtractionResult()
@@ -697,6 +690,26 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
 
     # Set ad_source based on detected site
     result.ad_source = site
+
+    # If CAPTCHA was detected, check if we still got valid job data
+    # If we did, use it (CAPTCHA was already completed)
+    # If we didn't, mark as captcha-required
+    if captcha_detected:
+        logger.warning(
+            f"CAPTCHA detected for URL: {url}, but attempting extraction anyway"
+        )
+        if result.has_minimum_data():
+            logger.info(
+                f"✅ Successfully extracted job data despite CAPTCHA detection - CAPTCHA appears to be already completed"
+            )
+            # CAPTCHA was detected but we got valid data, so it's already completed
+            # Return the result normally (don't mark as captcha-required)
+        else:
+            logger.warning(
+                f"❌ CAPTCHA detected and no valid job data extracted - CAPTCHA required"
+            )
+            result.method = "captcha-required"
+            return result
 
     # Try to extract hiring manager (common patterns)
     try:
@@ -869,9 +882,11 @@ async def analyze_job_url(
         logger.info("Attempting BeautifulSoup extraction...")
         result = extract_with_beautifulsoup(url)
 
-    # Check if CAPTCHA is required
+    # Check if CAPTCHA is required (only if extraction failed)
     if result.method == "captcha-required":
-        logger.info("CAPTCHA required - returning special response")
+        logger.info(
+            "CAPTCHA required and extraction failed - returning special response"
+        )
         return {
             "success": False,
             "captcha_required": True,
@@ -899,22 +914,12 @@ async def analyze_job_url(
             html, error, captcha_detected = fetch_html(url)
 
         # Check for CAPTCHA again before using Grok (only if we fetched)
+        # But try Grok extraction anyway - CAPTCHA might already be completed
         if captcha_detected:
-            logger.info(
-                "CAPTCHA detected during Grok fallback - returning special response"
+            logger.warning(
+                "CAPTCHA detected during Grok fallback, but attempting extraction anyway..."
             )
-            return {
-                "success": False,
-                "captcha_required": True,
-                "url": url,
-                "message": "CAPTCHA or human verification required. The website is blocking automated access.",
-                "company": "Not specified",
-                "job_title": "Not specified",
-                "ad_source": ad_source,
-                "full_description": "Not specified",
-                "hiring_manager": "",
-                "extractionMethod": "error",
-            }
+            # Continue with Grok extraction - if it succeeds, CAPTCHA was already completed
 
         if html and not error:
             grok_result = extract_with_grok(html, grok_client)
@@ -922,14 +927,39 @@ async def analyze_job_url(
             # Set ad_source for Grok result
             grok_result.ad_source = ad_source
 
+            # If CAPTCHA was detected but Grok got valid data, CAPTCHA was already completed
+            if captcha_detected and grok_result.has_minimum_data():
+                logger.info(
+                    "✅ Successfully extracted job data with Grok despite CAPTCHA detection - CAPTCHA appears to be already completed"
+                )
+                # Use Grok results directly
+                result = grok_result
             # Combine results intelligently: prefer Grok for better quality, but keep BS if Grok fails
-            if grok_result.is_complete or (
+            elif grok_result.is_complete or (
                 not result.has_minimum_data() and grok_result.has_minimum_data()
             ):
                 # Use Grok results, but preserve BeautifulSoup ad_source
                 grok_result.ad_source = result.ad_source or ad_source
                 result = grok_result
                 logger.info("Using Grok extraction results")
+            # If CAPTCHA was detected and Grok also failed, mark as captcha-required
+            elif captcha_detected and not grok_result.has_minimum_data():
+                logger.warning(
+                    "❌ CAPTCHA detected and Grok extraction also failed - CAPTCHA required"
+                )
+                result.method = "captcha-required"
+                return {
+                    "success": False,
+                    "captcha_required": True,
+                    "url": url,
+                    "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+                    "company": "Not specified",
+                    "job_title": "Not specified",
+                    "ad_source": ad_source,
+                    "full_description": "Not specified",
+                    "hiring_manager": "",
+                    "extractionMethod": "error",
+                }
             else:
                 # Combine: use Grok values where BS has "Not specified"
                 if (
