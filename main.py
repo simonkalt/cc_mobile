@@ -13,10 +13,19 @@ import json
 import datetime
 import base64
 import re
+import warnings
 from dotenv import load_dotenv
 from openai import OpenAI
 import anthropic
-import google.generativeai as genai
+
+# Suppress deprecation warnings
+# - google.generativeai deprecation (still works, will migrate to google.genai later)
+# - Python version warning from google.api_core (informational, not critical)
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning, message=".*google.generativeai.*")
+    warnings.filterwarnings("ignore", category=FutureWarning, message=".*Python version.*")
+    import google.generativeai as genai
+
 from huggingface_hub import login
 import requests
 import oci
