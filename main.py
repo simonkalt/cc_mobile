@@ -3366,6 +3366,19 @@ def extract_job_info_from_url(url: str) -> dict:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         page_response = requests.get(url, headers=headers, timeout=30)
+        
+        # Check for 403/429 errors (often indicate bot detection/CAPTCHA required)
+        if page_response.status_code in [403, 429]:
+            logger.warning(f"Received {page_response.status_code} from {url} - likely bot detection/CAPTCHA required")
+            page_content = page_response.text
+            # Check if it's a CAPTCHA page
+            content_lower = page_content.lower()
+            captcha_indicators = ['captcha', 'verify you are human', 'access denied', 'unusual traffic', 'security check']
+            if any(indicator in content_lower for indicator in captcha_indicators):
+                raise ValueError("CAPTCHA or human verification required. The website is blocking automated access.")
+            else:
+                raise ValueError(f"Access forbidden ({page_response.status_code}). The website may be blocking automated requests.")
+        
         page_response.raise_for_status()
         page_content = page_response.text
 
@@ -3470,12 +3483,21 @@ Important:
         )
         return job_info
 
+    except requests.exceptions.HTTPError as e:
+        if e.response and e.response.status_code in [403, 429]:
+            logger.error(f"Access forbidden ({e.response.status_code}) for URL: {url}")
+            raise ValueError("CAPTCHA or human verification required. The website is blocking automated access.")
+        logger.error(f"HTTP error fetching URL: {str(e)}")
+        raise Exception(f"Failed to fetch or analyze job URL: {str(e)}")
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching URL or calling Grok API: {str(e)}")
         raise Exception(f"Failed to fetch or analyze job URL: {str(e)}")
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing JSON response: {str(e)}")
         raise Exception(f"Failed to parse job information: {str(e)}")
+    except ValueError:
+        # Re-raise ValueError (CAPTCHA errors) as-is
+        raise
     except Exception as e:
         logger.error(f"Unexpected error extracting job info: {str(e)}")
         raise
@@ -3556,9 +3578,36 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
     except HTTPException:
         raise
     except ValueError as e:
-        # Invalid URL format from analyzer
-        logger.warning(f"Invalid URL format: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        # Invalid URL format or CAPTCHA required
+        error_msg = str(e)
+        if "CAPTCHA" in error_msg or "verification" in error_msg or "blocking" in error_msg:
+            logger.warning(f"CAPTCHA/verification required: {error_msg}")
+            # Detect ad source for error response
+            from urllib.parse import urlparse
+            domain = urlparse(request.url).netloc.lower()
+            if 'linkedin.com' in domain:
+                ad_source = 'linkedin'
+            elif 'indeed.com' in domain:
+                ad_source = 'indeed'
+            elif 'glassdoor.com' in domain:
+                ad_source = 'glassdoor'
+            else:
+                ad_source = 'generic'
+            
+            return {
+                "success": False,
+                "captcha_required": True,
+                "url": request.url,
+                "message": error_msg,
+                "company": "Not specified",
+                "job_title": "Not specified",
+                "ad_source": ad_source,
+                "full_description": "Not specified",
+                "hiring_manager": "",
+                "extractionMethod": "error"
+            }
+        logger.warning(f"Invalid URL format: {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
         error_msg = f"Failed to analyze job URL: {str(e)}"
         logger.error(error_msg, exc_info=True)

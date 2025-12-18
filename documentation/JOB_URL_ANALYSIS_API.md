@@ -1,21 +1,67 @@
 # Job URL Analysis API Documentation
 
-This endpoint uses Grok AI to analyze a job posting URL and extract structured information including company name, job title, and job description.
+This endpoint uses a hybrid BeautifulSoup + Grok AI approach to analyze a job posting URL and extract structured information including company name, job title, job description, ad source, and hiring manager (if available).
+
+## Quick Reference
+
+**Endpoint**: `POST /api/job-url/analyze`
+
+**Base URL**: `https://your-api-domain.com` (or `http://localhost:8000` for local development)
+
+**Request**:
+```json
+{
+  "url": "https://www.linkedin.com/jobs/view/123456",
+  "user_id": "optional-user-id",
+  "user_email": "optional@email.com"
+}
+```
+
+**Success Response** (200 OK):
+```json
+{
+  "success": true,
+  "url": "...",
+  "company": "Company Name",
+  "job_title": "Job Title",
+  "ad_source": "linkedin",
+  "full_description": "Job description...",
+  "hiring_manager": "Name or empty string",
+  "extractionMethod": "hybrid-bs-beautifulsoup-linkedin-grok"
+}
+```
+
+**CAPTCHA Required Response** (200 OK):
+```json
+{
+  "success": false,
+  "captcha_required": true,
+  "url": "...",
+  "message": "CAPTCHA or human verification required...",
+  "company": "Not specified",
+  "job_title": "Not specified",
+  "ad_source": "indeed",
+  "full_description": "Not specified",
+  "hiring_manager": "",
+  "extractionMethod": "error"
+}
+```
 
 ## Endpoint
 
 **POST** `/api/job-url/analyze`
 
-Analyze a job posting webpage and extract key information using Grok AI.
+Analyze a job posting webpage and extract key information using hybrid extraction methods.
 
 ## Overview
 
 This endpoint:
 1. Fetches the HTML content from the provided job posting URL
-2. Runs BeautifulSoup extraction (fast, site-specific parsers)
-3. Runs Grok AI extraction (comprehensive, AI-powered)
+2. Attempts BeautifulSoup extraction first (fast, site-specific parsers for LinkedIn, Indeed, Glassdoor)
+3. Falls back to Grok AI extraction if BeautifulSoup results are incomplete
 4. Intelligently combines results from both methods
 5. Returns structured information (company, job_title, ad_source, full_description, hiring_manager)
+6. Handles CAPTCHA/verification requirements gracefully
 
 ## Request Body
 
@@ -61,6 +107,27 @@ This endpoint:
 
 ## Error Responses
 
+### 200 OK - CAPTCHA Required (Success: false)
+
+When a website requires CAPTCHA or human verification (common with Indeed and some other sites), the endpoint returns a 200 OK response with `success: false`:
+
+```json
+{
+  "success": false,
+  "captcha_required": true,
+  "url": "https://www.indeed.com/viewjob?jk=...",
+  "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+  "company": "Not specified",
+  "job_title": "Not specified",
+  "ad_source": "indeed",
+  "full_description": "Not specified",
+  "hiring_manager": "",
+  "extractionMethod": "error"
+}
+```
+
+**Frontend Handling**: Check for `success: false` and `captcha_required: true` to show a user-friendly message asking them to paste the job description manually.
+
 ### 400 Bad Request
 ```json
 {
@@ -84,20 +151,32 @@ This endpoint:
 
 ## How It Works
 
-1. **URL Fetching**: The endpoint fetches the HTML content from the provided URL using a standard HTTP GET request with a browser-like User-Agent header.
+### Extraction Flow
 
-2. **Content Analysis**: The fetched content (limited to first 50,000 characters to avoid token limits) is sent to Grok AI with a specialized prompt designed to extract structured information.
+1. **URL Validation**: Validates that the URL starts with `http://` or `https://`
 
-3. **Grok Prompt**: The prompt instructs Grok to:
-   - Analyze the webpage content
-   - Extract the company name (not just from URL)
-   - Extract the complete job title
-   - Extract the full job description
-   - Return only valid JSON with the specified fields
+2. **HTML Fetching**: Fetches the HTML content using a browser-like User-Agent header with CAPTCHA detection
 
-4. **Response Parsing**: The endpoint parses Grok's JSON response, handles markdown code blocks if present, and validates that all required fields are present.
+3. **CAPTCHA Detection**: Checks for CAPTCHA indicators (Cloudflare, reCAPTCHA, etc.) and returns appropriate error if detected
 
-5. **Error Handling**: If any information cannot be extracted, the field value is set to "Not specified".
+4. **BeautifulSoup Extraction** (First Attempt):
+   - Detects the job site (LinkedIn, Indeed, Glassdoor, or generic)
+   - Uses site-specific parsers optimized for each platform
+   - Extracts company, job title, description, and hiring manager using CSS selectors and JSON-LD structured data
+   - Sets `ad_source` based on detected site
+
+5. **Grok AI Extraction** (Fallback):
+   - Only runs if BeautifulSoup extraction is incomplete
+   - Uses AI to analyze HTML content (limited to 50,000 characters)
+   - Extracts structured information with high accuracy
+   - Handles unstructured content better than BeautifulSoup
+
+6. **Result Combination**: Intelligently combines results:
+   - Prefers Grok values when available (usually more complete)
+   - Falls back to BeautifulSoup values when Grok has "Not specified"
+   - Ensures all required fields are present
+
+7. **Response Formatting**: Returns standardized JSON with all fields, using "Not specified" for missing data and empty string `""` for missing hiring manager
 
 ## Client-Side Usage Examples
 
@@ -255,6 +334,33 @@ function JobApplicationForm() {
           rows={10}
         />
       </div>
+
+      <div>
+        <label>Hiring Manager:</label>
+        <input
+          type="text"
+          value={hiringManager}
+          onChange={(e) => setHiringManager(e.target.value)}
+          placeholder="Leave empty if not found"
+        />
+      </div>
+
+      {/* CAPTCHA Modal */}
+      {showCaptchaModal && (
+        <div className="modal">
+          <div className="modal-content">
+            <h3>Manual Entry Required</h3>
+            <p>{captchaMessage}</p>
+            <p>Please copy and paste the job description from the website:</p>
+            <textarea
+              placeholder="Paste job description here..."
+              rows={10}
+              onChange={(e) => setJobDescription(e.target.value)}
+            />
+            <button onClick={() => setShowCaptchaModal(false)}>Done</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -422,11 +528,32 @@ async function analyzeJobURLWithErrorHandling(jobURL) {
 
 ## Notes
 
-- The endpoint uses Grok AI (`grok-4-fast-reasoning` model) for content analysis
-- The Grok API key must be configured in the server environment (`XAI_API_KEY`)
-- The endpoint automatically handles JSON parsing, including removal of markdown code blocks
-- If extraction fails for any field, it defaults to "Not specified" rather than failing the entire request
-- The endpoint includes comprehensive logging for debugging purposes
+### Technical Details
+
+- **Hybrid Approach**: Uses BeautifulSoup first (fast, free), then Grok AI as fallback (comprehensive)
+- **Grok AI**: Uses `grok-beta` model for content analysis when needed
+- **API Key**: Grok API key must be configured in server environment (`XAI_API_KEY`)
+- **JSON Parsing**: Automatically handles JSON parsing, including removal of markdown code blocks
+- **Field Defaults**: Missing fields default to "Not specified" (except `hiring_manager` which defaults to empty string `""`)
+- **CAPTCHA Detection**: Automatically detects CAPTCHA requirements and returns appropriate error response
+- **Logging**: Comprehensive logging for debugging purposes
+
+### Field Behavior
+
+- **company**: Always present, "Not specified" if extraction fails
+- **job_title**: Always present, "Not specified" if extraction fails
+- **ad_source**: Always present, detected from URL domain (`linkedin`, `indeed`, `glassdoor`, or `generic`)
+- **full_description**: Always present, "Not specified" if extraction fails
+- **hiring_manager**: Always present, empty string `""` if not found (this is normal - many postings don't include this)
+- **extractionMethod**: Shows which method was used (`hybrid-bs-{site}-grok`, `beautifulsoup-{site}`, `grok`, etc.)
+
+### Known Limitations
+
+1. **Indeed.com**: Often blocks automated requests with 403 errors. The endpoint will return `captcha_required: true` in this case.
+2. **CAPTCHA Sites**: Sites using Cloudflare, reCAPTCHA, or similar protection will require manual entry.
+3. **Dynamic Content**: JavaScript-rendered content may not be captured (BeautifulSoup only sees initial HTML).
+4. **Rate Limiting**: Some sites may rate-limit requests. The endpoint handles this gracefully.
+5. **Content Size**: HTML content is limited to 50,000 characters for Grok analysis to avoid token limits.
 
 ## Troubleshooting
 
