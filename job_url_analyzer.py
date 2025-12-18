@@ -1092,6 +1092,10 @@ async def analyze_job_url(
     response_data = result.to_dict()
     response_data["url"] = url
 
+    # Set success based on whether we have valid data
+    has_valid_data = result.has_minimum_data()
+    response_data["success"] = has_valid_data
+
     # If HTML was provided, never return captcha_required (HTML is already verified)
     # This is a safety check - we should have already handled this above, but ensure it here too
     if html_content:
@@ -1101,9 +1105,11 @@ async def analyze_job_url(
                 "Removing captcha_required flag since HTML was provided from verified page"
             )
             del response_data["captcha_required"]
-        # Ensure success is True (even if extraction failed, we don't want captcha_required)
-        if not response_data.get("success"):
-            response_data["success"] = True
+        # If extraction failed, add a helpful message but don't set captcha_required
+        if not has_valid_data:
+            response_data["message"] = (
+                "Unable to extract job data from the provided HTML. The page may not contain a valid job posting, or the structure may have changed."
+            )
 
     logger.info(
         f"Final extraction result: method={result.method}, company={bool(result.company)}, "
