@@ -1473,15 +1473,15 @@ async def analyze_job_url(
     html_content: Optional[str] = None,
 ) -> Dict:
     """
-    Analyze job URL using hybrid BeautifulSoup + ChatGPT approach
+    Analyze job URL using GPT model to extract all required fields.
 
     Args:
         url: Job posting URL
         user_id: Optional user ID for logging
         user_email: Optional user email for logging
-        use_chatgpt_fallback: Whether to use ChatGPT if BeautifulSoup fails
+        use_chatgpt_fallback: Deprecated - kept for compatibility, always uses GPT
         openai_client: Optional OpenAI client instance
-        html_content: Optional HTML content (from CAPTCHA completion) - if provided, skips fetching
+        html_content: Optional HTML content - if provided, skips fetching
 
     Returns:
         Dictionary matching API response format
@@ -1494,150 +1494,37 @@ async def analyze_job_url(
     if not url.startswith(("http://", "https://")):
         raise ValueError("Invalid URL format. URL must start with http:// or https://")
 
-    # Detect ad_source from URL (needed for both methods)
+    # Detect ad_source from URL
     ad_source = detect_site(url)
 
-    # Step 1: Try BeautifulSoup first (fast, free)
-    # If HTML content is provided, use it directly (from CAPTCHA completion)
+    # Step 1: Fetch HTML from URL (or use provided HTML)
     if html_content:
         logger.info("Using provided HTML content for extraction...")
-        result = extract_from_html(html_content, url)
+        html = html_content
+        error = None
     else:
-        logger.info("Attempting BeautifulSoup extraction...")
-        result = extract_with_beautifulsoup(url)
+        logger.info("Fetching HTML from URL...")
+        html, error, _ = fetch_html(url)
 
-    # Check if CAPTCHA is required (only if extraction failed AND HTML was not provided)
-    # If HTML was provided, it's already from a verified page, so don't return captcha_required
-    if result.method == "captcha-required":
-        if html_content:
-            # HTML was provided, so CAPTCHA is already completed - don't return captcha_required
-            logger.warning(
-                "Extraction failed even with provided HTML content - resetting method and continuing"
-            )
-            # Reset method to indicate failure, not CAPTCHA requirement
-            result.method = "beautifulsoup-failed"
-            # Continue with Grok fallback instead of returning early
-        else:
-            # No HTML provided, so CAPTCHA is actually required
-            logger.info(
-                "CAPTCHA required and extraction failed - returning special response"
-            )
-            return {
-                "success": False,
-                "captcha_required": True,
-                "url": url,
-                "message": "CAPTCHA or human verification required. The website is blocking automated access.",
-                "company": "Not specified",
-                "job_title": "Not specified",
-                "ad_source": ad_source,
-                "full_description": "Not specified",
-                "hiring_manager": "",
-                "extractionMethod": "error",
-            }
-
-    # Step 2: If BeautifulSoup didn't get complete data, try ChatGPT
-    if not result.is_complete and use_chatgpt_fallback:
-        logger.info("BeautifulSoup extraction incomplete, falling back to ChatGPT...")
-
-        # Use provided HTML if available, otherwise fetch it
-        if html_content:
-            html = html_content
-            error = None
-            captcha_detected = False
-        else:
-            # Fetch HTML for ChatGPT (if not already fetched)
-            html, error, captcha_detected = fetch_html(url)
-
-        # Check for CAPTCHA again before using ChatGPT (only if we fetched)
-        # But try ChatGPT extraction anyway - CAPTCHA might already be completed
-        if captcha_detected:
-            logger.warning(
-                "CAPTCHA detected during ChatGPT fallback, but attempting extraction anyway..."
-            )
-            # Continue with ChatGPT extraction - if it succeeds, CAPTCHA was already completed
-
-        if html and not error:
-            chatgpt_result = extract_with_chatgpt(html, openai_client)
-
-            # Set ad_source for ChatGPT result
-            chatgpt_result.ad_source = ad_source
-
-            # If CAPTCHA was detected but ChatGPT got valid data, CAPTCHA was already completed
-            if captcha_detected and chatgpt_result.has_minimum_data():
-                logger.info(
-                    "✅ Successfully extracted job data with ChatGPT despite CAPTCHA detection - CAPTCHA appears to be already completed"
-                )
-                # Use ChatGPT results directly
-                result = chatgpt_result
-            # Combine results intelligently: prefer ChatGPT for better quality, but keep BS if ChatGPT fails
-            elif chatgpt_result.is_complete or (
-                not result.has_minimum_data() and chatgpt_result.has_minimum_data()
-            ):
-                # Use ChatGPT results, but preserve BeautifulSoup ad_source
-                chatgpt_result.ad_source = result.ad_source or ad_source
-                result = chatgpt_result
-                logger.info("Using ChatGPT extraction results")
-            # If CAPTCHA was detected and ChatGPT also failed, mark as captcha-required
-            # BUT only if HTML was not provided (if HTML was provided, it's already verified)
-            elif (
-                captcha_detected
-                and not chatgpt_result.has_minimum_data()
-                and not html_content
-            ):
-                logger.warning(
-                    "❌ CAPTCHA detected and ChatGPT extraction also failed - CAPTCHA required"
-                )
-                result.method = "captcha-required"
-                return {
-                    "success": False,
-                    "captcha_required": True,
-                    "url": url,
-                    "message": "CAPTCHA or human verification required. The website is blocking automated access.",
-                    "company": "Not specified",
-                    "job_title": "Not specified",
-                    "ad_source": ad_source,
-                    "full_description": "Not specified",
-                    "hiring_manager": "",
-                    "extractionMethod": "error",
-                }
-            # If HTML was provided but ChatGPT extraction failed, just return the failed result
-            elif not chatgpt_result.has_minimum_data() and html_content:
-                logger.warning(
-                    "❌ ChatGPT extraction failed even with provided HTML content"
-                )
-                # Use whatever data we have, even if incomplete
-                if chatgpt_result.has_minimum_data():
-                    result = chatgpt_result
-                # Otherwise keep the BeautifulSoup result (even if incomplete)
-                # Ensure method is not set to captcha-required when HTML was provided
-                if result.method == "captcha-required":
-                    result.method = "chatgpt-failed"
-            else:
-                # Combine: use ChatGPT values where BS has "Not specified"
-                if (
-                    result.company == "Not specified"
-                    and chatgpt_result.company != "Not specified"
-                ):
-                    result.company = chatgpt_result.company
-                if (
-                    result.job_title == "Not specified"
-                    and chatgpt_result.job_title != "Not specified"
-                ):
-                    result.job_title = chatgpt_result.job_title
-                if (
-                    result.job_description == "Not specified"
-                    and chatgpt_result.job_description != "Not specified"
-                ):
-                    result.job_description = chatgpt_result.job_description
-                if not result.hiring_manager and chatgpt_result.hiring_manager:
-                    result.hiring_manager = chatgpt_result.hiring_manager
-                logger.info("Combined BeautifulSoup and ChatGPT extraction results")
-        else:
-            logger.warning(f"Failed to fetch HTML for ChatGPT fallback: {error}")
-
-    # Ensure ad_source is set
-    if not result.ad_source:
+    # Step 2: Always use GPT model to extract all fields
+    if html and not error:
+        logger.info("Extracting job information using GPT model...")
+        result = extract_with_chatgpt(html, openai_client)
         result.ad_source = ad_source
+    else:
+        logger.error(f"Failed to fetch HTML: {error}")
+        # Return error response
+        return {
+            "success": False,
+            "url": url,
+            "message": f"Failed to fetch page content: {error or 'Unknown error'}",
+            "company": "Not specified",
+            "job_title": "Not specified",
+            "ad_source": ad_source,
+            "full_description": "Not specified",
+            "hiring_manager": "",
+            "extractionMethod": "error",
+        }
 
     # Prepare response
     response_data = result.to_dict()
@@ -1647,20 +1534,11 @@ async def analyze_job_url(
     has_valid_data = result.has_minimum_data()
     response_data["success"] = has_valid_data
 
-    # If HTML was provided, never return captcha_required (HTML is already verified)
-    # This is a safety check - we should have already handled this above, but ensure it here too
-    if html_content:
-        # Remove any captcha_required flag that might have been set
-        if "captcha_required" in response_data:
-            logger.warning(
-                "Removing captcha_required flag since HTML was provided from verified page"
-            )
-            del response_data["captcha_required"]
-        # If extraction failed, add a helpful message but don't set captcha_required
-        if not has_valid_data:
-            response_data["message"] = (
-                "Unable to extract job data from the provided HTML. The page may not contain a valid job posting, or the structure may have changed."
-            )
+    # Add error message if extraction failed
+    if not has_valid_data:
+        response_data["message"] = (
+            "Unable to extract job data from the page. The page may not contain a valid job posting, or the structure may have changed."
+        )
 
     # Detailed logging for debugging
     logger.info("=" * 80)
