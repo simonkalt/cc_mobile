@@ -24,9 +24,30 @@ import requests
 from bs4 import BeautifulSoup
 from xai import Grok
 
-# Configure logging
+# Configure logging first
 logger = logging.getLogger(__name__)
+
+# Try to import Selenium for JavaScript rendering (optional)
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+
 token_limit = 100000
+
+# Log Selenium availability after logger is configured
+if not SELENIUM_AVAILABLE:
+    logger.warning(
+        "Selenium not available - JavaScript rendering will be skipped. Install selenium to enable JavaScript rendering."
+    )
 
 
 class JobExtractionResult:
@@ -825,16 +846,114 @@ def detect_captcha(html: str) -> bool:
     return False
 
 
-def fetch_html(
-    url: str, timeout: int = 10
+def fetch_html_with_selenium(
+    url: str, timeout: int = 30
 ) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
     """
-    Fetch HTML content from URL
+    Fetch HTML content from URL using Selenium to render JavaScript
 
     Returns:
         Tuple of (html_content, error_message, captcha_detected)
         captcha_detected is True if CAPTCHA is detected, False otherwise, None on error
     """
+    if not SELENIUM_AVAILABLE:
+        return None, "Selenium not available", None
+
+    driver = None
+    try:
+        logger.info(f"[Selenium] Fetching URL with JavaScript rendering: {url}")
+
+        # Set up Chrome options for headless browsing
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument(
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option("useAutomationExtension", False)
+
+        # Create driver
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.set_page_load_timeout(timeout)
+
+        # Navigate to URL
+        driver.get(url)
+
+        # Wait for page to load - wait for common job page elements
+        try:
+            # Wait for either job description or common LinkedIn elements
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            # Additional wait for dynamic content
+            import time
+
+            time.sleep(3)  # Give JavaScript time to render
+        except TimeoutException:
+            logger.warning(
+                "[Selenium] Page load timeout, proceeding with current content"
+            )
+
+        # Get the rendered HTML
+        html = driver.page_source
+
+        logger.info(
+            f"[Selenium] Successfully fetched rendered HTML: {len(html)} characters"
+        )
+
+        # Check for CAPTCHA
+        captcha_detected = detect_captcha(html)
+
+        # Clean up
+        driver.quit()
+
+        return html, None, captcha_detected
+
+    except WebDriverException as e:
+        logger.error(f"[Selenium] WebDriver error: {e}")
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
+        return None, f"Selenium WebDriver error: {str(e)}", None
+    except Exception as e:
+        logger.error(f"[Selenium] Unexpected error: {e}", exc_info=True)
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
+        return None, f"Selenium error: {str(e)}", None
+
+
+def fetch_html(
+    url: str, timeout: int = 10, use_selenium: bool = True
+) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
+    """
+    Fetch HTML content from URL
+    First tries Selenium (if available) to render JavaScript, falls back to requests
+
+    Returns:
+        Tuple of (html_content, error_message, captcha_detected)
+        captcha_detected is True if CAPTCHA is detected, False otherwise, None on error
+    """
+    # Try Selenium first for JavaScript rendering (especially for LinkedIn)
+    if use_selenium and SELENIUM_AVAILABLE and "linkedin.com" in url.lower():
+        logger.info(f"[fetch_html] Using Selenium for LinkedIn URL: {url}")
+        html, error, captcha = fetch_html_with_selenium(url, timeout=30)
+        if html and not error:
+            return html, error, captcha
+        logger.warning(
+            f"[fetch_html] Selenium failed, falling back to requests: {error}"
+        )
+
+    # Fallback to requests
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
