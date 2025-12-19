@@ -1,0 +1,32 @@
+{
+  "llms": [
+    {
+      "value": "gpt-5.2",
+      "label": "GPT-5.2",
+      "description": "Latest GPT model with enhanced capabilities"
+    },
+    {
+      "value": "gpt-4.1",
+      "label": "GPT-4.1",
+      "description": "Previous generation GPT model"
+    },
+    {
+      "value": "claude-sonnet-4-20250514",
+      "label": "Claude Sonnet 4",
+      "description": "Anthropic's Claude Sonnet 4 model"
+    },
+    {
+      "value": "gemini-2.5-flash",
+      "label": "Gemini 2.5 Flash",
+      "description": "Google's Gemini 2.5 Flash model"
+    },
+    {
+      "value": "grok-4-fast-reasoning",
+      "label": "Grok 4 Fast Reasoning",
+      "description": "xAI's Grok 4 Fast Reasoning model"
+    }
+  ],
+  "defaultModel": "gpt-5.2",
+  "internalModel": "gpt-5.2"
+}
+

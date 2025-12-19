@@ -76,6 +76,16 @@ except ImportError:
         "job_url_analyzer module not available. Falling back to ChatGPT-only extraction."
     )
 
+# Import LLM configuration endpoint (after logger is defined)
+try:
+    from llm_config_endpoint import get_llms_endpoint, load_llm_config
+    LLM_CONFIG_AVAILABLE = True
+except ImportError:
+    LLM_CONFIG_AVAILABLE = False
+    logger.warning(
+        "llm_config_endpoint module not available. LLM configuration endpoint will use fallback."
+    )
+
 XAI_SDK_AVAILABLE = False
 
 # Import MongoDB client (after logger is defined)
@@ -235,6 +245,14 @@ app.add_middleware(
 )
 logger.info(f"CORS configured for origins: {all_origins}")
 
+# Register LLM configuration endpoint if available
+if LLM_CONFIG_AVAILABLE:
+    try:
+        get_llms_endpoint(app)
+        logger.info("LLM configuration endpoint registered from llm_config_endpoint module")
+    except Exception as e:
+        logger.error(f"Failed to register LLM configuration endpoint: {e}")
+        LLM_CONFIG_AVAILABLE = False
 
 # Add exception handler for validation errors to help debug 422 errors
 @app.exception_handler(RequestValidationError)
@@ -1710,11 +1728,13 @@ async def health_check():
 # Define the main endpoint your app will call
 
 
-@app.get("/api/llms")
-def get_llms():
-    """JSON API endpoint to get available LLMs for the mobile app"""
-    llm_options = get_available_llms()
-    return {"llms": llm_options}
+# Fallback endpoint if llm_config_endpoint is not available
+if not LLM_CONFIG_AVAILABLE:
+    @app.get("/api/llms")
+    def get_llms_fallback():
+        """JSON API endpoint to get available LLMs for the mobile app (fallback)"""
+        llm_options = get_available_llms()
+        return {"llms": llm_options}
 
 
 @app.get("/api/personality-profiles")
