@@ -37,27 +37,7 @@ except ImportError:
         "OpenAI not available - ChatGPT extraction will be skipped. Install openai to enable ChatGPT extraction."
     )
 
-# Try to import Selenium for JavaScript rendering (optional)
-try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.chrome.service import Service
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.common.exceptions import TimeoutException, WebDriverException
-
-    SELENIUM_AVAILABLE = True
-except ImportError:
-    SELENIUM_AVAILABLE = False
-
 token_limit = 100000
-
-# Log Selenium availability after logger is configured
-if not SELENIUM_AVAILABLE:
-    logger.warning(
-        "Selenium not available - JavaScript rendering will be skipped. Install selenium to enable JavaScript rendering."
-    )
 
 
 class JobExtractionResult:
@@ -856,252 +836,17 @@ def detect_captcha(html: str) -> bool:
     return False
 
 
-def fetch_html_with_selenium(
-    url: str, timeout: int = 45
-) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
-    """
-    Fetch HTML content from URL using Selenium to render JavaScript
-
-    Returns:
-        Tuple of (html_content, error_message, captcha_detected)
-        captcha_detected is True if CAPTCHA is detected, False otherwise, None on error
-    """
-    if not SELENIUM_AVAILABLE:
-        return None, "Selenium not available", None
-
-    driver = None
-    try:
-        logger.info(f"[Selenium] Fetching URL with JavaScript rendering: {url}")
-
-        # Set up Chrome options for headless browsing (optimized for speed)
-        chrome_options = Options()
-        chrome_options.add_argument("--headless=new")  # Use new headless mode (faster)
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument(
-            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option("useAutomationExtension", False)
-        # Disable images and CSS to speed up loading
-        prefs = {
-            "profile.managed_default_content_settings.images": 2,  # Block images
-        }
-        chrome_options.add_experimental_option("prefs", prefs)
-
-        # Create driver
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(timeout)
-        driver.implicitly_wait(3)  # Implicit wait for elements
-
-        # Navigate to URL - catch timeout but continue
-        try:
-            driver.get(url)
-        except TimeoutException:
-            logger.warning(
-                "[Selenium] Page load timeout, but continuing with current content..."
-            )
-            # Page may have partially loaded, continue anyway
-
-        # Wait for page to load - optimized wait strategy
-        try:
-            import time
-
-            # Wait for document ready state (faster check)
-            WebDriverWait(driver, 5).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
-
-            # Reduced wait time for dynamic content - check if content is already loaded
-            # For LinkedIn, check if job description section exists
-            try:
-                # Try to find job description content quickly
-                WebDriverWait(driver, 3).until(
-                    lambda d: len(d.find_elements(By.TAG_NAME, "body")) > 0
-                    and (
-                        "job" in d.page_source.lower()[:5000]
-                        or len(d.page_source) > 10000
-                    )  # Reasonable content length
-                )
-            except TimeoutException:
-                # If specific content not found, just wait a short time for any dynamic content
-                time.sleep(1)  # Reduced from 3 seconds to 1 second
-
-        except TimeoutException:
-            logger.warning(
-                "[Selenium] Page load timeout, proceeding with current content"
-            )
-
-        # For LinkedIn, try to expand "more" buttons to get full content
-        if "linkedin.com" in url.lower():
-            logger.info("[Selenium] Attempting to expand LinkedIn 'more' sections...")
-            try:
-                # Wait a bit for dynamic content to load
-                time.sleep(3)
-
-                # Use JavaScript to find and click all "more" buttons (more reliable)
-                expanded_count = 0
-                try:
-                    logger.info(
-                        "[Selenium] Using JavaScript to find and click 'more' buttons..."
-                    )
-                    # JavaScript approach - finds buttons/links with "more" text
-                    expanded_js = driver.execute_script(
-                        """
-                        var expanded = 0;
-                        // Find all clickable elements
-                        var elements = document.querySelectorAll('button, a, span[role="button"], div[role="button"]');
-                        for (var i = 0; i < elements.length; i++) {
-                            var el = elements[i];
-                            var text = (el.textContent || el.innerText || '').trim().toLowerCase();
-                            var ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                            
-                            // Look for "more" (not "Show more") - exact match or contains
-                            if ((text === 'more' || text.indexOf(' more') !== -1 || text.indexOf('more') === 0) &&
-                                el.offsetParent !== null && // Element is visible
-                                !el.disabled) {
-                                try {
-                                    // Scroll into view
-                                    el.scrollIntoView({behavior: 'smooth', block: 'center'});
-                                    // Click the element
-                                    el.click();
-                                    expanded++;
-                                } catch(e) {
-                                    // Try alternative click method
-                                    try {
-                                        var clickEvent = new MouseEvent('click', {bubbles: true, cancelable: true});
-                                        el.dispatchEvent(clickEvent);
-                                        expanded++;
-                                    } catch(e2) {}
-                                }
-                            }
-                        }
-                        return expanded;
-                    """
-                    )
-                    if expanded_js and expanded_js > 0:
-                        expanded_count = expanded_js
-                        logger.info(
-                            f"[Selenium] JavaScript clicked {expanded_count} 'more' buttons"
-                        )
-                        time.sleep(2)  # Wait for content to expand
-                except Exception as e:
-                    logger.debug(f"[Selenium] JavaScript expansion failed: {e}")
-                    # Fallback to XPath/CSS selectors
-                    logger.info("[Selenium] Falling back to XPath/CSS selectors...")
-
-                    # XPath selectors for "more" buttons
-                    more_selectors = [
-                        '//button[contains(text(), "more")]',
-                        '//button[contains(text(), "More")]',
-                        '//a[contains(text(), "more")]',
-                        '//a[contains(text(), "More")]',
-                        '//span[contains(text(), "more")]',
-                        '//span[contains(text(), "More")]',
-                        '//button[@aria-label and contains(translate(@aria-label, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "more")]',
-                    ]
-
-                    for selector in more_selectors:
-                        try:
-                            elements = driver.find_elements(By.XPATH, selector)
-                            for element in elements:
-                                try:
-                                    if element.is_displayed() and element.is_enabled():
-                                        driver.execute_script(
-                                            "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
-                                            element,
-                                        )
-                                        time.sleep(0.5)
-                                        element.click()
-                                        expanded_count += 1
-                                        logger.info(
-                                            f"[Selenium] Clicked 'more' button via XPath (count: {expanded_count})"
-                                        )
-                                        time.sleep(1)
-                                except Exception as e:
-                                    logger.debug(
-                                        f"[Selenium] Could not click element: {e}"
-                                    )
-                                    continue
-                        except Exception as e:
-                            logger.debug(
-                                f"[Selenium] Selector '{selector}' failed: {e}"
-                            )
-                            continue
-
-                if expanded_count > 0:
-                    logger.info(f"[Selenium] Expanded {expanded_count} 'more' sections")
-                    # Wait a bit more for all content to load
-                    time.sleep(3)
-                else:
-                    logger.info(
-                        "[Selenium] No 'more' buttons found or already expanded"
-                    )
-
-            except Exception as e:
-                logger.warning(f"[Selenium] Error expanding content: {e}")
-                # Continue anyway - we'll get what we can
-
-        # Get the rendered HTML
-        html = driver.page_source
-
-        logger.info(
-            f"[Selenium] Successfully fetched rendered HTML: {len(html)} characters"
-        )
-
-        # Check for CAPTCHA
-        captcha_detected = detect_captcha(html)
-
-        # Clean up
-        driver.quit()
-
-        return html, None, captcha_detected
-
-    except WebDriverException as e:
-        logger.error(f"[Selenium] WebDriver error: {e}")
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
-        return None, f"Selenium WebDriver error: {str(e)}", None
-    except Exception as e:
-        logger.error(f"[Selenium] Unexpected error: {e}", exc_info=True)
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
-        return None, f"Selenium error: {str(e)}", None
-
-
 def fetch_html(
-    url: str, timeout: int = 10, use_selenium: bool = True
+    url: str, timeout: int = 10
 ) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
     """
-    Fetch HTML content from URL
-    First tries Selenium (if available) to render JavaScript, falls back to requests
+    Fetch HTML content from URL using requests
 
     Returns:
         Tuple of (html_content, error_message, captcha_detected)
         captcha_detected is True if CAPTCHA is detected, False otherwise, None on error
     """
-    # Try Selenium first for JavaScript rendering (especially for LinkedIn)
-    if use_selenium and SELENIUM_AVAILABLE and "linkedin.com" in url.lower():
-        logger.info(f"[fetch_html] Using Selenium for LinkedIn URL: {url}")
-        html, error, captcha = fetch_html_with_selenium(
-            url, timeout=45
-        )  # Increased to 45 seconds for LinkedIn's heavy JavaScript pages
-        if html and not error:
-            return html, error, captcha
-        logger.warning(
-            f"[fetch_html] Selenium failed, falling back to requests: {error}"
-        )
-
-    # Fallback to requests
+    # Use requests to fetch HTML
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -1486,13 +1231,31 @@ IMPORTANT EXTRACTION INSTRUCTIONS:
 
 3. full_description: Extract the complete, full job description text. For LinkedIn job postings, this is typically found in the "About the job" section. Include all responsibilities, requirements, qualifications, and any other job details.
    
-   CRITICAL: Look for the FULL job description text, not just the truncated preview. LinkedIn often shows a shortened version with a "Show more" or "more..." link. The HTML may contain:
-   - Hidden/expanded content in collapsed sections
-   - Full text in data attributes or hidden divs
-   - Complete description that appears after expansion
-   - Multiple sections that together form the full description
+   CRITICAL - EXPANDABLE TEXT BOXES: LinkedIn hides the bulk of the job description in expandable text boxes using <span> elements. Before extracting the description, you MUST:
    
-   Extract ALL visible text from the job description area, including any content that would normally be hidden behind "Show more" buttons. Look for the longest, most complete version of the description available in the HTML.
+   a) Look for <span> elements with expandable/collapsed content. These often have:
+      - Attributes like aria-expanded="false" or data-state="collapsed"
+      - Classes containing "expand", "collapse", "truncate", or "show-more"
+      - Text content that appears truncated or ends with "..."
+      - Sibling elements with "more" buttons or expand controls
+   
+   b) Find the FULL text content within these expandable spans. The HTML structure typically contains:
+      - A visible truncated preview (what users see before clicking "more")
+      - The full expanded text (often in the same element or a sibling element)
+      - Both versions may be present in the HTML simultaneously
+   
+   c) Extract the COMPLETE text from expandable spans, including:
+      - All text within <span> elements that contain the full description
+      - Text in data attributes (data-full-text, data-content, etc.)
+      - Text in hidden divs or elements with display:none that contain the full content
+      - Multiple span elements that together form the complete description
+   
+   d) Look for patterns like:
+      - <span class="...">[truncated text]</span> followed by <span class="...">[full text]</span>
+      - <span aria-expanded="false">[preview]</span> with full text in a data attribute
+      - Nested spans where inner spans contain the full text
+   
+   Extract the LONGEST and MOST COMPLETE version of the description available in the HTML. Do not stop at the truncated preview - always look for the expanded/full version within span elements or their data attributes.
 
 4. hiring_manager: CRITICAL - For LinkedIn job postings, look for a section titled "Meet the hiring team" or "Hiring team". In this section, extract the name of the person shown (this could be a hiring manager, recruiter, or team member). The name is typically displayed as:
    - Text near "Meet the hiring team" heading
