@@ -73,7 +73,7 @@ try:
 except ImportError:
     JOB_URL_ANALYZER_AVAILABLE = False
     logger.warning(
-        "job_url_analyzer module not available. Falling back to Grok-only extraction."
+        "job_url_analyzer module not available. Falling back to ChatGPT-only extraction."
     )
 
 XAI_SDK_AVAILABLE = False
@@ -3512,13 +3512,13 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
     
     Uses hybrid approach:
     1. First tries BeautifulSoup parsing (fast, free) for LinkedIn job postings
-    2. Falls back to Grok AI if BeautifulSoup extraction is incomplete
+    2. Falls back to ChatGPT AI if BeautifulSoup extraction is incomplete
 
     This endpoint:
     1. Validates that the URL is a LinkedIn job posting URL
     2. Fetches the content from the provided URL
     3. Attempts BeautifulSoup extraction first (LinkedIn-specific parser)
-    4. Falls back to Grok AI if needed
+    4. Falls back to ChatGPT AI if needed
     5. Returns the extracted information as JSON with extraction method
     """
     logger.info(
@@ -3533,20 +3533,20 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
         )
 
     try:
-        # Use hybrid analyzer if available, otherwise fall back to Grok-only
+        # Use hybrid analyzer if available, otherwise fall back to ChatGPT-only
         if JOB_URL_ANALYZER_AVAILABLE:
-            logger.info("Using hybrid BeautifulSoup + Grok analyzer")
+            logger.info("Using hybrid BeautifulSoup + ChatGPT analyzer")
             result = await analyze_job_url_hybrid(
                 url=request.url,
                 user_id=request.user_id,
                 user_email=request.user_email,
-                use_grok_fallback=True
+                use_chatgpt_fallback=True
             )
             logger.info(f"Job URL analysis completed successfully using {result.get('extractionMethod', 'unknown')}")
             return result
         else:
-            # Fallback to old Grok-only method (should not happen if job_url_analyzer is available)
-            logger.info("Using Grok-only analyzer (hybrid analyzer not available)")
+            # Fallback to old ChatGPT-only method (should not happen if job_url_analyzer is available)
+            logger.info("Using ChatGPT-only analyzer (hybrid analyzer not available)")
             if not xai_api_key:
                 raise HTTPException(
                     status_code=503,
