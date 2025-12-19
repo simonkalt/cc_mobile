@@ -356,7 +356,16 @@ system_message = load_system_prompt()
 # No longer loading from JSON file - all profiles come from user's appSettings.personalityProfiles
 
 # Model names mapping
-gpt_model = "gpt-4.1"
+# Try to load GPT model from LLM config, fallback to default
+gpt_model = "gpt-5.2"  # Default fallback
+if LLM_CONFIG_AVAILABLE:
+    try:
+        config = load_llm_config()
+        gpt_model = config.get("internalModel", "gpt-5.2")
+        logger.info(f"Loaded GPT model from config: {gpt_model}")
+    except Exception as e:
+        logger.warning(f"Failed to load GPT model from config, using default: {e}")
+
 claude_model = "claude-sonnet-4-20250514"
 ollama_model = "llama3.2"
 OLLAMA_API = "http://localhost:11434/api/chat"
@@ -516,14 +525,17 @@ class JobURLAnalysisRequest(BaseModel):
 
 def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
-    if model == "gpt-4.1":
+    if model == "gpt-4.1" or model == "gpt-5.2" or model.startswith("gpt-"):
         client = OpenAI(api_key=openai_api_key)
+        # Use high max_tokens for GPT-5.2 (supports 128,000 max output tokens)
+        max_tokens_value = 128000 if model == "gpt-5.2" else 16000
         response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt},
             ],
+            max_tokens=max_tokens_value,
         )
         return_response = response.choices[0].message.content
     elif model == "claude-sonnet-4-20250514":
@@ -1401,8 +1413,12 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info(
                     "Additional instructions appended to ChatGPT messages as final override"
                 )
+            # Use high max_tokens for GPT-5.2 (supports 128,000 max output tokens)
+            max_tokens_value = 128000 if gpt_model == "gpt-5.2" else 16000
             response = client.chat.completions.create(
-                model=gpt_model, messages=messages
+                model=gpt_model, 
+                messages=messages,
+                max_tokens=max_tokens_value
             )
             r = response.choices[0].message.content
 

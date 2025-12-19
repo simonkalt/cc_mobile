@@ -1372,12 +1372,15 @@ If any information cannot be extracted, use "Not specified" as the value (except
         logger.info(f"Prompt length: {len(prompt)} characters")
         logger.info(f"HTML content length: {len(html_content)} characters")
 
-        # Call OpenAI ChatGPT API - using gpt-4-turbo for better extraction
+        # Call OpenAI ChatGPT API - using gpt-5.2 for better extraction
+        # GPT-5.2 supports 128,000 max output tokens, 400,000 context window
+        model_name = "gpt-5.2"
+        max_tokens_value = 128000  # GPT-5.2 supports up to 128,000 max output tokens
         response = openai_client.chat.completions.create(
-            model="gpt-4-turbo-preview",  # or "gpt-4" or "gpt-3.5-turbo"
+            model=model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=8000,  # Increased to handle full job descriptions
+            max_tokens=max_tokens_value,
             response_format={"type": "json_object"},  # Force JSON response
         )
 
