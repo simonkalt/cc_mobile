@@ -929,6 +929,80 @@ def fetch_html_with_selenium(
                 "[Selenium] Page load timeout, proceeding with current content"
             )
 
+        # For LinkedIn, try to expand "Show more" / "more..." buttons to get full content
+        if "linkedin.com" in url.lower():
+            logger.info(
+                "[Selenium] Attempting to expand LinkedIn 'Show more' sections..."
+            )
+            try:
+                # Wait a bit for dynamic content to load
+                time.sleep(2)
+
+                # Find and click "Show more" buttons - LinkedIn uses various selectors
+                show_more_selectors = [
+                    # Common LinkedIn "Show more" button patterns
+                    'button[aria-label*="Show more"]',
+                    'button[aria-label*="show more"]',
+                    'button:contains("Show more")',
+                    'button:contains("more")',
+                    'a[aria-label*="Show more"]',
+                    'a:contains("Show more")',
+                    # Look for buttons with text containing "more"
+                    '//button[contains(text(), "more")]',
+                    '//button[contains(text(), "More")]',
+                    '//a[contains(text(), "more")]',
+                    '//a[contains(text(), "More")]',
+                ]
+
+                expanded_count = 0
+                for selector in show_more_selectors:
+                    try:
+                        # Try XPath if it starts with //
+                        if selector.startswith("//"):
+                            elements = driver.find_elements(By.XPATH, selector)
+                        else:
+                            # Try CSS selector
+                            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+
+                        for element in elements:
+                            try:
+                                # Check if element is visible and clickable
+                                if element.is_displayed() and element.is_enabled():
+                                    # Scroll element into view
+                                    driver.execute_script(
+                                        "arguments[0].scrollIntoView(true);", element
+                                    )
+                                    time.sleep(0.5)
+
+                                    # Try clicking
+                                    element.click()
+                                    expanded_count += 1
+                                    logger.info(
+                                        f"[Selenium] Clicked 'Show more' button (count: {expanded_count})"
+                                    )
+                                    time.sleep(1)  # Wait for content to expand
+                            except Exception as e:
+                                logger.debug(f"[Selenium] Could not click element: {e}")
+                                continue
+                    except Exception as e:
+                        logger.debug(f"[Selenium] Selector '{selector}' failed: {e}")
+                        continue
+
+                if expanded_count > 0:
+                    logger.info(
+                        f"[Selenium] Expanded {expanded_count} 'Show more' sections"
+                    )
+                    # Wait a bit more for all content to load
+                    time.sleep(2)
+                else:
+                    logger.info(
+                        "[Selenium] No 'Show more' buttons found or already expanded"
+                    )
+
+            except Exception as e:
+                logger.warning(f"[Selenium] Error expanding content: {e}")
+                # Continue anyway - we'll get what we can
+
         # Get the rendered HTML
         html = driver.page_source
 
@@ -1369,6 +1443,14 @@ IMPORTANT EXTRACTION INSTRUCTIONS:
 2. job_title: Extract the complete job title/position name
 
 3. full_description: Extract the complete, full job description text. For LinkedIn job postings, this is typically found in the "About the job" section. Include all responsibilities, requirements, qualifications, and any other job details.
+   
+   CRITICAL: Look for the FULL job description text, not just the truncated preview. LinkedIn often shows a shortened version with a "Show more" or "more..." link. The HTML may contain:
+   - Hidden/expanded content in collapsed sections
+   - Full text in data attributes or hidden divs
+   - Complete description that appears after expansion
+   - Multiple sections that together form the full description
+   
+   Extract ALL visible text from the job description area, including any content that would normally be hidden behind "Show more" buttons. Look for the longest, most complete version of the description available in the HTML.
 
 4. hiring_manager: CRITICAL - For LinkedIn job postings, look for a section titled "Meet the hiring team" or "Hiring team". In this section, extract the name of the person shown (this could be a hiring manager, recruiter, or team member). The name is typically displayed as:
    - Text near "Meet the hiring team" heading
