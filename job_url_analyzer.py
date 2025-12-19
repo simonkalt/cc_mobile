@@ -118,7 +118,7 @@ class LinkedInParser(BaseJobParser):
             f"[LinkedInParser] Simplified mode - skipping BeautifulSoup extraction, will use Grok"
         )
 
-        # Return empty result to trigger Grok fallback
+        # Return empty result to trigger ChatGPT fallback
         # The LLM will handle all extraction via extract_with_chatgpt()
         return result
 
@@ -857,7 +857,7 @@ def detect_captcha(html: str) -> bool:
 
 
 def fetch_html_with_selenium(
-    url: str, timeout: int = 30
+    url: str, timeout: int = 15
 ) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
     """
     Fetch HTML content from URL using Selenium to render JavaScript
@@ -873,9 +873,9 @@ def fetch_html_with_selenium(
     try:
         logger.info(f"[Selenium] Fetching URL with JavaScript rendering: {url}")
 
-        # Set up Chrome options for headless browsing
+        # Set up Chrome options for headless browsing (optimized for speed)
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")  # Use new headless mode (faster)
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
@@ -886,24 +886,44 @@ def fetch_html_with_selenium(
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
+        # Disable images and CSS to speed up loading
+        prefs = {
+            "profile.managed_default_content_settings.images": 2,  # Block images
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
 
         # Create driver
         driver = webdriver.Chrome(options=chrome_options)
         driver.set_page_load_timeout(timeout)
+        driver.implicitly_wait(2)  # Reduce implicit wait time
 
         # Navigate to URL
         driver.get(url)
 
-        # Wait for page to load - wait for common job page elements
+        # Wait for page to load - optimized wait strategy
         try:
-            # Wait for either job description or common LinkedIn elements
-            WebDriverWait(driver, 10).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
-            # Additional wait for dynamic content
             import time
 
-            time.sleep(3)  # Give JavaScript time to render
+            # Wait for document ready state (faster check)
+            WebDriverWait(driver, 5).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+
+            # Reduced wait time for dynamic content - check if content is already loaded
+            # For LinkedIn, check if job description section exists
+            try:
+                # Try to find job description content quickly
+                WebDriverWait(driver, 3).until(
+                    lambda d: len(d.find_elements(By.TAG_NAME, "body")) > 0
+                    and (
+                        "job" in d.page_source.lower()[:5000]
+                        or len(d.page_source) > 10000
+                    )  # Reasonable content length
+                )
+            except TimeoutException:
+                # If specific content not found, just wait a short time for any dynamic content
+                time.sleep(1)  # Reduced from 3 seconds to 1 second
+
         except TimeoutException:
             logger.warning(
                 "[Selenium] Page load timeout, proceeding with current content"
@@ -956,7 +976,9 @@ def fetch_html(
     # Try Selenium first for JavaScript rendering (especially for LinkedIn)
     if use_selenium and SELENIUM_AVAILABLE and "linkedin.com" in url.lower():
         logger.info(f"[fetch_html] Using Selenium for LinkedIn URL: {url}")
-        html, error, captcha = fetch_html_with_selenium(url, timeout=30)
+        html, error, captcha = fetch_html_with_selenium(
+            url, timeout=15
+        )  # Reduced from 30 to 15 seconds
         if html and not error:
             return html, error, captcha
         logger.warning(
@@ -1241,7 +1263,7 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
                 f"❌ CAPTCHA detected and no valid job data extracted - NEW CAPTCHA required (show modal)"
             )
             result.method = "captcha-required"
-            return result
+    return result
 
     # Try to extract hiring manager (common patterns)
     # Note: LinkedIn hiring manager extraction is handled in LinkedInParser
