@@ -527,16 +527,25 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
     return_response = None
     if model == "gpt-4.1" or model == "gpt-5.2" or model.startswith("gpt-"):
         client = OpenAI(api_key=openai_api_key)
-        # Use high max_tokens for GPT-5.2 (supports 128,000 max output tokens)
-        max_tokens_value = 128000 if model == "gpt-5.2" else 16000
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=max_tokens_value,
-        )
+        # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
+        if model == "gpt-5.2":
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_completion_tokens=128000,  # GPT-5.2 uses max_completion_tokens
+            )
+        else:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=16000,  # Older GPT models use max_tokens
+            )
         return_response = response.choices[0].message.content
     elif model == "claude-sonnet-4-20250514":
         client = anthropic.Anthropic(api_key=anthropic_api_key)
@@ -1413,13 +1422,19 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info(
                     "Additional instructions appended to ChatGPT messages as final override"
                 )
-            # Use high max_tokens for GPT-5.2 (supports 128,000 max output tokens)
-            max_tokens_value = 128000 if gpt_model == "gpt-5.2" else 16000
-            response = client.chat.completions.create(
-                model=gpt_model, 
-                messages=messages,
-                max_tokens=max_tokens_value
-            )
+            # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
+            if gpt_model == "gpt-5.2":
+                response = client.chat.completions.create(
+                    model=gpt_model, 
+                    messages=messages,
+                    max_completion_tokens=128000  # GPT-5.2 uses max_completion_tokens
+                )
+            else:
+                response = client.chat.completions.create(
+                    model=gpt_model, 
+                    messages=messages,
+                    max_tokens=16000  # Older GPT models use max_tokens
+                )
             r = response.choices[0].message.content
 
         elif llm == "Grok" or llm == xai_model or llm == "grok-4-fast-reasoning":
