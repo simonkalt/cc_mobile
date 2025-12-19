@@ -1383,7 +1383,12 @@ IMPORTANT EXTRACTION INSTRUCTIONS:
    - "glassdoor" if URL contains glassdoor.com
    - "generic" for any other source
 
-If any information cannot be extracted, use "Not specified" as the value (except hiring_manager which should be empty string "" if not found, and ad_source which should be "generic" if uncertain)."""
+Extraction Guidelines:
+- Extract all fields accurately from the HTML content
+- For hiring_manager: Return empty string "" if not found
+- For ad_source: Return "linkedin", "indeed", "glassdoor", or "generic" based on the URL or page content
+- For company, job_title, and full_description: Extract the actual values from the page content
+- Ensure full_description includes the complete job description with all responsibilities, requirements, and qualifications"""
 
         # Log the prompt being sent to ChatGPT
         logger.info("=" * 80)
@@ -1395,14 +1400,16 @@ If any information cannot be extracted, use "Not specified" as the value (except
         logger.info(f"HTML content length: {len(html_content)} characters")
 
         # Call OpenAI ChatGPT API - using gpt-5.2 for better extraction
-        # GPT-5.2 supports 128,000 max output tokens, 400,000 context window
+        # GPT-5.2 supports 128,000 max completion tokens, 400,000 context window
         model_name = "gpt-5.2"
-        max_tokens_value = 128000  # GPT-5.2 supports up to 128,000 max output tokens
+        max_completion_tokens_value = (
+            128000  # GPT-5.2 supports up to 128,000 max completion tokens
+        )
         response = openai_client.chat.completions.create(
             model=model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=max_tokens_value,
+            max_completion_tokens=max_completion_tokens_value,  # GPT-5.2 uses max_completion_tokens instead of max_tokens
             response_format={"type": "json_object"},  # Force JSON response
         )
 
