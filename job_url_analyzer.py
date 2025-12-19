@@ -857,7 +857,7 @@ def detect_captcha(html: str) -> bool:
 
 
 def fetch_html_with_selenium(
-    url: str, timeout: int = 15
+    url: str, timeout: int = 45
 ) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
     """
     Fetch HTML content from URL using Selenium to render JavaScript
@@ -895,10 +895,16 @@ def fetch_html_with_selenium(
         # Create driver
         driver = webdriver.Chrome(options=chrome_options)
         driver.set_page_load_timeout(timeout)
-        driver.implicitly_wait(2)  # Reduce implicit wait time
+        driver.implicitly_wait(3)  # Implicit wait for elements
 
-        # Navigate to URL
-        driver.get(url)
+        # Navigate to URL - catch timeout but continue
+        try:
+            driver.get(url)
+        except TimeoutException:
+            logger.warning(
+                "[Selenium] Page load timeout, but continuing with current content..."
+            )
+            # Page may have partially loaded, continue anyway
 
         # Wait for page to load - optimized wait strategy
         try:
@@ -929,74 +935,110 @@ def fetch_html_with_selenium(
                 "[Selenium] Page load timeout, proceeding with current content"
             )
 
-        # For LinkedIn, try to expand "Show more" / "more..." buttons to get full content
+        # For LinkedIn, try to expand "more" buttons to get full content
         if "linkedin.com" in url.lower():
-            logger.info(
-                "[Selenium] Attempting to expand LinkedIn 'Show more' sections..."
-            )
+            logger.info("[Selenium] Attempting to expand LinkedIn 'more' sections...")
             try:
                 # Wait a bit for dynamic content to load
-                time.sleep(2)
+                time.sleep(3)
 
-                # Find and click "Show more" buttons - LinkedIn uses various selectors
-                show_more_selectors = [
-                    # Common LinkedIn "Show more" button patterns
-                    'button[aria-label*="Show more"]',
-                    'button[aria-label*="show more"]',
-                    'button:contains("Show more")',
-                    'button:contains("more")',
-                    'a[aria-label*="Show more"]',
-                    'a:contains("Show more")',
-                    # Look for buttons with text containing "more"
-                    '//button[contains(text(), "more")]',
-                    '//button[contains(text(), "More")]',
-                    '//a[contains(text(), "more")]',
-                    '//a[contains(text(), "More")]',
-                ]
-
+                # Use JavaScript to find and click all "more" buttons (more reliable)
                 expanded_count = 0
-                for selector in show_more_selectors:
-                    try:
-                        # Try XPath if it starts with //
-                        if selector.startswith("//"):
+                try:
+                    logger.info(
+                        "[Selenium] Using JavaScript to find and click 'more' buttons..."
+                    )
+                    # JavaScript approach - finds buttons/links with "more" text
+                    expanded_js = driver.execute_script(
+                        """
+                        var expanded = 0;
+                        // Find all clickable elements
+                        var elements = document.querySelectorAll('button, a, span[role="button"], div[role="button"]');
+                        for (var i = 0; i < elements.length; i++) {
+                            var el = elements[i];
+                            var text = (el.textContent || el.innerText || '').trim().toLowerCase();
+                            var ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+                            
+                            // Look for "more" (not "Show more") - exact match or contains
+                            if ((text === 'more' || text.indexOf(' more') !== -1 || text.indexOf('more') === 0) &&
+                                el.offsetParent !== null && // Element is visible
+                                !el.disabled) {
+                                try {
+                                    // Scroll into view
+                                    el.scrollIntoView({behavior: 'smooth', block: 'center'});
+                                    // Click the element
+                                    el.click();
+                                    expanded++;
+                                } catch(e) {
+                                    // Try alternative click method
+                                    try {
+                                        var clickEvent = new MouseEvent('click', {bubbles: true, cancelable: true});
+                                        el.dispatchEvent(clickEvent);
+                                        expanded++;
+                                    } catch(e2) {}
+                                }
+                            }
+                        }
+                        return expanded;
+                    """
+                    )
+                    if expanded_js and expanded_js > 0:
+                        expanded_count = expanded_js
+                        logger.info(
+                            f"[Selenium] JavaScript clicked {expanded_count} 'more' buttons"
+                        )
+                        time.sleep(2)  # Wait for content to expand
+                except Exception as e:
+                    logger.debug(f"[Selenium] JavaScript expansion failed: {e}")
+                    # Fallback to XPath/CSS selectors
+                    logger.info("[Selenium] Falling back to XPath/CSS selectors...")
+
+                    # XPath selectors for "more" buttons
+                    more_selectors = [
+                        '//button[contains(text(), "more")]',
+                        '//button[contains(text(), "More")]',
+                        '//a[contains(text(), "more")]',
+                        '//a[contains(text(), "More")]',
+                        '//span[contains(text(), "more")]',
+                        '//span[contains(text(), "More")]',
+                        '//button[@aria-label and contains(translate(@aria-label, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "more")]',
+                    ]
+
+                    for selector in more_selectors:
+                        try:
                             elements = driver.find_elements(By.XPATH, selector)
-                        else:
-                            # Try CSS selector
-                            elements = driver.find_elements(By.CSS_SELECTOR, selector)
-
-                        for element in elements:
-                            try:
-                                # Check if element is visible and clickable
-                                if element.is_displayed() and element.is_enabled():
-                                    # Scroll element into view
-                                    driver.execute_script(
-                                        "arguments[0].scrollIntoView(true);", element
+                            for element in elements:
+                                try:
+                                    if element.is_displayed() and element.is_enabled():
+                                        driver.execute_script(
+                                            "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});",
+                                            element,
+                                        )
+                                        time.sleep(0.5)
+                                        element.click()
+                                        expanded_count += 1
+                                        logger.info(
+                                            f"[Selenium] Clicked 'more' button via XPath (count: {expanded_count})"
+                                        )
+                                        time.sleep(1)
+                                except Exception as e:
+                                    logger.debug(
+                                        f"[Selenium] Could not click element: {e}"
                                     )
-                                    time.sleep(0.5)
-
-                                    # Try clicking
-                                    element.click()
-                                    expanded_count += 1
-                                    logger.info(
-                                        f"[Selenium] Clicked 'Show more' button (count: {expanded_count})"
-                                    )
-                                    time.sleep(1)  # Wait for content to expand
-                            except Exception as e:
-                                logger.debug(f"[Selenium] Could not click element: {e}")
-                                continue
-                    except Exception as e:
-                        logger.debug(f"[Selenium] Selector '{selector}' failed: {e}")
-                        continue
+                                    continue
+                        except Exception as e:
+                            logger.debug(
+                                f"[Selenium] Selector '{selector}' failed: {e}"
+                            )
+                            continue
 
                 if expanded_count > 0:
-                    logger.info(
-                        f"[Selenium] Expanded {expanded_count} 'Show more' sections"
-                    )
+                    logger.info(f"[Selenium] Expanded {expanded_count} 'more' sections")
                     # Wait a bit more for all content to load
-                    time.sleep(2)
+                    time.sleep(3)
                 else:
                     logger.info(
-                        "[Selenium] No 'Show more' buttons found or already expanded"
+                        "[Selenium] No 'more' buttons found or already expanded"
                     )
 
             except Exception as e:
@@ -1051,8 +1093,8 @@ def fetch_html(
     if use_selenium and SELENIUM_AVAILABLE and "linkedin.com" in url.lower():
         logger.info(f"[fetch_html] Using Selenium for LinkedIn URL: {url}")
         html, error, captcha = fetch_html_with_selenium(
-            url, timeout=15
-        )  # Reduced from 30 to 15 seconds
+            url, timeout=45
+        )  # Increased to 45 seconds for LinkedIn's heavy JavaScript pages
         if html and not error:
             return html, error, captcha
         logger.warning(
