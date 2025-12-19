@@ -22,10 +22,20 @@ from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from xai import Grok
 
 # Configure logging first
 logger = logging.getLogger(__name__)
+
+# Try to import OpenAI for ChatGPT (optional)
+try:
+    from openai import OpenAI
+
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    logger.warning(
+        "OpenAI not available - ChatGPT extraction will be skipped. Install openai to enable ChatGPT extraction."
+    )
 
 # Try to import Selenium for JavaScript rendering (optional)
 try:
@@ -109,7 +119,7 @@ class LinkedInParser(BaseJobParser):
         )
 
         # Return empty result to trigger Grok fallback
-        # The LLM will handle all extraction via extract_with_grok()
+        # The LLM will handle all extraction via extract_with_chatgpt()
         return result
 
         # ============================================================================
@@ -1279,35 +1289,39 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     return result
 
 
-def extract_with_grok(
-    html: str, grok_client: Optional[Grok] = None
+def extract_with_chatgpt(
+    html: str, openai_client: Optional[OpenAI] = None
 ) -> JobExtractionResult:
     """
-    Extract job information using Grok AI (fallback method)
+    Extract job information using ChatGPT (fallback method)
 
     Args:
         html: HTML content to analyze
-        grok_client: Optional Grok client instance (will create if not provided)
+        openai_client: Optional OpenAI client instance (will create if not provided)
 
     Returns:
         JobExtractionResult object
     """
     result = JobExtractionResult()
-    result.method = "grok"
+    result.method = "chatgpt"
+
+    if not OPENAI_AVAILABLE:
+        logger.error("OpenAI not available - cannot use ChatGPT extraction")
+        return result
 
     try:
         # Limit HTML size to avoid token limits
         html_content = html[:token_limit] if len(html) > token_limit else html
 
-        # Create Grok client if not provided
-        if grok_client is None:
+        # Create OpenAI client if not provided
+        if openai_client is None:
             import os
 
-            api_key = os.getenv("XAI_API_KEY")
+            api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
-                logger.error("XAI_API_KEY not configured")
+                logger.error("OPENAI_API_KEY not configured")
                 return result
-            grok_client = Grok(api_key=api_key)
+            openai_client = OpenAI(api_key=api_key)
 
         # Create simplified prompt for Grok - let the LLM figure it out
         prompt = f"""Scan the provided HTML content and retrieve the following fields: "Company Name", "Job Title", "Hiring Manager", "Ad Source", and "Job Description". The job description should include all responsibilities, requirements, qualifications, and details. It should be the full job description text including all responsibilities, requirements, qualifications, and details. The hiring manager should be the name of the person who is hiring for the job. The ad source should be the source of the job posting. The company name should be the name of the company that is hiring for the job. The job title should be the title of the job. The hiring manager may be called a human resources manager, recruiter, hiring manager, or "meet the hiring team". 
@@ -1349,27 +1363,28 @@ IMPORTANT EXTRACTION INSTRUCTIONS:
 
 If any information cannot be extracted, use "Not specified" as the value (except hiring_manager which should be empty string "" if not found, and ad_source which should be "generic" if uncertain)."""
 
-        # Log the prompt being sent to Grok
+        # Log the prompt being sent to ChatGPT
         logger.info("=" * 80)
-        logger.info("GROK PROMPT BEING SENT:")
+        logger.info("CHATGPT PROMPT BEING SENT:")
         logger.info("=" * 80)
         logger.info(prompt)
         logger.info("=" * 80)
         logger.info(f"Prompt length: {len(prompt)} characters")
         logger.info(f"HTML content length: {len(html_content)} characters")
 
-        # Call Grok API - increased max_tokens to handle longer descriptions
-        response = grok_client.chat.completions.create(
-            model="grok-beta",
+        # Call OpenAI ChatGPT API - using gpt-4-turbo for better extraction
+        response = openai_client.chat.completions.create(
+            model="gpt-4-turbo-preview",  # or "gpt-4" or "gpt-3.5-turbo"
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=8000,  # Increased to handle full job descriptions
+            response_format={"type": "json_object"},  # Force JSON response
         )
 
-        # Log the raw response from Grok
+        # Log the raw response from ChatGPT
         raw_response = response.choices[0].message.content.strip()
         logger.info("=" * 80)
-        logger.info("GROK RAW RESPONSE:")
+        logger.info("CHATGPT RAW RESPONSE:")
         logger.info("=" * 80)
         logger.info(raw_response[:2000])  # Log first 2000 chars
         if len(raw_response) > 2000:
@@ -1391,7 +1406,7 @@ If any information cannot be extracted, use "Not specified" as the value (except
 
         # Log the parsed data
         logger.info("=" * 80)
-        logger.info("GROK PARSED EXTRACTION RESULTS:")
+        logger.info("CHATGPT PARSED EXTRACTION RESULTS:")
         logger.info("=" * 80)
         logger.info(f"Company: {data.get('company', 'Not found')}")
         logger.info(f"Job Title: {data.get('job_title', 'Not found')}")
@@ -1412,14 +1427,14 @@ If any information cannot be extracted, use "Not specified" as the value (except
         result.is_complete = result.has_minimum_data()
 
         logger.info(
-            f"Grok extraction completed: complete={result.is_complete}, hiring_manager='{result.hiring_manager}'"
+            f"ChatGPT extraction completed: complete={result.is_complete}, hiring_manager='{result.hiring_manager}'"
         )
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Grok JSON response: {e}")
-        logger.debug(f"Grok response content: {content[:500]}")
+        logger.error(f"Failed to parse ChatGPT JSON response: {e}")
+        logger.debug(f"ChatGPT response content: {content[:500]}")
     except Exception as e:
-        logger.error(f"Grok extraction error: {e}")
+        logger.error(f"ChatGPT extraction error: {e}")
 
     return result
 
@@ -1428,19 +1443,19 @@ async def analyze_job_url(
     url: str,
     user_id: Optional[str] = None,
     user_email: Optional[str] = None,
-    use_grok_fallback: bool = True,
-    grok_client: Optional[Grok] = None,
+    use_chatgpt_fallback: bool = True,
+    openai_client: Optional[OpenAI] = None,
     html_content: Optional[str] = None,
 ) -> Dict:
     """
-    Analyze job URL using hybrid BeautifulSoup + Grok approach
+    Analyze job URL using hybrid BeautifulSoup + ChatGPT approach
 
     Args:
         url: Job posting URL
         user_id: Optional user ID for logging
         user_email: Optional user email for logging
-        use_grok_fallback: Whether to use Grok if BeautifulSoup fails
-        grok_client: Optional Grok client instance
+        use_chatgpt_fallback: Whether to use ChatGPT if BeautifulSoup fails
+        openai_client: Optional OpenAI client instance
         html_content: Optional HTML content (from CAPTCHA completion) - if provided, skips fetching
 
     Returns:
@@ -1495,9 +1510,9 @@ async def analyze_job_url(
                 "extractionMethod": "error",
             }
 
-    # Step 2: If BeautifulSoup didn't get complete data, try Grok
-    if not result.is_complete and use_grok_fallback:
-        logger.info("BeautifulSoup extraction incomplete, falling back to Grok...")
+    # Step 2: If BeautifulSoup didn't get complete data, try ChatGPT
+    if not result.is_complete and use_chatgpt_fallback:
+        logger.info("BeautifulSoup extraction incomplete, falling back to ChatGPT...")
 
         # Use provided HTML if available, otherwise fetch it
         if html_content:
@@ -1505,47 +1520,47 @@ async def analyze_job_url(
             error = None
             captcha_detected = False
         else:
-            # Fetch HTML for Grok (if not already fetched)
+            # Fetch HTML for ChatGPT (if not already fetched)
             html, error, captcha_detected = fetch_html(url)
 
-        # Check for CAPTCHA again before using Grok (only if we fetched)
-        # But try Grok extraction anyway - CAPTCHA might already be completed
+        # Check for CAPTCHA again before using ChatGPT (only if we fetched)
+        # But try ChatGPT extraction anyway - CAPTCHA might already be completed
         if captcha_detected:
             logger.warning(
-                "CAPTCHA detected during Grok fallback, but attempting extraction anyway..."
+                "CAPTCHA detected during ChatGPT fallback, but attempting extraction anyway..."
             )
-            # Continue with Grok extraction - if it succeeds, CAPTCHA was already completed
+            # Continue with ChatGPT extraction - if it succeeds, CAPTCHA was already completed
 
         if html and not error:
-            grok_result = extract_with_grok(html, grok_client)
+            chatgpt_result = extract_with_chatgpt(html, openai_client)
 
-            # Set ad_source for Grok result
-            grok_result.ad_source = ad_source
+            # Set ad_source for ChatGPT result
+            chatgpt_result.ad_source = ad_source
 
-            # If CAPTCHA was detected but Grok got valid data, CAPTCHA was already completed
-            if captcha_detected and grok_result.has_minimum_data():
+            # If CAPTCHA was detected but ChatGPT got valid data, CAPTCHA was already completed
+            if captcha_detected and chatgpt_result.has_minimum_data():
                 logger.info(
-                    "✅ Successfully extracted job data with Grok despite CAPTCHA detection - CAPTCHA appears to be already completed"
+                    "✅ Successfully extracted job data with ChatGPT despite CAPTCHA detection - CAPTCHA appears to be already completed"
                 )
-                # Use Grok results directly
-                result = grok_result
-            # Combine results intelligently: prefer Grok for better quality, but keep BS if Grok fails
-            elif grok_result.is_complete or (
-                not result.has_minimum_data() and grok_result.has_minimum_data()
+                # Use ChatGPT results directly
+                result = chatgpt_result
+            # Combine results intelligently: prefer ChatGPT for better quality, but keep BS if ChatGPT fails
+            elif chatgpt_result.is_complete or (
+                not result.has_minimum_data() and chatgpt_result.has_minimum_data()
             ):
-                # Use Grok results, but preserve BeautifulSoup ad_source
-                grok_result.ad_source = result.ad_source or ad_source
-                result = grok_result
-                logger.info("Using Grok extraction results")
-            # If CAPTCHA was detected and Grok also failed, mark as captcha-required
+                # Use ChatGPT results, but preserve BeautifulSoup ad_source
+                chatgpt_result.ad_source = result.ad_source or ad_source
+                result = chatgpt_result
+                logger.info("Using ChatGPT extraction results")
+            # If CAPTCHA was detected and ChatGPT also failed, mark as captcha-required
             # BUT only if HTML was not provided (if HTML was provided, it's already verified)
             elif (
                 captcha_detected
-                and not grok_result.has_minimum_data()
+                and not chatgpt_result.has_minimum_data()
                 and not html_content
             ):
                 logger.warning(
-                    "❌ CAPTCHA detected and Grok extraction also failed - CAPTCHA required"
+                    "❌ CAPTCHA detected and ChatGPT extraction also failed - CAPTCHA required"
                 )
                 result.method = "captcha-required"
                 return {
@@ -1560,40 +1575,40 @@ async def analyze_job_url(
                     "hiring_manager": "",
                     "extractionMethod": "error",
                 }
-            # If HTML was provided but Grok extraction failed, just return the failed result
-            elif not grok_result.has_minimum_data() and html_content:
+            # If HTML was provided but ChatGPT extraction failed, just return the failed result
+            elif not chatgpt_result.has_minimum_data() and html_content:
                 logger.warning(
-                    "❌ Grok extraction failed even with provided HTML content"
+                    "❌ ChatGPT extraction failed even with provided HTML content"
                 )
                 # Use whatever data we have, even if incomplete
-                if grok_result.has_minimum_data():
-                    result = grok_result
+                if chatgpt_result.has_minimum_data():
+                    result = chatgpt_result
                 # Otherwise keep the BeautifulSoup result (even if incomplete)
                 # Ensure method is not set to captcha-required when HTML was provided
                 if result.method == "captcha-required":
-                    result.method = "grok-failed"
+                    result.method = "chatgpt-failed"
             else:
-                # Combine: use Grok values where BS has "Not specified"
+                # Combine: use ChatGPT values where BS has "Not specified"
                 if (
                     result.company == "Not specified"
-                    and grok_result.company != "Not specified"
+                    and chatgpt_result.company != "Not specified"
                 ):
-                    result.company = grok_result.company
+                    result.company = chatgpt_result.company
                 if (
                     result.job_title == "Not specified"
-                    and grok_result.job_title != "Not specified"
+                    and chatgpt_result.job_title != "Not specified"
                 ):
-                    result.job_title = grok_result.job_title
+                    result.job_title = chatgpt_result.job_title
                 if (
                     result.job_description == "Not specified"
-                    and grok_result.job_description != "Not specified"
+                    and chatgpt_result.job_description != "Not specified"
                 ):
-                    result.job_description = grok_result.job_description
-                if not result.hiring_manager and grok_result.hiring_manager:
-                    result.hiring_manager = grok_result.hiring_manager
-                logger.info("Combined BeautifulSoup and Grok extraction results")
+                    result.job_description = chatgpt_result.job_description
+                if not result.hiring_manager and chatgpt_result.hiring_manager:
+                    result.hiring_manager = chatgpt_result.hiring_manager
+                logger.info("Combined BeautifulSoup and ChatGPT extraction results")
         else:
-            logger.warning(f"Failed to fetch HTML for Grok fallback: {error}")
+            logger.warning(f"Failed to fetch HTML for ChatGPT fallback: {error}")
 
     # Ensure ad_source is set
     if not result.ad_source:

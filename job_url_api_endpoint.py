@@ -29,7 +29,7 @@ async def analyze_job_url_endpoint(request: JobURLRequest):
 
     Uses hybrid approach:
     1. First tries BeautifulSoup (fast, free)
-    2. Falls back to Grok AI if BeautifulSoup fails
+    2. Falls back to ChatGPT AI if BeautifulSoup fails
     """
     try:
         # Convert HttpUrl to string
@@ -40,7 +40,7 @@ async def analyze_job_url_endpoint(request: JobURLRequest):
             url=url_str,
             user_id=request.user_id,
             user_email=request.user_email,
-            use_grok_fallback=True,  # Enable Grok fallback
+            use_chatgpt_fallback=True,  # Enable ChatGPT fallback
         )
 
         return result
