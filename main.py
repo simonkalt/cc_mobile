@@ -1282,8 +1282,13 @@ async def handle_chat(request: Request):
                         f"Failed to fetch PDF from S3: {str(e)}. Continuing with original resume value."
                     )
 
-        # Check if this is a job info request (has 'llm', 'company_name', etc.)
-        if "llm" in body and "company_name" in body:
+        # Check if this is a job info request
+        # Look for job info fields: llm + (company_name OR jd OR resume)
+        is_job_info_request = "llm" in body and (
+            "company_name" in body or "jd" in body or "resume" in body
+        )
+
+        if is_job_info_request:
             logger.info("Detected job info request in /chat endpoint, routing to job-info handler")
             # Check for required user identification
             if not body.get("user_id") and not body.get("user_email"):
@@ -1296,7 +1301,17 @@ async def handle_chat(request: Request):
                     },
                 )
             # Convert to JobInfoRequest and handle it
-            job_request = JobInfoRequest(**body)
+            try:
+                job_request = JobInfoRequest(**body)
+            except Exception as e:
+                logger.error(f"Invalid job info request: {e}")
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "Invalid job info request",
+                        "detail": str(e),
+                    },
+                )
             result = get_job_info(
                 llm=job_request.llm,
                 date_input=job_request.date_input,
