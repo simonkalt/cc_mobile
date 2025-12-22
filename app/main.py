@@ -25,7 +25,19 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
     # Startup
-    logger.info("Application startup")
+    logger.info("=" * 80)
+    logger.info("Application startup - app.main:app")
+    logger.info("=" * 80)
+    
+    # Log all registered routes for debugging
+    try:
+        user_routes = [r for r in app.routes if hasattr(r, 'path') and '/api/users' in r.path]
+        logger.info(f"Registered /api/users routes: {[(r.path, list(r.methods) if hasattr(r, 'methods') else []) for r in user_routes]}")
+        all_routes = [r.path for r in app.routes if hasattr(r, 'path')]
+        logger.info(f"Total routes registered: {len(all_routes)}")
+        logger.info(f"Sample routes: {all_routes[:10]}")
+    except Exception as e:
+        logger.warning(f"Could not log routes: {e}")
     
     # Connect to MongoDB Atlas
     logger.info("Attempting to connect to MongoDB Atlas...")
