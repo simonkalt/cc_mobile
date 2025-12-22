@@ -94,9 +94,6 @@ class LinkedInParser(BaseJobParser):
         result = JobExtractionResult()
         result.method = "beautifulsoup-linkedin"
         result.ad_source = "linkedin"  # Set ad_source since we know it's LinkedIn
-        logger.info(
-            f"[LinkedInParser] Simplified mode - skipping BeautifulSoup extraction, will use Grok"
-        )
 
         # Return empty result to trigger ChatGPT fallback
         # The LLM will handle all extraction via extract_with_chatgpt()
@@ -421,35 +418,24 @@ class IndeedParser(BaseJobParser):
     def parse(self, soup: BeautifulSoup, url: str) -> JobExtractionResult:
         result = JobExtractionResult()
         result.method = "beautifulsoup-indeed"
-        logger.info(f"[IndeedParser] Starting extraction for URL: {url}")
 
         try:
             # Try JSON-LD structured data first
             json_ld_scripts = soup.find_all("script", type="application/ld+json")
-            logger.info(f"[IndeedParser] Found {len(json_ld_scripts)} JSON-LD scripts")
             for script in json_ld_scripts:
                 try:
                     data = json.loads(script.string)
                     if isinstance(data, dict) and data.get("@type") == "JobPosting":
-                        logger.info("[IndeedParser] Found JobPosting in JSON-LD")
                         result.company = data.get("hiringOrganization", {}).get("name")
                         result.job_title = data.get("title")
                         result.job_description = data.get("description")
-                        logger.info(
-                            f"[IndeedParser] JSON-LD extracted - Company: '{result.company}', Title: '{result.job_title}', Description: {len(result.job_description) if result.job_description else 0} chars"
-                        )
                         if result.has_minimum_data():
                             result.is_complete = True
-                            logger.info(
-                                "[IndeedParser] JSON-LD extraction successful, returning result"
-                            )
                             return result
-                except (json.JSONDecodeError, AttributeError) as e:
-                    logger.debug(f"[IndeedParser] JSON-LD parse error: {e}")
+                except (json.JSONDecodeError, AttributeError):
                     continue
 
             # Company name
-            logger.info("[IndeedParser] Trying CSS selectors for company name...")
             company_selectors = [
                 '[data-testid="job-poster-name"]',
                 '[data-testid="inlineHeader-companyName"]',
@@ -460,17 +446,9 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.company = element.get_text(strip=True)
-                    logger.info(
-                        f"[IndeedParser] Found company using selector '{selector}': '{result.company}'"
-                    )
                     break
-            if not result.company:
-                logger.warning(
-                    "[IndeedParser] Could not find company name with any selector"
-                )
 
             # Job title
-            logger.info("[IndeedParser] Trying CSS selectors for job title...")
             title_selectors = [
                 "h1.jobTitle",
                 'h1[data-testid="job-title"]',
@@ -480,17 +458,9 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.job_title = element.get_text(strip=True)
-                    logger.info(
-                        f"[IndeedParser] Found job title using selector '{selector}': '{result.job_title}'"
-                    )
                     break
-            if not result.job_title:
-                logger.warning(
-                    "[IndeedParser] Could not find job title with any selector"
-                )
 
             # Job description
-            logger.info("[IndeedParser] Trying CSS selectors for job description...")
             desc_selectors = [
                 "#jobDescriptionText",
                 '[data-testid="job-description"]',
@@ -500,23 +470,9 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.job_description = element.get_text(strip=True)
-                    logger.info(
-                        f"[IndeedParser] Found job description using selector '{selector}': {len(result.job_description)} chars"
-                    )
                     break
-            if not result.job_description:
-                logger.warning(
-                    "[IndeedParser] Could not find job description with any selector"
-                )
 
             result.is_complete = result.has_minimum_data()
-
-            logger.info(
-                f"[IndeedParser] Final extraction - Company: '{result.company or 'None'}', Title: '{result.job_title or 'None'}', Description: {len(result.job_description) if result.job_description else 0} chars"
-            )
-            logger.info(
-                f"[IndeedParser] Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
-            )
 
         except Exception as e:
             logger.error(f"Indeed parser error: {e}", exc_info=True)
@@ -995,16 +951,7 @@ def extract_from_html(html: str, url: str) -> JobExtractionResult:
     }
 
     parser = parsers.get(site, GenericParser())
-    logger.info(f"Using {site} parser for extraction...")
     result = parser.parse(soup, url)
-
-    # Log extraction details
-    logger.info(
-        f"Parser result - Company: {result.company or 'None'}, Title: {result.job_title or 'None'}, Description length: {len(result.job_description) if result.job_description else 0}"
-    )
-    logger.info(
-        f"Parser result - Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
-    )
 
     # Set ad_source based on detected site
     result.ad_source = site
@@ -1040,9 +987,6 @@ def extract_from_html(html: str, url: str) -> JobExtractionResult:
         logger.debug(f"Could not extract hiring manager: {e}")
         # Leave as None/empty string
 
-    logger.info(
-        f"BeautifulSoup extraction from HTML: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
-    )
     return result
 
 
@@ -1054,7 +998,6 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
         JobExtractionResult object
     """
     # Fetch HTML
-    logger.info(f"[extract_with_beautifulsoup] Fetching HTML from URL: {url}")
     html, error, captcha_detected = fetch_html(url)
 
     if error or not html:
@@ -1062,13 +1005,6 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
         result = JobExtractionResult()
         result.method = "beautifulsoup-failed"
         return result
-
-    logger.info(
-        f"[extract_with_beautifulsoup] HTML fetched successfully - Length: {len(html)} chars, CAPTCHA detected: {captcha_detected}"
-    )
-    logger.debug(
-        f"[extract_with_beautifulsoup] HTML preview (first 500 chars): {html[:500]}"
-    )
 
     # Parse HTML
     try:
@@ -1081,7 +1017,6 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
 
     # Detect site and use appropriate parser
     site = detect_site(url)
-    logger.info(f"Detected site: {site} for URL: {url}")
 
     parsers = {
         "linkedin": LinkedInParser(),
@@ -1091,16 +1026,7 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     }
 
     parser = parsers.get(site, GenericParser())
-    logger.info(f"Using {site} parser for extraction...")
     result = parser.parse(soup, url)
-
-    # Log extraction details
-    logger.info(
-        f"Parser result - Company: {result.company or 'None'}, Title: {result.job_title or 'None'}, Description length: {len(result.job_description) if result.job_description else 0}"
-    )
-    logger.info(
-        f"Parser result - Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
-    )
 
     # Set ad_source based on detected site
     result.ad_source = site
@@ -1277,15 +1203,6 @@ Extraction Guidelines:
 - For company, job_title, and full_description: Extract the actual values from the page content
 - Ensure full_description includes the complete job description with all responsibilities, requirements, and qualifications"""
 
-        # Log the prompt being sent to ChatGPT
-        logger.info("=" * 80)
-        logger.info("CHATGPT PROMPT BEING SENT:")
-        logger.info("=" * 80)
-        logger.info(prompt)
-        logger.info("=" * 80)
-        logger.info(f"Prompt length: {len(prompt)} characters")
-        logger.info(f"HTML content length: {len(html_content)} characters")
-
         # Call OpenAI ChatGPT API - using gpt-5.2 for better extraction
         # GPT-5.2 supports 128,000 max completion tokens, 400,000 context window
         model_name = "gpt-5.2"
@@ -1300,19 +1217,8 @@ Extraction Guidelines:
             response_format={"type": "json_object"},  # Force JSON response
         )
 
-        # Log the raw response from ChatGPT
-        raw_response = response.choices[0].message.content.strip()
-        logger.info("=" * 80)
-        logger.info("CHATGPT RAW RESPONSE:")
-        logger.info("=" * 80)
-        logger.info(raw_response[:2000])  # Log first 2000 chars
-        if len(raw_response) > 2000:
-            logger.info(
-                f"... (truncated, total length: {len(raw_response)} characters)"
-            )
-        logger.info("=" * 80)
-
         # Parse response
+        raw_response = response.choices[0].message.content.strip()
         content = raw_response
 
         # Remove markdown code blocks if present
@@ -1322,17 +1228,6 @@ Extraction Guidelines:
 
         # Parse JSON
         data = json.loads(content)
-
-        # Log the parsed data
-        logger.info("=" * 80)
-        logger.info("CHATGPT PARSED EXTRACTION RESULTS:")
-        logger.info("=" * 80)
-        logger.info(f"Company: {data.get('company', 'Not found')}")
-        logger.info(f"Job Title: {data.get('job_title', 'Not found')}")
-        logger.info(f"Full Description: {len(data.get('full_description', ''))} chars")
-        logger.info(f"Hiring Manager: '{data.get('hiring_manager', '')}'")
-        logger.info(f"Ad Source: {data.get('ad_source', 'Not found')}")
-        logger.info("=" * 80)
 
         result.company = data.get("company", "Not specified")
         result.job_title = data.get("job_title") or data.get(
@@ -1344,10 +1239,6 @@ Extraction Guidelines:
         result.hiring_manager = data.get("hiring_manager", "") or ""
         result.ad_source = data.get("ad_source", "generic") or "generic"
         result.is_complete = result.has_minimum_data()
-
-        logger.info(
-            f"ChatGPT extraction completed: complete={result.is_complete}, hiring_manager='{result.hiring_manager}'"
-        )
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse ChatGPT JSON response: {e}")
@@ -1393,16 +1284,13 @@ async def analyze_job_url(
 
     # Step 1: Fetch HTML from URL (or use provided HTML)
     if html_content:
-        logger.info("Using provided HTML content for extraction...")
         html = html_content
         error = None
     else:
-        logger.info("Fetching HTML from URL...")
         html, error, _ = fetch_html(url)
 
     # Step 2: Always use GPT model to extract all fields
     if html and not error:
-        logger.info("Extracting job information using GPT model...")
         result = extract_with_chatgpt(html, openai_client)
         result.ad_source = ad_source
     else:
@@ -1433,29 +1321,5 @@ async def analyze_job_url(
         response_data["message"] = (
             "Unable to extract job data from the page. The page may not contain a valid job posting, or the structure may have changed."
         )
-
-    # Detailed logging for debugging
-    logger.info("=" * 80)
-    logger.info("FINAL EXTRACTION RESULT")
-    logger.info("=" * 80)
-    logger.info(f"URL: {url}")
-    logger.info(f"Method: {result.method}")
-    logger.info(f"Ad Source: {result.ad_source}")
-    logger.info(f"Success: {has_valid_data}")
-    logger.info(
-        f"Company: {result.company or 'None'} (valid: {bool(result.company and result.company != 'Not specified')})"
-    )
-    logger.info(
-        f"Job Title: {result.job_title or 'None'} (valid: {bool(result.job_title and result.job_title != 'Not specified')})"
-    )
-    logger.info(
-        f"Description: {'Present' if result.job_description else 'None'} (length: {len(result.job_description) if result.job_description else 0}, valid: {bool(result.job_description and result.job_description != 'Not specified')})"
-    )
-    logger.info(f"Hiring Manager: {result.hiring_manager or 'None'}")
-    logger.info(f"Has Minimum Data: {result.has_minimum_data()}")
-    logger.info(f"HTML Provided: {bool(html_content)}")
-    logger.info(f"Response Success: {response_data.get('success')}")
-    logger.info(f"Response Message: {response_data.get('message', 'None')}")
-    logger.info("=" * 80)
 
     return response_data
