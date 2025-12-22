@@ -1,0 +1,45 @@
+"""
+Cover letter related Pydantic models
+"""
+from pydantic import BaseModel
+from typing import Optional
+
+
+class ChatRequest(BaseModel):
+    prompt: str
+    active_model: str = "gpt-4.1"  # Default model
+
+    class Config:
+        # Allow extra fields to be ignored
+        extra = "ignore"
+
+
+class JobInfoRequest(BaseModel):
+    llm: str
+    date_input: str
+    company_name: str
+    hiring_manager: str
+    ad_source: str
+    resume: str
+    jd: str  # Job description
+    additional_instructions: str = ""
+    tone: str = "Professional"
+    address: str = ""  # City, State
+    phone_number: str = ""
+    user_id: Optional[str] = None  # Optional user ID to access custom personality profiles
+    user_email: Optional[str] = None  # Optional user email to access custom personality profiles
+
+
+class SaveCoverLetterRequest(BaseModel):
+    coverLetterContent: str  # The cover letter content (markdown, HTML, or base64-encoded PDF)
+    fileName: Optional[str] = None  # Optional custom filename (without extension)
+    contentType: str = "text/markdown"  # Content type: "text/markdown", "text/html", or "application/pdf"
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+
+class CoverLetterRequest(BaseModel):
+    key: str  # S3 key (user_id/generated_cover_letters/filename)
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
