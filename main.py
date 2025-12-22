@@ -1058,17 +1058,26 @@ async def health_check():
         try:
             collection = get_collection("users")
             if collection is None:
+                logger.warning("Collection is None - database not initialized")
                 health_status["mongodb"]["collection_accessible"] = False
                 return JSONResponse(status_code=503, content=health_status)
 
             # Try a simple operation to verify collection access
-            # Use count_documents with limit=1 for a lightweight check
-            collection.count_documents({}, limit=1)
-            health_status["mongodb"]["collection_accessible"] = True
+            # Use estimated_document_count() for a lightweight check (doesn't scan all documents)
+            # This is faster than count_documents() as it uses collection metadata
+            try:
+                collection.estimated_document_count()
+                health_status["mongodb"]["collection_accessible"] = True
+            except Exception as count_error:
+                # Fallback: try a simple find_one operation
+                logger.debug(f"estimated_document_count failed, trying find_one: {count_error}")
+                collection.find_one({}, {"_id": 1})  # Just get _id field, very lightweight
+                health_status["mongodb"]["collection_accessible"] = True
 
         except Exception as e:
-            logger.warning(f"Users collection not accessible: {e}")
+            logger.error(f"Users collection not accessible: {e}", exc_info=True)
             health_status["mongodb"]["collection_accessible"] = False
+            health_status["mongodb"]["error"] = str(e)
             return JSONResponse(status_code=503, content=health_status)
 
         # All checks passed - server is ready
