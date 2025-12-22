@@ -85,6 +85,22 @@ async def get_user_by_email_endpoint(email: str):
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user_endpoint(user_id: str, updates: UserUpdateRequest):
     """Update user"""
+    # Log what's being updated, especially personalityProfiles
+    if updates.preferences and isinstance(updates.preferences, dict):
+        app_settings = updates.preferences.get("appSettings", {})
+        if isinstance(app_settings, dict) and "personalityProfiles" in app_settings:
+            personality_profiles = app_settings["personalityProfiles"]
+            logger.info(
+                f"Update request for user {user_id} includes personalityProfiles: "
+                f"type={type(personality_profiles)}, "
+                f"length={len(personality_profiles) if isinstance(personality_profiles, list) else 'N/A'}, "
+                f"value={personality_profiles}"
+            )
+        else:
+            logger.debug(f"Update request for user {user_id} does not include personalityProfiles")
+    else:
+        logger.debug(f"Update request for user {user_id} does not include preferences")
+    
     return update_user(user_id, updates)
 
 

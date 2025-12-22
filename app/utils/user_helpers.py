@@ -26,11 +26,19 @@ def normalize_personality_profile(profile: dict) -> Optional[dict]:
         Normalized profile dict or None if invalid
     """
     if not isinstance(profile, dict):
+        logger.debug(f"Profile is not a dict: {type(profile)}")
         return None
     
+    profile_id = profile.get("id", "")
+    profile_name = profile.get("name", "")
+    
+    # Log if profile is missing required fields
+    if not profile_id or not profile_name:
+        logger.debug(f"Profile missing required fields - id: {bool(profile_id)}, name: {bool(profile_name)}, profile keys: {list(profile.keys())}")
+    
     return {
-        "id": profile.get("id", ""),
-        "name": profile.get("name", ""),
+        "id": profile_id,
+        "name": profile_name,
         "description": profile.get("description", "")
     }
 
@@ -47,13 +55,21 @@ def normalize_personality_profiles(profiles: list) -> List[dict]:
         List of normalized profile dictionaries
     """
     if not isinstance(profiles, list):
+        logger.debug(f"Profiles is not a list: {type(profiles)}")
         return []
     
     normalized = []
-    for profile in profiles:
+    filtered_count = 0
+    for idx, profile in enumerate(profiles):
         normalized_profile = normalize_personality_profile(profile)
         if normalized_profile and normalized_profile.get("id") and normalized_profile.get("name"):
             normalized.append(normalized_profile)
+        else:
+            filtered_count += 1
+            logger.debug(f"Filtered out profile at index {idx}: missing id or name")
+    
+    if filtered_count > 0:
+        logger.info(f"Filtered out {filtered_count} invalid profile(s) out of {len(profiles)} total")
     
     return normalized
 

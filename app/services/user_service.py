@@ -233,6 +233,13 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
             detail="Invalid user ID format"
         )
     
+    # Get current user to preserve existing personalityProfiles if not explicitly updated
+    current_user = collection.find_one({"_id": user_id_obj})
+    existing_profiles = []
+    if current_user:
+        existing_profiles = current_user.get("preferences", {}).get("appSettings", {}).get("personalityProfiles", [])
+        logger.debug(f"Current user has {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing personality profile(s)")
+    
     # Build update document (only include fields that are provided)
     update_doc = {"dateUpdated": datetime.utcnow()}
     
@@ -281,31 +288,47 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                                 for size_key, size_value in print_props["pageSize"].items():
                                     update_doc[f"preferences.appSettings.printProperties.pageSize.{size_key}"] = size_value
                     # Update personalityProfiles
+                    # IMPORTANT: Only update if explicitly provided in the request
+                    # If not provided, preserve existing profiles
                     if "personalityProfiles" in app_settings:
                         personality_profiles = app_settings["personalityProfiles"]
+                        logger.info(f"personalityProfiles provided in update request for user {user_id}: type={type(personality_profiles)}, value={personality_profiles}")
+                        
                         if isinstance(personality_profiles, list):
+                            # Only update if explicitly provided (even if empty array)
+                            # If the array is empty, that means user wants to clear profiles
+                            # If normalization filters out invalid profiles, preserve existing ones
                             normalized_profiles = normalize_personality_profiles(personality_profiles)
-                            if len(normalized_profiles) == 0:
-                                # Get current user to check existing profiles
-                                try:
-                                    current_user = collection.find_one({"_id": user_id_obj})
-                                    if current_user:
-                                        existing_profiles = current_user.get("preferences", {}).get("appSettings", {}).get("personalityProfiles", [])
-                                        if existing_profiles and len(existing_profiles) > 0:
-                                            logger.warning(
-                                                f"⚠️ WARNING: Updating personalityProfiles to empty array for user {user_id}. "
-                                                f"This will DELETE {len(existing_profiles)} existing profile(s)"
-                                            )
-                                except Exception as e:
-                                    logger.warning(f"Could not check existing profiles before update: {e}")
                             
-                            if len(normalized_profiles) > 0:
+                            # If frontend sent empty array, clear profiles (explicit intent)
+                            if len(personality_profiles) == 0:
+                                update_doc["preferences.appSettings.personalityProfiles"] = []
+                                logger.warning(
+                                    f"⚠️ Cleared personalityProfiles for user {user_id} (explicit empty array). "
+                                    f"Had {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing profile(s)."
+                                )
+                            # If normalization filtered out all profiles but frontend sent some, warn and preserve existing
+                            elif len(normalized_profiles) == 0 and len(personality_profiles) > 0:
+                                logger.warning(
+                                    f"⚠️ WARNING: All personalityProfiles were filtered out during normalization for user {user_id}. "
+                                    f"Frontend sent {len(personality_profiles)} profile(s) but none were valid. Preserving {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing profile(s)."
+                                )
+                                # Don't update - preserve existing profiles
+                            # If we have valid normalized profiles, update them
+                            elif len(normalized_profiles) > 0:
                                 update_doc["preferences.appSettings.personalityProfiles"] = normalized_profiles
-                                logger.info(f"Updated personalityProfiles for user {user_id}: {len(normalized_profiles)} profile(s)")
-                            else:
-                                if len(personality_profiles) == 0:
-                                    update_doc["preferences.appSettings.personalityProfiles"] = []
-                                    logger.info(f"Cleared personalityProfiles for user {user_id}")
+                                logger.info(
+                                    f"Updated personalityProfiles for user {user_id}: {len(normalized_profiles)} profile(s) "
+                                    f"(replaced {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing)"
+                                )
+                        elif personality_profiles is None:
+                            # Explicitly set to None - don't update, preserve existing
+                            logger.info(f"personalityProfiles set to None in update request for user {user_id}. Preserving existing profiles.")
+                        else:
+                            logger.error(f"Invalid personalityProfiles type for user {user_id}: {type(personality_profiles)}. Expected list. Preserving existing profiles.")
+                    else:
+                        # personalityProfiles not in update request - preserve existing
+                        logger.debug(f"personalityProfiles not in update request for user {user_id}. Preserving {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing profile(s).")
                     # Update selectedModel
                     if "selectedModel" in app_settings:
                         update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]
