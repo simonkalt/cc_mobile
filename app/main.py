@@ -131,14 +131,14 @@ async def health_check():
     if is_connected():
         try:
             db = get_database()
-            if db:
+            if db is not None:
                 health_info["database"] = db.name
                 collections = db.list_collection_names()
                 health_info["collections"] = collections
                 
                 # Try to access users collection
                 collection = get_collection(USERS_COLLECTION)
-                if collection:
+                if collection is not None:
                     user_count = collection.count_documents({})
                     health_info["users_collection"] = {
                         "name": USERS_COLLECTION,
