@@ -80,6 +80,30 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Include routers
 app.include_router(users.router)
 
+# Import and include other routers
+try:
+    from app.api.routers import (
+        job_url,
+        llm_config,
+        personality,
+        config,
+        cover_letter,
+        files,
+        cover_letters,
+        pdf,
+    )
+    app.include_router(job_url.router)
+    app.include_router(llm_config.router)
+    app.include_router(personality.router)
+    app.include_router(config.router)
+    app.include_router(cover_letter.router)
+    app.include_router(files.router)
+    app.include_router(cover_letters.router)
+    app.include_router(pdf.router)
+    logger.info("All API routers registered successfully")
+except ImportError as e:
+    logger.warning(f"Some routers could not be imported: {e}")
+
 
 # Health check endpoints
 @app.get("/")
