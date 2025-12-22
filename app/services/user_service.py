@@ -368,13 +368,15 @@ def delete_user(user_id: str) -> Dict:
 def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     """Authenticate user login"""
     if not is_connected():
+        logger.error("Database connection unavailable when attempting login")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable. Please try again in a moment."
         )
     
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
+        logger.error("Failed to get users collection")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection"

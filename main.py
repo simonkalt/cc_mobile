@@ -159,15 +159,22 @@ async def lifespan(app: FastAPI):
     # Connect to MongoDB Atlas
     if MONGODB_AVAILABLE:
         logger.info("Attempting to connect to MongoDB Atlas...")
-        if connect_to_mongodb():
+        connection_result = connect_to_mongodb()
+        if connection_result:
             logger.info("MongoDB Atlas connection established")
-            send_ntfy_notification("MongoDB Atlas connected successfully", "MongoDB")
+            # Verify connection is actually working
+            from app.db.mongodb import is_connected
+            if is_connected():
+                logger.info("MongoDB connection verified and ready")
+                send_ntfy_notification("MongoDB Atlas connected successfully", "MongoDB")
+            else:
+                logger.error("MongoDB connection established but ping check failed!")
         else:
-            logger.warning(
-                "MongoDB Atlas connection failed. Continuing without database."
+            logger.error(
+                "MongoDB Atlas connection failed. Database features will be unavailable."
             )
     else:
-        logger.info("MongoDB not available - skipping connection")
+        logger.warning("MongoDB not available - skipping connection")
 
     # Log OCI configuration variables
     # logger.info(f"oci_config_file: {oci_config_file}")

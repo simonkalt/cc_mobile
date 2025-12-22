@@ -120,11 +120,13 @@ def is_connected() -> bool:
         True if connected, False otherwise
     """
     if mongodb_client is None:
+        logger.debug("MongoDB client is None - not connected")
         return False
     
     try:
         mongodb_client.admin.command('ping')
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug(f"MongoDB ping failed: {e}")
         return False
 
