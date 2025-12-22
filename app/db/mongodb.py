@@ -44,7 +44,6 @@ def connect_to_mongodb() -> bool:
         uri_db_match = re.search(r'mongodb\+srv://[^/]+/([^?]+)', settings.MONGODB_URI)
         if uri_db_match:
             uri_db_name = uri_db_match.group(1)
-            logger.info(f"Database name found in connection string: {uri_db_name}")
             # Use database from URI if specified, otherwise use env var
             db_name = uri_db_name if uri_db_name else settings.MONGODB_DB_NAME
         else:
@@ -52,19 +51,6 @@ def connect_to_mongodb() -> bool:
         
         # Get database
         mongodb_db = mongodb_client[db_name]
-        
-        # Verify database and collection access
-        logger.info(f"Successfully connected to MongoDB Atlas. Using Database: {db_name}")
-        logger.info(f"Collection name configured: {settings.MONGODB_COLLECTION_NAME}")
-        
-        # List collections to verify access
-        try:
-            collections = mongodb_db.list_collection_names()
-            logger.info(f"Available collections in database '{db_name}': {collections}")
-            if settings.MONGODB_COLLECTION_NAME in collections:
-                collection = mongodb_db[settings.MONGODB_COLLECTION_NAME]
-                user_count = collection.count_documents({})
-                logger.info(f"Collection '{settings.MONGODB_COLLECTION_NAME}' exists with {user_count} documents")
             else:
                 logger.warning(f"Collection '{settings.MONGODB_COLLECTION_NAME}' not found in database '{db_name}'")
         except Exception as e:
@@ -97,7 +83,6 @@ def close_mongodb_connection() -> None:
     if mongodb_client is not None:
         try:
             mongodb_client.close()
-            logger.info("MongoDB connection closed")
         except Exception as e:
             logger.error(f"Error closing MongoDB connection: {e}")
         finally:

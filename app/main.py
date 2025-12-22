@@ -25,33 +25,12 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
     # Startup
-    logger.info("=" * 80)
-    logger.info("Application startup - app.main:app")
-    logger.info("=" * 80)
-    
-    # Log all registered routes for debugging
-    try:
-        user_routes = [r for r in app.routes if hasattr(r, 'path') and '/api/users' in r.path]
-        logger.info(f"Registered /api/users routes: {[(r.path, list(r.methods) if hasattr(r, 'methods') else []) for r in user_routes]}")
-        all_routes = [r.path for r in app.routes if hasattr(r, 'path')]
-        logger.info(f"Total routes registered: {len(all_routes)}")
-        logger.info(f"Sample routes: {all_routes[:10]}")
-    except Exception as e:
-        logger.warning(f"Could not log routes: {e}")
-    
-    # Connect to MongoDB Atlas
-    logger.info("Attempting to connect to MongoDB Atlas...")
-    if connect_to_mongodb():
-        logger.info("MongoDB Atlas connection established")
-    else:
-        logger.warning("MongoDB Atlas connection failed. Continuing without database.")
+    connect_to_mongodb()
     
     yield
     
     # Shutdown
-    logger.info("Application shutdown")
     close_mongodb_connection()
-    logger.info("MongoDB Atlas connection closed")
 
 
 # Create the FastAPI app instance
@@ -71,7 +50,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-logger.info(f"CORS configured for origins: {cors_origins}")
 
 # Add exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -92,8 +70,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Include routers
 try:
     app.include_router(users.router)
-    logger.info(f"Users router registered with prefix: {users.router.prefix}")
-    logger.info(f"Users router routes: {[r.path for r in users.router.routes]}")
 except Exception as e:
     logger.error(f"Failed to register users router: {e}", exc_info=True)
     raise
@@ -118,7 +94,6 @@ try:
     app.include_router(files.router)
     app.include_router(cover_letters.router)
     app.include_router(pdf.router)
-    logger.info("All API routers registered successfully")
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 

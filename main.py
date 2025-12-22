@@ -153,28 +153,10 @@ async def lifespan(app: FastAPI):
         handlers=[logging.StreamHandler(sys.stdout)],
         force=True,
     )
-    logger.info("Application startup - logging configured")
-    send_ntfy_notification("Application started and logging configured", "Startup")
 
     # Connect to MongoDB Atlas
     if MONGODB_AVAILABLE:
-        logger.info("Attempting to connect to MongoDB Atlas...")
-        connection_result = connect_to_mongodb()
-        if connection_result:
-            logger.info("MongoDB Atlas connection established")
-            # Verify connection is actually working
-            from app.db.mongodb import is_connected
-            if is_connected():
-                logger.info("MongoDB connection verified and ready")
-                send_ntfy_notification("MongoDB Atlas connected successfully", "MongoDB")
-            else:
-                logger.error("MongoDB connection established but ping check failed!")
-        else:
-            logger.error(
-                "MongoDB Atlas connection failed. Database features will be unavailable."
-            )
-    else:
-        logger.warning("MongoDB not available - skipping connection")
+        connect_to_mongodb()
 
     # Log OCI configuration variables
     # logger.info(f"oci_config_file: {oci_config_file}")
@@ -204,9 +186,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     if MONGODB_AVAILABLE:
-        logger.info("Closing MongoDB Atlas connection...")
         close_mongodb_connection()
-        logger.info("MongoDB Atlas connection closed")
 
 
 # Create the FastAPI app instance
@@ -242,13 +222,11 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, etc.)
     allow_headers=["*"],  # Allows all headers
 )
-logger.info(f"CORS configured for origins: {all_origins}")
 
 # Register LLM configuration endpoint if available
 if LLM_CONFIG_AVAILABLE:
     try:
         get_llms_endpoint(app)
-        logger.info("LLM configuration endpoint registered from llm_config_endpoint module")
     except Exception as e:
         logger.error(f"Failed to register LLM configuration endpoint: {e}")
         LLM_CONFIG_AVAILABLE = False
@@ -257,8 +235,6 @@ if LLM_CONFIG_AVAILABLE:
 try:
     from app.api.routers import users
     app.include_router(users.router)
-    logger.info(f"Users router registered with prefix: {users.router.prefix}")
-    logger.info(f"Users router routes: {[r.path for r in users.router.routes]}")
 except Exception as e:
     logger.error(f"Failed to register users router: {e}", exc_info=True)
 
@@ -281,7 +257,6 @@ try:
     app.include_router(files.router)
     app.include_router(cover_letters.router)
     app.include_router(pdf.router)
-    logger.info("All refactored API routers registered successfully")
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:
