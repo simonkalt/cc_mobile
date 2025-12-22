@@ -119,10 +119,44 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
-    from app.db.mongodb import is_connected
+    from app.db.mongodb import is_connected, get_collection, get_database
+    from app.utils.user_helpers import USERS_COLLECTION
     
-    return {
+    health_info = {
         "status": "healthy",
         "mongodb": "connected" if is_connected() else "disconnected"
     }
+    
+    # Add detailed database info if connected
+    if is_connected():
+        try:
+            db = get_database()
+            if db:
+                health_info["database"] = db.name
+                collections = db.list_collection_names()
+                health_info["collections"] = collections
+                
+                # Try to access users collection
+                collection = get_collection(USERS_COLLECTION)
+                if collection:
+                    user_count = collection.count_documents({})
+                    health_info["users_collection"] = {
+                        "name": USERS_COLLECTION,
+                        "document_count": user_count
+                    }
+                    
+                    # Try to find the specific user
+                    from bson import ObjectId
+                    try:
+                        user_id_obj = ObjectId("693326c07fcdaab8e81cdd2f")
+                        user = collection.find_one({"_id": user_id_obj})
+                        health_info["test_user_found"] = user is not None
+                        if user:
+                            health_info["test_user_email"] = user.get("email")
+                    except Exception as e:
+                        health_info["test_user_error"] = str(e)
+        except Exception as e:
+            health_info["database_error"] = str(e)
+    
+    return health_info
 

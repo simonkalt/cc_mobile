@@ -151,13 +151,22 @@ def get_user_by_id(user_id: str) -> UserResponse:
             detail="Invalid user ID format"
         )
     
+    logger.debug(f"Querying MongoDB for user_id: {user_id} (ObjectId: {user_id_obj})")
     user = collection.find_one({"_id": user_id_obj})
     if not user:
+        # Log collection info for debugging
+        total_users = collection.count_documents({})
+        logger.warning(f"User not found: {user_id}. Total users in collection: {total_users}")
+        # Try to find any user to verify collection access
+        sample_user = collection.find_one({})
+        if sample_user:
+            logger.debug(f"Sample user in collection: {sample_user.get('_id')}, email: {sample_user.get('email')}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
+    logger.debug(f"Found user: {user.get('email')} (ID: {user.get('_id')})")
     return user_doc_to_response(user)
 
 

@@ -46,23 +46,34 @@ async def register_user_endpoint(user_data: UserRegisterRequest):
 async def login_user_endpoint(login_data: UserLoginRequest):
     """Authenticate user login"""
     logger.info(f"Login attempt: {login_data.email}")
-    login_response = login_user(login_data)
-    
-    if login_response.success and login_response.user:
-        logger.info("=" * 80)
-        logger.info(f"✓ USER LOGGED IN SUCCESSFULLY")
-        logger.info(f"  User ID: {login_response.user.id}")
-        logger.info(f"  Name: {login_response.user.name}")
-        logger.info(f"  Email: {login_response.user.email}")
-        logger.info("=" * 80)
-    
-    return login_response
+    try:
+        login_response = login_user(login_data)
+        
+        if login_response.success and login_response.user:
+            logger.info("=" * 80)
+            logger.info(f"✓ USER LOGGED IN SUCCESSFULLY")
+            logger.info(f"  User ID: {login_response.user.id}")
+            logger.info(f"  Name: {login_response.user.name}")
+            logger.info(f"  Email: {login_response.user.email}")
+            logger.info("=" * 80)
+        
+        return login_response
+    except Exception as e:
+        logger.error(f"Error during login for {login_data.email}: {e}", exc_info=True)
+        raise
 
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user_by_id_endpoint(user_id: str):
     """Get user by ID"""
-    return get_user_by_id(user_id)
+    logger.info(f"Get user request: {user_id}")
+    try:
+        result = get_user_by_id(user_id)
+        logger.info(f"Successfully retrieved user: {user_id}")
+        return result
+    except Exception as e:
+        logger.error(f"Error getting user {user_id}: {e}", exc_info=True)
+        raise
 
 
 @router.get("/email/{email}", response_model=UserResponse)
