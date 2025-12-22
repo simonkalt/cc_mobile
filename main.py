@@ -253,6 +253,40 @@ if LLM_CONFIG_AVAILABLE:
         logger.error(f"Failed to register LLM configuration endpoint: {e}")
         LLM_CONFIG_AVAILABLE = False
 
+# Register refactored API routers
+try:
+    from app.api.routers import users
+    app.include_router(users.router)
+    logger.info(f"Users router registered with prefix: {users.router.prefix}")
+    logger.info(f"Users router routes: {[r.path for r in users.router.routes]}")
+except Exception as e:
+    logger.error(f"Failed to register users router: {e}", exc_info=True)
+
+try:
+    from app.api.routers import (
+        job_url,
+        llm_config,
+        personality,
+        config,
+        cover_letter,
+        files,
+        cover_letters,
+        pdf,
+    )
+    app.include_router(job_url.router)
+    app.include_router(llm_config.router)
+    app.include_router(personality.router)
+    app.include_router(config.router)
+    app.include_router(cover_letter.router)
+    app.include_router(files.router)
+    app.include_router(cover_letters.router)
+    app.include_router(pdf.router)
+    logger.info("All refactored API routers registered successfully")
+except ImportError as e:
+    logger.warning(f"Some routers could not be imported: {e}")
+except Exception as e:
+    logger.error(f"Failed to register some routers: {e}", exc_info=True)
+
 # Add exception handler for validation errors to help debug 422 errors
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
