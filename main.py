@@ -32,13 +32,14 @@ import oci
 import logging
 import sys
 
-# Import MongoDB client
+# Import MongoDB client - use refactored module
 try:
-    from mongodb_client import connect_to_mongodb, close_mongodb_connection
+    from app.db.mongodb import connect_to_mongodb, close_mongodb_connection, is_connected, get_collection
 
     MONGODB_AVAILABLE = True
 except ImportError:
     MONGODB_AVAILABLE = False
+    logger.warning("MongoDB module not available. Some features will be disabled.")
 
 # Try to import ollama, make it optional
 try:
@@ -88,16 +89,7 @@ except ImportError:
 
 XAI_SDK_AVAILABLE = False
 
-# Import MongoDB client (after logger is defined)
-try:
-    from mongodb_client import connect_to_mongodb, close_mongodb_connection
-
-    MONGODB_AVAILABLE = True
-except ImportError:
-    MONGODB_AVAILABLE = False
-    logger.warning(
-        "mongodb_client module not available. MongoDB features will be disabled."
-    )
+# MongoDB client already imported above - using app.db.mongodb
 
 # Try to import PyPDF2 for PDF reading (after logger is defined)
 try:
@@ -1048,8 +1040,7 @@ async def health_check():
 
     # Check MongoDB connection
     try:
-        from mongodb_client import is_connected, get_collection
-
+        # is_connected and get_collection already imported from app.db.mongodb above
         if not is_connected():
             health_status["mongodb"]["connected"] = False
             return JSONResponse(status_code=503, content=health_status)

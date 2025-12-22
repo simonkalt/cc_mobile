@@ -146,14 +146,22 @@ def get_job_info(
                     )
                 else:
                     try:
-                        # If it's already an S3 key (contains user_id/), use it directly
+                        # Determine the S3 key
+                        # If resume already contains user_id/, use it directly
                         if is_s3_key and resume.startswith(f"{user_id}/"):
                             s3_key = resume
                         elif is_s3_key:
-                            # It's an S3 key but doesn't start with user_id/, prepend user_id
-                            # This handles cases where client sends just the filename part
-                            filename = os.path.basename(resume.replace("\\", "/"))
-                            s3_key = f"{user_id}/{filename}"
+                            # It's an S3 key but doesn't start with user_id/
+                            # Check if it's already a full S3 key (starts with another user_id)
+                            # If so, use it as-is; otherwise prepend user_id
+                            parts = resume.split("/", 1)
+                            if len(parts) == 2 and len(parts[0]) == 24:  # MongoDB ObjectId length
+                                # Already has a user_id prefix, use as-is
+                                s3_key = resume
+                            else:
+                                # Extract filename and prepend user_id
+                                filename = os.path.basename(resume.replace("\\", "/"))
+                                s3_key = f"{user_id}/{filename}"
                         else:
                             # Extract just the filename if path includes directory
                             filename = os.path.basename(resume.replace("\\", "/"))
@@ -172,72 +180,87 @@ def get_job_info(
                         logger.warning(
                             f"Failed to download from S3: {str(e)}. Will try local file paths."
                         )
+                        # Continue to try local paths
 
         # If S3 download failed or S3 not available, try local file paths as fallback
+        # Skip local file check if resume is clearly an S3 key (has user_id prefix)
         if resume_content == resume:
-            # Get the current working directory
-            cwd = os.getcwd()
-            logger.info(f"Trying local file paths. Current working directory: {cwd}")
+            # Check if resume path looks like an S3 key (user_id/filename format)
+            # MongoDB ObjectId is 24 characters, so check if first part is 24 chars
+            parts = resume.split("/", 1)
+            is_s3_key_format = len(parts) == 2 and len(parts[0]) == 24
+            
+            # Only try local paths if it doesn't look like an S3 key
+            if not is_s3_key_format:
+                # Get the current working directory
+                cwd = os.getcwd()
+                logger.info(f"Trying local file paths. Current working directory: {cwd}")
 
-            # Build list of possible paths to try
-            possible_paths = []
+                # Build list of possible paths to try
+                possible_paths = []
 
-            # If it's already an absolute path, try it first
-            if os.path.isabs(resume):
-                possible_paths.append(resume)
-            else:
-                # If it contains path separators (like "PDF Resumes/file.pdf"), try it as-is first
-                if os.path.sep in resume or "/" in resume:
+                # If it's already an absolute path, try it first
+                if os.path.isabs(resume):
                     possible_paths.append(resume)
-                    # Also try from current directory
-                    possible_paths.append(os.path.join(cwd, resume))
+                else:
+                    # If it contains path separators (like "PDF Resumes/file.pdf"), try it as-is first
+                    if os.path.sep in resume or "/" in resume:
+                        possible_paths.append(resume)
+                        # Also try from current directory
+                        possible_paths.append(os.path.join(cwd, resume))
 
-                # Try common locations
-                possible_paths.extend(
-                    [
-                        os.path.join(cwd, resume),
-                        os.path.join(cwd, "PDF Resumes", os.path.basename(resume)),
-                        os.path.join(cwd, "PDF Resumes", resume),
-                        os.path.join(cwd, "resumes", os.path.basename(resume)),
-                        os.path.join(cwd, "resumes", resume),
-                        os.path.join(".", resume),
-                        os.path.join(".", "PDF Resumes", os.path.basename(resume)),
-                        os.path.join(".", "PDF Resumes", resume),
-                    ]
-                )
-
-                # If the resume path already includes "PDF Resumes", try extracting just the filename
-                if "PDF Resumes" in resume or "pdf" in resume.lower():
-                    filename = os.path.basename(resume)
+                    # Try common locations
                     possible_paths.extend(
                         [
-                            os.path.join(cwd, "PDF Resumes", filename),
-                            os.path.join(".", "PDF Resumes", filename),
+                            os.path.join(cwd, resume),
+                            os.path.join(cwd, "PDF Resumes", os.path.basename(resume)),
+                            os.path.join(cwd, "PDF Resumes", resume),
+                            os.path.join(cwd, "resumes", os.path.basename(resume)),
+                            os.path.join(cwd, "resumes", resume),
+                            os.path.join(".", resume),
+                            os.path.join(".", "PDF Resumes", os.path.basename(resume)),
+                            os.path.join(".", "PDF Resumes", resume),
                         ]
                     )
 
-            # Try each path until we find one that exists
-            found = False
-            for path in possible_paths:
-                # Normalize the path
-                normalized_path = os.path.normpath(path)
-                logger.debug(f"Trying PDF path: {normalized_path}")
-                if os.path.exists(normalized_path) and os.path.isfile(normalized_path):
-                    logger.info(f"Found PDF at: {normalized_path}, reading content")
-                    resume_content = read_pdf_file(normalized_path)
-                    found = True
-                    break
+                    # If the resume path already includes "PDF Resumes", try extracting just the filename
+                    if "PDF Resumes" in resume or "pdf" in resume.lower():
+                        filename = os.path.basename(resume)
+                        possible_paths.extend(
+                            [
+                                os.path.join(cwd, "PDF Resumes", filename),
+                                os.path.join(".", "PDF Resumes", filename),
+                            ]
+                        )
 
-            if not found:
-                logger.warning(
-                    f"PDF file not found locally. Tried paths: {possible_paths[:5]}... (showing first 5)"
-                )
-                # If we haven't successfully extracted content, return the original
-                if resume_content == resume:
+                # Try each path until we find one that exists
+                found = False
+                for path in possible_paths:
+                    # Normalize the path
+                    normalized_path = os.path.normpath(path)
+                    logger.debug(f"Trying PDF path: {normalized_path}")
+                    if os.path.exists(normalized_path) and os.path.isfile(normalized_path):
+                        logger.info(f"Found PDF at: {normalized_path}, reading content")
+                        resume_content = read_pdf_file(normalized_path)
+                        found = True
+                        break
+
+                if not found:
+                    logger.warning(
+                        f"PDF file not found locally. Tried paths: {possible_paths[:5]}... (showing first 5)"
+                    )
+            
+            # If we haven't successfully extracted content, return the original
+            if resume_content == resume:
+                if is_s3_key_format:
+                    logger.warning(
+                        f"Could not read PDF from S3 (path appears to be S3 key: {resume}). Using original resume string."
+                    )
+                else:
                     logger.warning(
                         f"Could not read PDF from S3 or local filesystem. Using original resume string."
                     )
-                    resume_content = resume
+                resume_content = resume
 
     # Get personality profile from user's custom profiles (user_id or user_email required)
     selected_profile = None
