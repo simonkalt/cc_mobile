@@ -94,7 +94,7 @@ def close_mongodb_connection() -> None:
     """Close MongoDB connection"""
     global mongodb_client, mongodb_db
     
-    if mongodb_client:
+    if mongodb_client is not None:
         try:
             mongodb_client.close()
             logger.info("MongoDB connection closed")

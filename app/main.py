@@ -78,7 +78,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 # Include routers
-app.include_router(users.router)
+try:
+    app.include_router(users.router)
+    logger.info(f"Users router registered with prefix: {users.router.prefix}")
+    logger.info(f"Users router routes: {[r.path for r in users.router.routes]}")
+except Exception as e:
+    logger.error(f"Failed to register users router: {e}", exc_info=True)
+    raise
 
 # Import and include other routers
 try:
@@ -157,6 +163,19 @@ async def health_check():
                         health_info["test_user_error"] = str(e)
         except Exception as e:
             health_info["database_error"] = str(e)
+    
+    # Add route information for debugging
+    try:
+        routes = []
+        for route in app.routes:
+            if hasattr(route, 'path') and hasattr(route, 'methods'):
+                routes.append({
+                    "path": route.path,
+                    "methods": list(route.methods) if route.methods else []
+                })
+        health_info["registered_routes"] = [r for r in routes if "/api/users" in r["path"]]
+    except Exception as e:
+        health_info["routes_error"] = str(e)
     
     return health_info
 
