@@ -1355,7 +1355,8 @@ async def handle_job_info(request: JobInfoRequest):
     return result
 
 
-# User API Endpoints
+# User API Endpoints - DEPRECATED: These endpoints are now handled by app/api/routers/users.py
+# Keeping imports for backward compatibility with other parts of main.py that may still use these functions
 from user_api import (
     UserRegisterRequest,
     UserUpdateRequest,
@@ -1371,61 +1372,64 @@ from user_api import (
     increment_llm_usage_count,
 )
 
+# NOTE: User endpoints are now handled by app/api/routers/users.py
+# These endpoints below are commented out to avoid conflicts when using app.main:app
+# Uncomment only if you need to use main.py directly instead of app.main:app
 
-@app.post(
-    "/api/users/register",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def register_user_endpoint(user_data: UserRegisterRequest):
-    """Register a new user"""
-    logger.info(f"User registration request: {user_data.email}")
-    user_response = register_user(user_data)
+# @app.post(
+#     "/api/users/register",
+#     response_model=UserResponse,
+#     status_code=status.HTTP_201_CREATED,
+# )
+# async def register_user_endpoint(user_data: UserRegisterRequest):
+#     """Register a new user"""
+#     logger.info(f"User registration request: {user_data.email}")
+#     user_response = register_user(user_data)
+#
+#     # Log that form fields have been cleared for new user
+#     logger.info(
+#         f"✓ New user registered: {user_response.email} (ID: {user_response.id})"
+#     )
+#     logger.info(f"  Form fields initialized to empty/placeholder values")
+#     logger.info(f"  - Company Name: ''")
+#     logger.info(f"  - Hiring Manager: ''")
+#     logger.info(f"  - Ad Source: ''")
+#     logger.info(f"  - Job Description: ''")
+#     logger.info(f"  - Additional Instructions: ''")
+#     logger.info(f"  - Tone: 'Professional' (default)")
+#     logger.info(f"  - Address: ''")
+#     logger.info(f"  - Phone Number: ''")
+#     logger.info(f"  - Resume: ''")
+#
+#     return user_response
 
-    # Log that form fields have been cleared for new user
-    logger.info(
-        f"✓ New user registered: {user_response.email} (ID: {user_response.id})"
-    )
-    logger.info(f"  Form fields initialized to empty/placeholder values")
-    logger.info(f"  - Company Name: ''")
-    logger.info(f"  - Hiring Manager: ''")
-    logger.info(f"  - Ad Source: ''")
-    logger.info(f"  - Job Description: ''")
-    logger.info(f"  - Additional Instructions: ''")
-    logger.info(f"  - Tone: 'Professional' (default)")
-    logger.info(f"  - Address: ''")
-    logger.info(f"  - Phone Number: ''")
-    logger.info(f"  - Resume: ''")
 
-    return user_response
-
-
-@app.post("/api/users/login", response_model=UserLoginResponse)
-async def login_user_endpoint(login_data: UserLoginRequest):
-    """Authenticate user login"""
-    logger.info(f"Login attempt: {login_data.email}")
-    login_response = login_user(login_data)
-
-    # After successful login, ensure user's S3 folder exists and log details
-    if login_response.success and login_response.user:
-        user_id = login_response.user.id
-        user_name = login_response.user.name
-        user_email = login_response.user.email
-
-        # Log successful login
-        logger.info("=" * 80)
-        logger.info(f"✓ USER LOGGED IN SUCCESSFULLY")
-        logger.info(f"  User ID: {user_id}")
-        logger.info(f"  Name: {user_name}")
-        logger.info(f"  Email: {user_email}")
-        logger.info("=" * 80)
-
-        # Check and ensure S3 folder exists
-        logger.info(f"Checking AWS S3 folder for user_id: {user_id}")
-        folder_exists = False
-        file_count = 0
-
-        if S3_AVAILABLE and s3_bucket_name:
+# @app.post("/api/users/login", response_model=UserLoginResponse)
+# async def login_user_endpoint(login_data: UserLoginRequest):
+#     """Authenticate user login"""
+#     logger.info(f"Login attempt: {login_data.email}")
+#     login_response = login_user(login_data)
+#
+#     # After successful login, ensure user's S3 folder exists and log details
+#     if login_response.success and login_response.user:
+#         user_id = login_response.user.id
+#         user_name = login_response.user.name
+#         user_email = login_response.user.email
+#
+#         # Log successful login
+#         logger.info("=" * 80)
+#         logger.info(f"✓ USER LOGGED IN SUCCESSFULLY")
+#         logger.info(f"  User ID: {user_id}")
+#         logger.info(f"  Name: {user_name}")
+#         logger.info(f"  Email: {user_email}")
+#         logger.info("=" * 80)
+#
+#         # Check and ensure S3 folder exists
+#         logger.info(f"Checking AWS S3 folder for user_id: {user_id}")
+#         folder_exists = False
+#         file_count = 0
+#
+#         if S3_AVAILABLE and s3_bucket_name:
             try:
                 s3_client = get_s3_client()
                 folder_prefix = f"{user_id}/"
@@ -1501,32 +1505,36 @@ async def login_user_endpoint(login_data: UserLoginRequest):
     return login_response
 
 
-@app.get("/api/users/{user_id}", response_model=UserResponse)
-async def get_user_by_id_endpoint(user_id: str):
-    """Get user by ID"""
-    logger.info(f"Get user request: {user_id}")
-    return get_user_by_id(user_id)
+# NOTE: User endpoints are now handled by app/api/routers/users.py
+# These endpoints below are commented out to avoid conflicts when using app.main:app
+# Uncomment only if you need to use main.py directly instead of app.main:app
+
+# @app.get("/api/users/{user_id}", response_model=UserResponse)
+# async def get_user_by_id_endpoint(user_id: str):
+#     """Get user by ID"""
+#     logger.info(f"Get user request: {user_id}")
+#     return get_user_by_id(user_id)
 
 
-@app.get("/api/users/email/{email}", response_model=UserResponse)
-async def get_user_by_email_endpoint(email: str):
-    """Get user by email"""
-    logger.info(f"Get user by email request: {email}")
-    return get_user_by_email(email)
+# @app.get("/api/users/email/{email}", response_model=UserResponse)
+# async def get_user_by_email_endpoint(email: str):
+#     """Get user by email"""
+#     logger.info(f"Get user by email request: {email}")
+#     return get_user_by_email(email)
 
 
-@app.put("/api/users/{user_id}", response_model=UserResponse)
-async def update_user_endpoint(user_id: str, updates: UserUpdateRequest):
-    """Update user information"""
-    logger.info(f"Update user request: {user_id}")
-    return update_user(user_id, updates)
+# @app.put("/api/users/{user_id}", response_model=UserResponse)
+# async def update_user_endpoint(user_id: str, updates: UserUpdateRequest):
+#     """Update user information"""
+#     logger.info(f"Update user request: {user_id}")
+#     return update_user(user_id, updates)
 
 
-@app.delete("/api/users/{user_id}")
-async def delete_user_endpoint(user_id: str):
-    """Delete user"""
-    logger.info(f"Delete user request: {user_id}")
-    return delete_user(user_id)
+# @app.delete("/api/users/{user_id}")
+# async def delete_user_endpoint(user_id: str):
+#     """Delete user"""
+#     logger.info(f"Delete user request: {user_id}")
+#     return delete_user(user_id)
 
 
 # File API Endpoints (S3 Operations)

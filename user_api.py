@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from bson import ObjectId
-from mongodb_client import get_collection, is_connected
+from app.db.mongodb import get_collection, is_connected
 import logging
 
 logger = logging.getLogger(__name__)
