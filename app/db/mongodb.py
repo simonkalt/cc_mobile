@@ -125,7 +125,7 @@ def get_collection(collection_name: Optional[str] = None):
         return None
     
     collection_name_final = collection_name or settings.MONGODB_COLLECTION_NAME
-    db_name = mongodb_db.name if mongodb_db else "unknown"
+    db_name = mongodb_db.name if mongodb_db is not None else "unknown"
     logger.debug(f"Accessing collection '{collection_name_final}' in database '{db_name}'")
     return mongodb_db[collection_name_final]
 
