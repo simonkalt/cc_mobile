@@ -51,12 +51,7 @@ def connect_to_mongodb() -> bool:
         
         # Get database
         mongodb_db = mongodb_client[db_name]
-            else:
-                logger.warning(f"Collection '{settings.MONGODB_COLLECTION_NAME}' not found in database '{db_name}'")
-        except Exception as e:
-            logger.warning(f"Could not list collections: {e}")
         
-        print(f"📊 Connected to MongoDB Atlas - Database: '{db_name}'")
         return True
         
     except ConnectionFailure as e:

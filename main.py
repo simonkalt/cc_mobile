@@ -21,9 +21,24 @@ import anthropic
 # Suppress deprecation warnings
 # - google.generativeai deprecation (still works, will migrate to google.genai later)
 # - Python version warning from google.api_core (informational, not critical)
+# - importlib.metadata compatibility warnings for Python 3.9
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=FutureWarning, message=".*google.generativeai.*")
     warnings.filterwarnings("ignore", category=FutureWarning, message=".*Python version.*")
+    warnings.filterwarnings("ignore", message=".*importlib.metadata.*packages_distributions.*")
+    warnings.filterwarnings("ignore", message=".*module 'importlib.metadata' has no attribute.*")
+    
+    # Patch importlib.metadata for Python 3.9 compatibility
+    try:
+        import importlib.metadata
+        if not hasattr(importlib.metadata, 'packages_distributions'):
+            # Add a stub function for Python 3.9 compatibility
+            def _packages_distributions_stub():
+                return {}
+            importlib.metadata.packages_distributions = _packages_distributions_stub
+    except (ImportError, AttributeError):
+        pass
+    
     import google.generativeai as genai
 
 from huggingface_hub import login

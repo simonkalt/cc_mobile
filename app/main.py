@@ -1,6 +1,25 @@
 """
 FastAPI application entry point
 """
+import warnings
+import sys
+
+# Suppress importlib.metadata compatibility warnings for Python 3.9
+# packages_distributions was added in Python 3.10, but some dependencies try to use it
+warnings.filterwarnings("ignore", message=".*importlib.metadata.*packages_distributions.*")
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*Python version.*")
+
+# Patch importlib.metadata for Python 3.9 compatibility
+try:
+    import importlib.metadata
+    if not hasattr(importlib.metadata, 'packages_distributions'):
+        # Add a stub function for Python 3.9 compatibility
+        def _packages_distributions_stub():
+            return {}
+        importlib.metadata.packages_distributions = _packages_distributions_stub
+except (ImportError, AttributeError):
+    pass
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +27,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi import Request, status
 import logging
-import sys
 
 from app.core.config import settings, get_cors_origins
 from app.core.logging_config import setup_logging
