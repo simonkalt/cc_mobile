@@ -27,18 +27,20 @@ with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=FutureWarning, message=".*Python version.*")
     warnings.filterwarnings("ignore", message=".*importlib.metadata.*packages_distributions.*")
     warnings.filterwarnings("ignore", message=".*module 'importlib.metadata' has no attribute.*")
-    
+
     # Patch importlib.metadata for Python 3.9 compatibility
     try:
         import importlib.metadata
-        if not hasattr(importlib.metadata, 'packages_distributions'):
+
+        if not hasattr(importlib.metadata, "packages_distributions"):
             # Add a stub function for Python 3.9 compatibility
             def _packages_distributions_stub():
                 return {}
+
             importlib.metadata.packages_distributions = _packages_distributions_stub
     except (ImportError, AttributeError):
         pass
-    
+
     import google.generativeai as genai
 
 from huggingface_hub import login
@@ -49,7 +51,12 @@ import sys
 
 # Import MongoDB client - use refactored module
 try:
-    from app.db.mongodb import connect_to_mongodb, close_mongodb_connection, is_connected, get_collection
+    from app.db.mongodb import (
+        connect_to_mongodb,
+        close_mongodb_connection,
+        is_connected,
+        get_collection,
+    )
 
     MONGODB_AVAILABLE = True
 except ImportError:
@@ -85,6 +92,7 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 # Import job URL analyzer (after logger is defined)
 try:
     from job_url_analyzer import analyze_job_url as analyze_job_url_hybrid
+
     JOB_URL_ANALYZER_AVAILABLE = True
 except ImportError:
     JOB_URL_ANALYZER_AVAILABLE = False
@@ -95,6 +103,7 @@ except ImportError:
 # Import LLM configuration endpoint (after logger is defined)
 try:
     from llm_config_endpoint import get_llms_endpoint, load_llm_config
+
     LLM_CONFIG_AVAILABLE = True
 except ImportError:
     LLM_CONFIG_AVAILABLE = False
@@ -194,9 +203,7 @@ async def lifespan(app: FastAPI):
     if not os.path.exists("oci_api_key.pem"):
         #     send_ntfy_notification("File exists!","oci_api_key.pem")
         # else:
-        send_ntfy_notification(
-            "oci_api_key.pem File does NOT exist.", "oci_api_key.pem"
-        )
+        send_ntfy_notification("oci_api_key.pem File does NOT exist.", "oci_api_key.pem")
 
     yield
     # Shutdown
@@ -215,9 +222,7 @@ app = FastAPI(
 
 # Configure CORS for React app
 # Get allowed origins from environment variable or use defaults
-cors_origins = (
-    os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
-)
+cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
 # Add default localhost origins for development
 default_origins = [
     "http://localhost:3000",  # React dev server
@@ -226,9 +231,7 @@ default_origins = [
     "http://127.0.0.1:3001",
 ]
 # Combine and filter out empty strings
-all_origins = [
-    origin.strip() for origin in cors_origins + default_origins if origin.strip()
-]
+all_origins = [origin.strip() for origin in cors_origins + default_origins if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -249,6 +252,7 @@ if LLM_CONFIG_AVAILABLE:
 # Register refactored API routers
 try:
     from app.api.routers import users
+
     app.include_router(users.router)
 except Exception as e:
     logger.error(f"Failed to register users router: {e}", exc_info=True)
@@ -264,6 +268,7 @@ try:
         cover_letters,
         pdf,
     )
+
     app.include_router(job_url.router)
     app.include_router(llm_config.router)
     app.include_router(personality.router)
@@ -276,6 +281,7 @@ except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:
     logger.error(f"Failed to register some routers: {e}", exc_info=True)
+
 
 # Add exception handler for validation errors to help debug 422 errors
 @app.exception_handler(RequestValidationError)
@@ -323,9 +329,7 @@ if s3_bucket_uri.startswith("s3://"):
     s3_bucket_name = uri_without_prefix.split("/")[0]
 else:
     # Fallback if URI format is incorrect
-    s3_bucket_name = (
-        s3_bucket_uri.split("/")[0] if "/" in s3_bucket_uri else s3_bucket_uri
-    )
+    s3_bucket_name = s3_bucket_uri.split("/")[0] if "/" in s3_bucket_uri else s3_bucket_uri
 
 # Resumes are organized by user_id folders: {user_id}/{filename}
 # The user_id folder is created automatically when files are uploaded to S3
@@ -357,9 +361,7 @@ def load_system_prompt():
             logger.warning(f"System prompt not found in {config_path}. Using default.")
             return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
 
-        logger.info(
-            f"Loaded system prompt from {config_path} ({len(system_prompt)} characters)"
-        )
+        logger.info(f"Loaded system prompt from {config_path} ({len(system_prompt)} characters)")
         return system_prompt
     except FileNotFoundError:
         logger.warning(f"System prompt file not found: {config_path}. Using default.")
@@ -456,12 +458,8 @@ class JobInfoRequest(BaseModel):
     tone: str = "Professional"
     address: str = ""  # City, State
     phone_number: str = ""
-    user_id: Optional[str] = (
-        None  # Optional user ID to access custom personality profiles
-    )
-    user_email: Optional[str] = (
-        None  # Optional user email to access custom personality profiles
-    )
+    user_id: Optional[str] = None  # Optional user ID to access custom personality profiles
+    user_email: Optional[str] = None  # Optional user email to access custom personality profiles
 
 
 # Define the data model for file upload request
@@ -490,9 +488,7 @@ class FileDeleteRequest(BaseModel):
 
 # Define the data model for saving cover letter
 class SaveCoverLetterRequest(BaseModel):
-    coverLetterContent: (
-        str  # The cover letter content (markdown, HTML, or base64-encoded PDF)
-    )
+    coverLetterContent: str  # The cover letter content (markdown, HTML, or base64-encoded PDF)
     fileName: Optional[str] = None  # Optional custom filename (without extension)
     contentType: str = (
         "text/markdown"  # Content type: "text/markdown", "text/html", or "application/pdf"
@@ -526,9 +522,7 @@ class PrintProperties(BaseModel):
     fontFamily: Optional[str] = "Times New Roman"
     fontSize: Optional[float] = 12
     lineHeight: Optional[float] = 1.6
-    pageSize: Optional[PageSize] = Field(
-        default_factory=lambda: PageSize(width=8.5, height=11.0)
-    )
+    pageSize: Optional[PageSize] = Field(default_factory=lambda: PageSize(width=8.5, height=11.0))
     useDefaultFonts: Optional[bool] = False
 
 
@@ -579,9 +573,7 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             max_tokens=20000,
             temperature=1,
         )
-        return_response = (
-            response.content[0].text.replace("```json", "").replace("```", "")
-        )
+        return_response = response.content[0].text.replace("```json", "").replace("```", "")
     elif model == "gemini-2.5-flash":
         genai.configure(api_key=gemini_api_key)
         client = genai.GenerativeModel(model)
@@ -616,14 +608,10 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             config = oci.config.from_file(oci_config_file, oci_config_profile)
 
             # Create Generative AI client — FIXED: pass config!
-            service_endpoint = (
-                f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
-            )
-            generative_ai_client = (
-                oci.generative_ai_inference.GenerativeAiInferenceClient(
-                    config=config,  # ← THIS WAS MISSING
-                    service_endpoint=service_endpoint,
-                )
+            service_endpoint = f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
+            generative_ai_client = oci.generative_ai_inference.GenerativeAiInferenceClient(
+                config=config,  # ← THIS WAS MISSING
+                service_endpoint=service_endpoint,
             )
 
             # Prepare the serving mode
@@ -635,18 +623,14 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
             full_prompt = f"You are a helpful assistant.\n\nUser: {prompt}\nAssistant:"
 
             # Use Cohere request for Cohere models (or Llama if using Llama)
-            inference_request = (
-                oci.generative_ai_inference.models.LlamaLlmInferenceRequest(
-                    prompt=full_prompt, max_tokens=2048, temperature=0.7
-                )
+            inference_request = oci.generative_ai_inference.models.LlamaLlmInferenceRequest(
+                prompt=full_prompt, max_tokens=2048, temperature=0.7
             )
             # Create generate text details
-            generate_text_details = (
-                oci.generative_ai_inference.models.GenerateTextDetails(
-                    serving_mode=serving_mode,
-                    compartment_id=oci_compartment_id,
-                    inference_request=inference_request,
-                )
+            generate_text_details = oci.generative_ai_inference.models.GenerateTextDetails(
+                serving_mode=serving_mode,
+                compartment_id=oci_compartment_id,
+                inference_request=inference_request,
             )
 
             # Make the request
@@ -714,9 +698,7 @@ def get_s3_client():
             region_name=aws_region,
         )
     else:
-        logger.info(
-            "Using default AWS credentials (IAM role, credentials file, or environment)"
-        )
+        logger.info("Using default AWS credentials (IAM role, credentials file, or environment)")
         return boto3.client("s3", region_name=aws_region)
 
 
@@ -806,9 +788,7 @@ def ensure_cover_letter_subfolder(user_id: str) -> bool:
 
             # If we get any objects (even the placeholder), subfolder exists
             if "Contents" in response and len(response["Contents"]) > 0:
-                logger.info(
-                    f"Cover letter subfolder already exists: {subfolder_prefix}"
-                )
+                logger.info(f"Cover letter subfolder already exists: {subfolder_prefix}")
                 return True
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
@@ -914,16 +894,12 @@ def get_oc_info(prompt: str):
         config = oci.config.from_file(oci_config_file, oci_config_profile)
 
         # Create Generative AI client
-        service_endpoint = (
-            f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
-        )
-        generative_ai_inference_client = (
-            oci.generative_ai_inference.GenerativeAiInferenceClient(
-                config=config,
-                service_endpoint=service_endpoint,
-                retry_strategy=oci.retry.NoneRetryStrategy(),
-                timeout=(10, 240),
-            )
+        service_endpoint = f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
+        generative_ai_inference_client = oci.generative_ai_inference.GenerativeAiInferenceClient(
+            config=config,
+            service_endpoint=service_endpoint,
+            retry_strategy=oci.retry.NoneRetryStrategy(),
+            timeout=(10, 240),
         )
 
         # Create text content
@@ -948,10 +924,8 @@ def get_oc_info(prompt: str):
 
         # Create chat detail
         oci_chat_detail = oci.generative_ai_inference.models.ChatDetails()
-        oci_chat_detail.serving_mode = (
-            oci.generative_ai_inference.models.OnDemandServingMode(
-                model_id=oci_model_id
-            )
+        oci_chat_detail.serving_mode = oci.generative_ai_inference.models.OnDemandServingMode(
+            model_id=oci_model_id
         )
         oci_chat_detail.chat_request = chat_request
         oci_chat_detail.compartment_id = oci_compartment_id
@@ -995,9 +969,7 @@ def get_oc_info(prompt: str):
     except Exception as e:
         error_msg = f"Error calling OCI Generative AI: {str(e)}"
         logger.error(error_msg)
-        return json.dumps(
-            {"markdown": f"Error: {error_msg}", "html": f"<p>Error: {error_msg}</p>"}
-        )
+        return json.dumps({"markdown": f"Error: {error_msg}", "html": f"<p>Error: {error_msg}</p>"})
 
 
 def normalize_llm_name(llm: str) -> str:
@@ -1030,9 +1002,12 @@ try:
     from app.services.cover_letter_service import get_job_info
 except ImportError:
     logger.warning("Could not import get_job_info from service. Some endpoints may not work.")
+
     # Fallback: define a stub function that raises an error
     def get_job_info(*args, **kwargs):
-        raise ImportError("get_job_info service not available. Please ensure app/services/cover_letter_service.py exists.")
+        raise ImportError(
+            "get_job_info service not available. Please ensure app/services/cover_letter_service.py exists."
+        )
 
 
 # Legacy function definition removed - now imported from app.services.cover_letter_service
@@ -1119,6 +1094,7 @@ async def health_check():
 
 # Fallback endpoint if llm_config_endpoint is not available
 if not LLM_CONFIG_AVAILABLE:
+
     @app.get("/api/llms")
     def get_llms_fallback():
         """JSON API endpoint to get available LLMs for the mobile app (fallback)"""
@@ -1127,9 +1103,7 @@ if not LLM_CONFIG_AVAILABLE:
 
 
 @app.get("/api/personality-profiles")
-def get_personality_profiles(
-    user_id: Optional[str] = None, user_email: Optional[str] = None
-):
+def get_personality_profiles(user_id: Optional[str] = None, user_email: Optional[str] = None):
     """JSON API endpoint to get available personality profiles for the UI from user's preferences"""
     if not user_id and not user_email:
         raise HTTPException(
@@ -1147,9 +1121,7 @@ def get_personality_profiles(
             user = get_user_by_email(user_email)
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Get user's custom personality profiles
         # Note: user_doc_to_response already normalizes personalityProfiles to {"id", "name", "description"} structure
@@ -1162,11 +1134,7 @@ def get_personality_profiles(
                 if custom_profiles:
                     normalized_profiles = []
                     for profile in custom_profiles:
-                        if (
-                            isinstance(profile, dict)
-                            and profile.get("id")
-                            and profile.get("name")
-                        ):
+                        if isinstance(profile, dict) and profile.get("id") and profile.get("name"):
                             # Extract only id, name, description
                             normalized_profiles.append(
                                 {
@@ -1259,11 +1227,64 @@ async def handle_chat(request: Request):
     try:
         body = await request.json()
 
+        # Check if resume is an S3 key and needs to be fetched
+        resume = body.get("resume")
+        user_id = body.get("user_id")
+
+        if resume and S3_AVAILABLE and s3_bucket_name:
+            # Check if resume looks like an S3 key (contains '/' or ends with .pdf)
+            is_s3_key = "/" in resume or resume.endswith((".pdf", ".PDF"))
+
+            if is_s3_key and user_id:
+                try:
+                    # Determine the S3 key
+                    # If resume already contains user_id/, use it directly
+                    if resume.startswith(f"{user_id}/"):
+                        s3_key = resume
+                    else:
+                        # Check if it's already a full S3 key (starts with another user_id)
+                        parts = resume.split("/", 1)
+                        if len(parts) == 2 and len(parts[0]) == 24:  # MongoDB ObjectId length
+                            # Already has a user_id prefix, use as-is
+                            s3_key = resume
+                        else:
+                            # Extract filename and prepend user_id
+                            filename = os.path.basename(resume.replace("\\", "/"))
+                            s3_key = f"{user_id}/{filename}"
+
+                    s3_path = f"s3://{s3_bucket_name}/{s3_key}"
+                    logger.info(f"Fetching PDF from S3: {s3_path}")
+
+                    # Download PDF from S3
+                    s3_client = get_s3_client()
+                    response = s3_client.get_object(Bucket=s3_bucket_name, Key=s3_key)
+                    pdf_bytes = response["Body"].read()
+
+                    # Extract text from PDF
+                    resume_text = read_pdf_from_bytes(pdf_bytes)
+
+                    # Replace resume field with extracted text
+                    body["resume"] = resume_text
+
+                    # Also update message object if it's being used
+                    if "message" in body and body["message"]:
+                        try:
+                            message_obj = json.loads(body["message"])
+                            message_obj["resume"] = resume_text
+                            body["message"] = json.dumps(message_obj)
+                            logger.info("Updated resume in message object")
+                        except (json.JSONDecodeError, TypeError) as e:
+                            logger.warning(f"Could not parse message object: {e}")
+
+                    logger.info("Successfully fetched and extracted text from S3 PDF")
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch PDF from S3: {str(e)}. Continuing with original resume value."
+                    )
+
         # Check if this is a job info request (has 'llm', 'company_name', etc.)
         if "llm" in body and "company_name" in body:
-            logger.info(
-                "Detected job info request in /chat endpoint, routing to job-info handler"
-            )
+            logger.info("Detected job info request in /chat endpoint, routing to job-info handler")
             # Check for required user identification
             if not body.get("user_id") and not body.get("user_email"):
                 logger.error("Job info request missing user_id or user_email")
@@ -1318,17 +1339,13 @@ async def handle_chat(request: Request):
                     try:
                         if MONGODB_AVAILABLE:
                             user = get_user_by_email(user_email_for_tracking)
-                            normalized_llm = normalize_llm_name(
-                                chat_request.active_model
-                            )
+                            normalized_llm = normalize_llm_name(chat_request.active_model)
                             increment_llm_usage_count(user.id, normalized_llm)
                             logger.info(
                                 f"Incremented LLM usage count for {normalized_llm} (user_email: {user_email_for_tracking})"
                             )
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to increment LLM usage count from email: {e}"
-                        )
+                        logger.warning(f"Failed to increment LLM usage count from email: {e}")
 
             return {
                 "response": (
@@ -1602,9 +1619,7 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
                 )
         except Exception as e:
             logger.error(f"Failed to get user_id from email: {str(e)}")
-            raise HTTPException(
-                status_code=404, detail=f"User not found for email: {user_email}"
-            )
+            raise HTTPException(status_code=404, detail=f"User not found for email: {user_email}")
 
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required to list files")
@@ -1624,9 +1639,7 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
         if "Contents" in response:
             for obj in response["Contents"]:
                 # Only return actual files (not folders/directories or placeholder files)
-                if not obj["Key"].endswith("/") and not obj["Key"].endswith(
-                    ".folder_initialized"
-                ):
+                if not obj["Key"].endswith("/") and not obj["Key"].endswith(".folder_initialized"):
                     # Exclude files from the generated_cover_letters subfolder
                     if obj["Key"].startswith(cover_letters_prefix):
                         continue  # Skip files in the generated_cover_letters subfolder
@@ -1703,9 +1716,7 @@ async def upload_file(request: FileUploadRequest):
             )
 
     if not user_id:
-        raise HTTPException(
-            status_code=400, detail="user_id is required to upload files"
-        )
+        raise HTTPException(status_code=400, detail="user_id is required to upload files")
 
     # Ensure user's S3 folder exists before uploading
     ensure_user_s3_folder(user_id)
@@ -1715,9 +1726,7 @@ async def upload_file(request: FileUploadRequest):
         try:
             file_bytes = base64.b64decode(request.fileData)
         except Exception as e:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid base64 fileData: {str(e)}"
-            )
+            raise HTTPException(status_code=400, detail=f"Invalid base64 fileData: {str(e)}")
 
         # Validate file type (only PDFs for now)
         if not request.fileName.lower().endswith(".pdf"):
@@ -1888,9 +1897,7 @@ async def rename_file(request: FileRenameRequest):
 
         # Copy object to new key
         copy_source = {"Bucket": s3_bucket_name, "Key": request.oldKey}
-        s3_client.copy_object(
-            CopySource=copy_source, Bucket=s3_bucket_name, Key=new_key
-        )
+        s3_client.copy_object(CopySource=copy_source, Bucket=s3_bucket_name, Key=new_key)
 
         # Delete old object
         s3_client.delete_object(Bucket=s3_bucket_name, Key=request.oldKey)
@@ -2098,9 +2105,7 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
             safe_filename = f"cover_letter_{timestamp}"
 
         # Normalize content type for comparison (case-insensitive)
-        content_type_lower = (
-            request.contentType.lower().strip() if request.contentType else ""
-        )
+        content_type_lower = request.contentType.lower().strip() if request.contentType else ""
 
         # Log the received content type for debugging
         logger.info(
@@ -2115,9 +2120,7 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
         else:
             file_extension = ".md"  # Default to markdown
             if content_type_lower and content_type_lower != "text/markdown":
-                logger.warning(
-                    f"Unknown content type '{request.contentType}', defaulting to .md"
-                )
+                logger.warning(f"Unknown content type '{request.contentType}', defaulting to .md")
 
         # Construct full filename with extension
         # If filename already has an extension, check if it matches the content type
@@ -2145,9 +2148,7 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
             # No extension, add the determined one
             full_filename = f"{safe_filename}{file_extension}"
 
-        logger.info(
-            f"Determined file extension: {file_extension}, full filename: {full_filename}"
-        )
+        logger.info(f"Determined file extension: {file_extension}, full filename: {full_filename}")
 
         # Construct S3 key: user_id/generated_cover_letters/filename
         s3_key = f"{user_id}/generated_cover_letters/{full_filename}"
@@ -2165,9 +2166,7 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
                     )
                 logger.info("Successfully decoded base64 PDF data")
             except Exception as e:
-                raise HTTPException(
-                    status_code=400, detail=f"Invalid base64 PDF data: {str(e)}"
-                )
+                raise HTTPException(status_code=400, detail=f"Invalid base64 PDF data: {str(e)}")
         else:
             # Markdown or HTML content - encode as UTF-8
             content_bytes = request.coverLetterContent.encode("utf-8")
@@ -2218,16 +2217,12 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
 
 
 @app.get("/api/cover-letters/list")
-async def list_cover_letters(
-    user_id: Optional[str] = None, user_email: Optional[str] = None
-):
+async def list_cover_letters(user_id: Optional[str] = None, user_email: Optional[str] = None):
     """
     List all saved cover letters from the user's generated_cover_letters subfolder.
     Files are organized by user_id: {user_id}/generated_cover_letters/{filename}
     """
-    logger.info(
-        f"Cover letters list request - user_id: {user_id}, user_email: {user_email}"
-    )
+    logger.info(f"Cover letters list request - user_id: {user_id}, user_email: {user_email}")
 
     if not S3_AVAILABLE:
         raise HTTPException(
@@ -2250,9 +2245,7 @@ async def list_cover_letters(
             if MONGODB_AVAILABLE:
                 user = get_user_by_email(user_email)
                 user_id = user.id
-                logger.info(
-                    f"Successfully resolved user_id: {user_id} from email: {user_email}"
-                )
+                logger.info(f"Successfully resolved user_id: {user_id} from email: {user_email}")
             else:
                 logger.error("MongoDB not available, cannot resolve user_id from email")
                 raise HTTPException(
@@ -2261,21 +2254,15 @@ async def list_cover_letters(
                 )
         except HTTPException:
             # Re-raise HTTPExceptions (like 503 or 404 from get_user_by_email) without modification
-            logger.warning(
-                f"HTTPException raised during user lookup for email: {user_email}"
-            )
+            logger.warning(f"HTTPException raised during user lookup for email: {user_email}")
             raise
         except Exception as e:
             logger.error(f"Failed to get user_id from email: {str(e)}")
-            raise HTTPException(
-                status_code=404, detail=f"User not found for email: {user_email}"
-            )
+            raise HTTPException(status_code=404, detail=f"User not found for email: {user_email}")
 
     if not user_id:
         logger.error("user_id is still None after email resolution attempt")
-        raise HTTPException(
-            status_code=400, detail="user_id is required to list cover letters"
-        )
+        raise HTTPException(status_code=400, detail="user_id is required to list cover letters")
 
     logger.info(f"Processing cover letters list request for user_id: {user_id}")
 
@@ -2293,14 +2280,10 @@ async def list_cover_letters(
 
         files = []
         if "Contents" in response:
-            logger.info(
-                f"Found {len(response['Contents'])} objects in S3 for prefix {prefix}"
-            )
+            logger.info(f"Found {len(response['Contents'])} objects in S3 for prefix {prefix}")
             for obj in response["Contents"]:
                 # Only return actual files (not folders/directories or placeholder files)
-                if not obj["Key"].endswith("/") and not obj["Key"].endswith(
-                    ".folder_initialized"
-                ):
+                if not obj["Key"].endswith("/") and not obj["Key"].endswith(".folder_initialized"):
                     # Extract filename from key (remove user_id/generated_cover_letters/ prefix)
                     filename = obj["Key"].replace(prefix, "")
                     files.append(
@@ -2368,14 +2351,10 @@ async def download_cover_letter(
                 )
         except Exception as e:
             logger.error(f"Failed to get user_id from email: {str(e)}")
-            raise HTTPException(
-                status_code=404, detail=f"User not found for email: {user_email}"
-            )
+            raise HTTPException(status_code=404, detail=f"User not found for email: {user_email}")
 
     if not user_id:
-        raise HTTPException(
-            status_code=400, detail="user_id is required to download cover letters"
-        )
+        raise HTTPException(status_code=400, detail="user_id is required to download cover letters")
 
     try:
         # Validate that the key belongs to this user and is in generated_cover_letters
@@ -2511,13 +2490,9 @@ async def delete_cover_letter(request: CoverLetterRequest):
                         )
 
             files.sort(key=lambda x: x["lastModified"], reverse=True)
-            logger.info(
-                f"Returning updated cover letter list with {len(files)} files after delete"
-            )
+            logger.info(f"Returning updated cover letter list with {len(files)} files after delete")
         except Exception as e:
-            logger.warning(
-                f"Could not fetch updated cover letter list after delete: {e}"
-            )
+            logger.warning(f"Could not fetch updated cover letter list after delete: {e}")
 
         return {
             "success": True,
@@ -2686,9 +2661,7 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: dict) ->
         # Encode to base64
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-        logger.info(
-            f"Successfully generated PDF from Markdown ({len(pdf_bytes)} bytes)"
-        )
+        logger.info(f"Successfully generated PDF from Markdown ({len(pdf_bytes)} bytes)")
         return pdf_base64
 
     except Exception as e:
@@ -2727,9 +2700,7 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
         raise HTTPException(status_code=400, detail="printProperties is required")
 
     if not request.printProperties.margins:
-        raise HTTPException(
-            status_code=400, detail="printProperties.margins is required"
-        )
+        raise HTTPException(status_code=400, detail="printProperties.margins is required")
 
     try:
         # Convert Pydantic model to dict for the generation function
@@ -2750,9 +2721,7 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
         }
 
         # Generate PDF
-        pdf_base64 = generate_pdf_from_markdown(
-            request.markdownContent, print_props_dict
-        )
+        pdf_base64 = generate_pdf_from_markdown(request.markdownContent, print_props_dict)
 
         logger.info("PDF generated successfully")
         return {
@@ -2792,18 +2761,18 @@ def extract_job_info_from_url(url: str) -> dict:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         page_response = requests.get(url, headers=headers, timeout=30)
-        
+
         # Check for 403/429 errors
         if page_response.status_code in [403, 429]:
             logger.warning(f"Received {page_response.status_code} from {url} - access forbidden")
-            raise ValueError(f"Access forbidden ({page_response.status_code}). The website may be blocking automated requests.")
-        
+            raise ValueError(
+                f"Access forbidden ({page_response.status_code}). The website may be blocking automated requests."
+            )
+
         page_response.raise_for_status()
         page_content = page_response.text
 
-        logger.info(
-            f"Successfully fetched page content ({len(page_content)} characters)"
-        )
+        logger.info(f"Successfully fetched page content ({len(page_content)} characters)")
 
         # Create a prompt for Grok to extract job information
         prompt = f"""Analyze the following job posting webpage content and extract the following information:
@@ -2879,9 +2848,7 @@ Important:
             # Try to extract JSON from the response
             import re
 
-            json_match = re.search(
-                r'\{[^{}]*"company"[^{}]*\}', grok_response, re.DOTALL
-            )
+            json_match = re.search(r'\{[^{}]*"company"[^{}]*\}', grok_response, re.DOTALL)
             if json_match:
                 job_info = json.loads(json_match.group())
             else:
@@ -2905,7 +2872,9 @@ Important:
     except requests.exceptions.HTTPError as e:
         if e.response and e.response.status_code in [403, 429]:
             logger.error(f"Access forbidden ({e.response.status_code}) for URL: {url}")
-            raise ValueError(f"Access forbidden ({e.response.status_code}). The website may be blocking automated requests.")
+            raise ValueError(
+                f"Access forbidden ({e.response.status_code}). The website may be blocking automated requests."
+            )
         logger.error(f"HTTP error fetching URL: {str(e)}")
         raise Exception(f"Failed to fetch or analyze job URL: {str(e)}")
     except requests.exceptions.RequestException as e:
@@ -2926,7 +2895,7 @@ Important:
 async def analyze_job_url(request: JobURLAnalysisRequest):
     """
     Analyze a LinkedIn job posting URL and extract company name, job title, and job description.
-    
+
     Uses hybrid approach:
     1. First tries BeautifulSoup parsing (fast, free) for LinkedIn job postings
     2. Falls back to ChatGPT AI if BeautifulSoup extraction is incomplete
@@ -2957,9 +2926,11 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
                 url=request.url,
                 user_id=request.user_id,
                 user_email=request.user_email,
-                use_chatgpt_fallback=True
+                use_chatgpt_fallback=True,
             )
-            logger.info(f"Job URL analysis completed successfully using {result.get('extractionMethod', 'unknown')}")
+            logger.info(
+                f"Job URL analysis completed successfully using {result.get('extractionMethod', 'unknown')}"
+            )
             return result
         else:
             # Fallback to old ChatGPT-only method (should not happen if job_url_analyzer is available)
@@ -2969,19 +2940,20 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
                     status_code=503,
                     detail="Grok API key is not configured. Cannot analyze job URL.",
                 )
-            
+
             # Detect ad source
             from urllib.parse import urlparse
+
             domain = urlparse(request.url).netloc.lower()
-            if 'linkedin.com' in domain:
-                ad_source = 'linkedin'
-            elif 'indeed.com' in domain:
-                ad_source = 'indeed'
-            elif 'glassdoor.com' in domain:
-                ad_source = 'glassdoor'
+            if "linkedin.com" in domain:
+                ad_source = "linkedin"
+            elif "indeed.com" in domain:
+                ad_source = "indeed"
+            elif "glassdoor.com" in domain:
+                ad_source = "glassdoor"
             else:
-                ad_source = 'generic'
-            
+                ad_source = "generic"
+
             job_info = extract_job_info_from_url(request.url)
             logger.info(f"Job URL analysis completed successfully")
             return {
@@ -2992,7 +2964,7 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
                 "ad_source": ad_source,
                 "full_description": job_info.get("jobDescription", "Not specified"),
                 "hiring_manager": "",  # Not available in legacy method
-                "extractionMethod": "grok-legacy"
+                "extractionMethod": "grok-legacy",
             }
 
     except HTTPException:
