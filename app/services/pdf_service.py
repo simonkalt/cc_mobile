@@ -3,6 +3,7 @@ PDF generation service
 """
 import logging
 import base64
+import re
 from typing import Dict
 
 from app.core.config import settings
@@ -53,8 +54,6 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         raise ImportError("weasyprint library is not installed. Cannot generate PDF.")
 
     try:
-        import re
-        
         # Normalize markdown content: replace escaped newlines with actual newlines
         normalized_markdown = markdown_content.replace("\\n", "\n").replace("\\r", "\r")
         

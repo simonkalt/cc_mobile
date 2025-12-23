@@ -465,7 +465,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 === END OVERRIDE INSTRUCTIONS ===
 """
         logger.info(
-            f"Additional instructions provided ({len(additional_instructions)} chars) - will override ALL other instructions: {additional_instructions}"
+            f"Additional instructions provided ({len(additional_instructions)} chars) - will override ALL other instructions"
         )
 
     r = ""
@@ -580,7 +580,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             # Include personality instruction prominently at the start
             full_prompt = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             r = get_oc_info(full_prompt)
-            logger.info(f"OCI response received: {r[:100]}...")
+            logger.info(f"OCI response received ({len(r)} characters)")
 
         elif llm == "Llama" or llm == ollama_model or llm == "llama3.2":
             if not OLLAMA_AVAILABLE:
@@ -787,8 +787,6 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
         logger.error(f"Response length: {len(r)} characters")
-        logger.error(f"Response (first 1000 chars): {r[:1000]}")
-        logger.error(f"Response (last 500 chars): {r[-500:]}")
         error_html = f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
         # Clean HTML of unwanted characters
         error_html = error_html.replace("\r", "").replace("\n", " ")
@@ -802,7 +800,6 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         logger.error(f"Error in get_job_info: {str(e)}")
         error_html = f"<p>Error: {str(e)}</p>"
         # Clean HTML of unwanted characters
-        import re
         error_html = error_html.replace("\r", "").replace("\n", " ")
         error_html = re.sub(r' +', ' ', error_html)
         return {"markdown": f"Error: {str(e)}", "html": error_html}

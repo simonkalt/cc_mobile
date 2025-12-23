@@ -1242,7 +1242,7 @@ Extraction Guidelines:
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse ChatGPT JSON response: {e}")
-        logger.debug(f"ChatGPT response content: {content[:500]}")
+        logger.debug(f"ChatGPT response received ({len(content)} characters)")
     except Exception as e:
         logger.error(f"ChatGPT extraction error: {e}")
 
