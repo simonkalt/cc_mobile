@@ -17,44 +17,45 @@ from app.services.pdf_service import generate_pdf_from_markdown
 @router.post("/generate-pdf")
 async def generate_pdf_endpoint(request: GeneratePDFRequest):
     """
-    Generate a PDF from HTML content with proper formatting support.
-    The PDF preserves all formatting including margins, fonts, page size, etc.
+    Generate a PDF from Markdown content with proper formatting support.
+    The PDF preserves all Markdown formatting including bold, italic, headings, lists, etc.
     """
     logger.info(
-        f"PDF generation request received - htmlContent length: {len(request.htmlContent)}"
+        f"PDF generation request received - user_id: {request.user_id}, user_email: {request.user_email}"
     )
 
-    if not request.htmlContent:
-        raise HTTPException(status_code=400, detail="htmlContent is required")
+    # Validate required fields
+    if not request.markdownContent:
+        raise HTTPException(status_code=400, detail="markdownContent is required")
 
-    if not request.margins:
-        raise HTTPException(status_code=400, detail="margins is required")
+    if not request.printProperties:
+        raise HTTPException(status_code=400, detail="printProperties is required")
 
-    if not request.pageSize:
-        raise HTTPException(status_code=400, detail="pageSize is required")
+    if not request.printProperties.margins:
+        raise HTTPException(status_code=400, detail="printProperties.margins is required")
 
     try:
         # Convert Pydantic model to dict for the generation function
         print_props_dict = {
             "margins": {
-                "top": request.margins.top,
-                "right": request.margins.right,
-                "bottom": request.margins.bottom,
-                "left": request.margins.left,
+                "top": request.printProperties.margins.top,
+                "right": request.printProperties.margins.right,
+                "bottom": request.printProperties.margins.bottom,
+                "left": request.printProperties.margins.left,
             },
-            "fontFamily": request.fontFamily,
-            "fontSize": request.fontSize,
-            "lineHeight": request.lineHeight,
+            "fontFamily": request.printProperties.fontFamily,
+            "fontSize": request.printProperties.fontSize,
+            "lineHeight": request.printProperties.lineHeight,
             "pageSize": {
-                "width": request.pageSize.width,
-                "height": request.pageSize.height,
+                "width": request.printProperties.pageSize.width,
+                "height": request.printProperties.pageSize.height,
             },
-            "useDefaultFonts": request.useDefaultFonts,
+            "useDefaultFonts": request.printProperties.useDefaultFonts,
         }
 
         # Generate PDF
         pdf_base64 = generate_pdf_from_markdown(
-            request.htmlContent, print_props_dict
+            request.markdownContent, print_props_dict
         )
 
         logger.info("PDF generated successfully")
