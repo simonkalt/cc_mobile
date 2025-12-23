@@ -61,7 +61,7 @@ def load_system_prompt() -> str:
     try:
         if not config_path.exists():
             logger.warning(f"System prompt file not found: {config_path}. Using default.")
-            return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+            return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
         
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
@@ -69,7 +69,7 @@ def load_system_prompt() -> str:
         system_prompt = config.get("system_prompt", "")
         if not system_prompt:
             logger.warning(f"System prompt not found in {config_path}. Using default.")
-            return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+            return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
 
         logger.info(
             f"Loaded system prompt from {config_path} ({len(system_prompt)} characters)"
@@ -77,13 +77,13 @@ def load_system_prompt() -> str:
         return system_prompt
     except FileNotFoundError:
         logger.warning(f"System prompt file not found: {config_path}. Using default.")
-        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing system prompt JSON: {e}. Using default.")
-        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
     except Exception as e:
         logger.error(f"Error loading system prompt: {e}. Using default.")
-        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information."
+        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
 
 
 def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
