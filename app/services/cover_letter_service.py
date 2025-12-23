@@ -6,6 +6,7 @@ import json
 import datetime
 import base64
 import logging
+import re
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -721,6 +722,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
         # Get raw HTML from LLM response
         raw_html = json_r.get("html", "")
+        
+        # Strip unwanted \r and \n characters from HTML
+        raw_html = raw_html.replace("\r", "").replace("\n", " ")
+        raw_html = re.sub(r' +', ' ', raw_html)
 
         # Apply user's print settings to HTML
         # Note: The user object was already retrieved earlier for personality profiles
@@ -773,6 +778,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             logger.warning(f"Could not apply print settings to HTML: {e}")
             # Continue with unstyled HTML if styling fails
 
+        # Final cleanup: strip any remaining \r or \n from HTML before returning
+        styled_html = styled_html.replace("\r", "").replace("\n", " ")
+        styled_html = re.sub(r' +', ' ', styled_html)
+        
         return {"markdown": markdown_content, "html": styled_html}
 
     except json.JSONDecodeError as e:
@@ -780,11 +789,21 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         logger.error(f"Response length: {len(r)} characters")
         logger.error(f"Response (first 1000 chars): {r[:1000]}")
         logger.error(f"Response (last 500 chars): {r[-500:]}")
+        error_html = f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
+        # Clean HTML of unwanted characters
+        error_html = error_html.replace("\r", "").replace("\n", " ")
+        error_html = re.sub(r' +', ' ', error_html)
+        
         return {
             "markdown": f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}",
-            "html": f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>",
+            "html": error_html,
         }
     except Exception as e:
         logger.error(f"Error in get_job_info: {str(e)}")
-        return {"markdown": f"Error: {str(e)}", "html": f"<p>Error: {str(e)}</p>"}
+        error_html = f"<p>Error: {str(e)}</p>"
+        # Clean HTML of unwanted characters
+        import re
+        error_html = error_html.replace("\r", "").replace("\n", " ")
+        error_html = re.sub(r' +', ' ', error_html)
+        return {"markdown": f"Error: {str(e)}", "html": error_html}
 

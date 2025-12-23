@@ -2552,14 +2552,25 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: dict) ->
         raise ImportError("weasyprint library is not installed. Cannot generate PDF.")
 
     try:
+        import re
+
         # Normalize markdown content: replace escaped newlines with actual newlines
         # This prevents backslashes from appearing in the PDF output
         normalized_markdown = markdown_content.replace("\\n", "\n").replace("\\r", "\r")
+
+        # Normalize line endings: convert \r\n to \n, then remove standalone \r
+        normalized_markdown = normalized_markdown.replace("\r\n", "\n").replace("\r", "\n")
 
         # Convert markdown to HTML
         html_content = markdown.markdown(
             normalized_markdown, extensions=["extra", "codehilite", "tables", "nl2br"]
         )
+
+        # Strip unwanted \r and \n characters from HTML output
+        # Remove carriage returns and normalize line feeds to spaces (HTML doesn't need them)
+        html_content = html_content.replace("\r", "").replace("\n", " ")
+        # Collapse multiple spaces to single space
+        html_content = re.sub(r" +", " ", html_content)
 
         # Extract print properties with defaults
         margins = print_properties.get("margins", {})
