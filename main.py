@@ -147,9 +147,9 @@ try:
     from weasyprint import HTML
 
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError) as e:
     WEASYPRINT_AVAILABLE = False
-    logger.warning("weasyprint not available. PDF generation will not work.")
+    logger.warning(f"weasyprint not available. PDF generation will not work. Error: {str(e)}")
 
 
 def send_ntfy_notification(message: str, title: str = "CoverLetter App"):

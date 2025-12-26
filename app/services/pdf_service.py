@@ -21,9 +21,9 @@ except ImportError:
 try:
     from weasyprint import HTML
     WEASYPRINT_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError) as e:
     WEASYPRINT_AVAILABLE = False
-    logger.warning("weasyprint not available. PDF generation will not work.")
+    logger.warning(f"weasyprint not available. PDF generation will not work. Error: {str(e)}")
 
 
 def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) -> str:
