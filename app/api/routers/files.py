@@ -6,7 +6,7 @@ import base64
 import re
 from typing import Optional
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from botocore.exceptions import ClientError
 
 from app.models.file import (
@@ -25,6 +25,7 @@ from app.utils.s3_utils import (
     get_s3_client,
     ensure_user_s3_folder,
     ensure_cover_letter_subfolder,
+    download_pdf_from_s3,
     S3_AVAILABLE,
 )
 from app.services.user_service import get_user_by_email
@@ -504,6 +505,44 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         error_msg = f"Save cover letter failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
+@router.get("/terms-of-service")
+async def get_terms_of_service():
+    """
+    Get the Terms of Service PDF from S3.
+    This is a public endpoint that requires no authentication.
+    """
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed.",
+        )
+
+    try:
+        # S3 path to the Terms of Service PDF
+        s3_path = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.pdf"
+        
+        # Download PDF from S3
+        pdf_bytes = download_pdf_from_s3(s3_path)
+        
+        logger.info(f"Successfully retrieved Terms of Service PDF ({len(pdf_bytes)} bytes)")
+        
+        # Return PDF with proper headers
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": 'inline; filename="Terms of Service.pdf"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Failed to retrieve Terms of Service: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
