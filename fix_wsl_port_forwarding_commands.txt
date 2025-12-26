@@ -1,0 +1,17 @@
+# Run these commands in PowerShell as Administrator
+
+# Step 1: Get WSL IP (or use: 172.17.136.190)
+wsl hostname -I
+
+# Step 2: Forward port 8000 (replace WSL_IP with actual IP from step 1)
+netsh interface portproxy add v4tov4 listenport=8000 listenaddress=0.0.0.0 connectport=8000 connectaddress=172.17.136.190
+
+# Step 3: Verify port forwarding
+netsh interface portproxy show all
+
+# Step 4: Allow Windows Firewall (if needed)
+New-NetFirewallRule -DisplayName "WSL FastAPI Port 8000" -Direction Inbound -LocalPort 8000 -Protocol TCP -Action Allow
+
+# Step 5: Test
+curl http://192.168.0.94:8000
+
