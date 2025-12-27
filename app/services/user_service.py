@@ -2,6 +2,7 @@
 User service - business logic for user operations
 """
 import logging
+import time
 from datetime import datetime
 from typing import Dict
 from bson import ObjectId
@@ -51,6 +52,82 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     # Hash password
     hashed_password_str = hash_password(user_data.password)
     
+    # Extract preferences if provided
+    preferences = user_data.preferences or {}
+    app_settings = preferences.get("appSettings", {})
+    personality_profiles = app_settings.get("personalityProfiles", [])
+    
+    # If no personality profiles provided or empty, create default profile
+    if not personality_profiles or len(personality_profiles) == 0:
+        default_profile = {
+            "id": str(int(time.time() * 1000)),  # Current timestamp in milliseconds
+            "name": "Professional",
+            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
+        }
+        personality_profiles = [default_profile]
+        logger.info(f"Created default personality profile for new user: {user_data.email}")
+    
+    # Ensure appSettings exists in preferences
+    if "appSettings" not in preferences:
+        preferences["appSettings"] = {}
+    
+    # Set the personality profiles (either provided or default)
+    preferences["appSettings"]["personalityProfiles"] = personality_profiles
+    
+    # Merge provided preferences with defaults to ensure all required fields exist
+    default_preferences = {
+        "newsletterOptIn": False,
+        "theme": "light",
+        "appSettings": {
+            "printProperties": {
+                "margins": {
+                    "top": 1.0,
+                    "right": 0.75,
+                    "bottom": 0.25,
+                    "left": 0.75
+                },
+                "fontFamily": "Georgia",
+                "fontSize": 11.0,
+                "lineHeight": 1.15,
+                "pageSize": {
+                    "width": 8.5,
+                    "height": 11.0
+                },
+                "useDefaultFonts": False
+            },
+            "personalityProfiles": personality_profiles,
+            "selectedModel": None,
+            "lastResumeUsed": None,
+            "last_personality_profile_used": None
+        },
+        "formDefaults": {
+            "companyName": "",
+            "hiringManager": "",
+            "adSource": "",
+            "jobDescription": "",
+            "additionalInstructions": "",
+            "tone": "Professional",
+            "address": "",
+            "phoneNumber": "",
+            "resume": ""
+        }
+    }
+    
+    # Deep merge: start with defaults, then overlay provided preferences
+    def deep_merge(default: dict, provided: dict) -> dict:
+        """Recursively merge provided dict into default dict"""
+        result = default.copy()
+        for key, value in provided.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+    
+    final_preferences = deep_merge(default_preferences, preferences)
+    # Ensure personalityProfiles is set (in case it was overwritten)
+    final_preferences["appSettings"]["personalityProfiles"] = personality_profiles
+    
     # Build user document
     user_doc = {
         "name": user_data.name,
@@ -75,44 +152,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},  # Initialize empty LLM usage counts object
         "last_llm_used": None,  # Initialize last LLM used field
-        "preferences": user_data.preferences or {
-            "newsletterOptIn": False,
-            "theme": "light",
-            "appSettings": {
-                "printProperties": {
-                    "margins": {
-                        "top": 1.0,
-                        "right": 0.75,
-                        "bottom": 0.25,
-                        "left": 0.75
-                    },
-                    "fontFamily": "Georgia",
-                    "fontSize": 11.0,
-                    "lineHeight": 1.15,
-                    "pageSize": {
-                        "width": 8.5,
-                        "height": 11.0
-                    },
-                    "useDefaultFonts": False
-                },
-                "personalityProfiles": [],
-                "selectedModel": None,
-                "lastResumeUsed": None,
-                "last_personality_profile_used": None
-            },
-            # Form field defaults - ensure all form fields start empty for new users
-            "formDefaults": {
-                "companyName": "",
-                "hiringManager": "",
-                "adSource": "",
-                "jobDescription": "",
-                "additionalInstructions": "",
-                "tone": "Professional",
-                "address": "",
-                "phoneNumber": "",
-                "resume": ""
-            }
-        }
+        "preferences": final_preferences
     }
     
     try:
