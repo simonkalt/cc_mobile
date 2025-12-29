@@ -13,6 +13,7 @@ from app.utils.sms_utils import (
     send_verification_code,
     normalize_phone_number,
 )
+from app.utils.email_utils import send_verification_code_email
 from app.utils.user_helpers import USERS_COLLECTION
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,8 @@ def store_verification_code(
     user_id: str,
     code: str,
     purpose: str,
-    phone_number: str
+    phone_number: Optional[str] = None,
+    email: Optional[str] = None
 ) -> bool:
     """
     Store verification code in user document
@@ -34,7 +36,8 @@ def store_verification_code(
         user_id: User ID
         code: Verification code
         purpose: Purpose of verification
-        phone_number: Phone number used
+        phone_number: Phone number used (for SMS)
+        email: Email address used (for email)
         
     Returns:
         True if stored successfully
@@ -58,11 +61,16 @@ def store_verification_code(
         verification_data = {
             "code": code,
             "purpose": purpose,
-            "phone_number": phone_number,
             "created_at": datetime.utcnow(),
             "expires_at": expires_at,
             "verified": False
         }
+        
+        # Store contact method (phone or email)
+        if phone_number:
+            verification_data["phone_number"] = phone_number
+        if email:
+            verification_data["email"] = email
         
         collection.update_one(
             {"_id": ObjectId(user_id)},
@@ -212,7 +220,39 @@ def send_and_store_verification_code(
         )
     
     # Store code
-    store_verification_code(user_id, code, purpose, normalized_phone)
+    store_verification_code(user_id, code, purpose, phone_number=normalized_phone)
+    
+    return code
+
+
+def send_and_store_verification_code_email(
+    user_id: str,
+    email: str,
+    purpose: str
+) -> str:
+    """
+    Generate, send, and store verification code via email
+    
+    Args:
+        user_id: User ID
+        email: Email address to send code to
+        purpose: Purpose of verification
+        
+    Returns:
+        Generated verification code
+    """
+    # Generate code
+    code = generate_verification_code()
+    
+    # Send email (stub - just logs for now)
+    if not send_verification_code_email(email, code, purpose):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send verification code"
+        )
+    
+    # Store code
+    store_verification_code(user_id, code, purpose, email=email)
     
     return code
 
