@@ -3,5 +3,17 @@
 .venv
 venv/
 
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
 .oci/config
 .pem
