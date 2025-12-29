@@ -3,7 +3,7 @@ Verification code service - handles storage and validation of SMS verification c
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from bson import ObjectId
 from fastapi import HTTPException, status
 
@@ -15,6 +15,16 @@ from app.utils.sms_utils import (
 )
 from app.utils.email_utils import send_verification_code_email
 from app.utils.user_helpers import USERS_COLLECTION
+from app.utils.redis_utils import (
+    is_redis_available,
+    store_registration_data,
+    get_registration_data,
+    delete_registration_data,
+    store_verification_session,
+    get_verification_session,
+    delete_verification_session,
+)
+from app.utils.password import hash_password
 
 logger = logging.getLogger(__name__)
 
@@ -226,17 +236,22 @@ def send_and_store_verification_code(
 
 
 def send_and_store_verification_code_email(
-    user_id: str,
+    user_id: Optional[str],
     email: str,
-    purpose: str
+    purpose: str,
+    registration_data: Optional[dict] = None,
+    delivery_method: str = "email"
 ) -> str:
     """
     Generate, send, and store verification code via email
+    Uses Redis for registration flow, MongoDB for existing users
     
     Args:
-        user_id: User ID
+        user_id: User ID (None for registration flow)
         email: Email address to send code to
         purpose: Purpose of verification
+        registration_data: Registration data dictionary (for finish_registration)
+        delivery_method: "email" or "sms"
         
     Returns:
         Generated verification code
@@ -244,15 +259,120 @@ def send_and_store_verification_code_email(
     # Generate code
     code = generate_verification_code()
     
-    # Send email (stub - just logs for now)
-    if not send_verification_code_email(email, code, purpose):
+    # For registration flow, use Redis
+    if purpose == "finish_registration" and registration_data:
+        # Hash password before storing in Redis
+        if "password" in registration_data and registration_data["password"]:
+            registration_data["password"] = hash_password(registration_data["password"])
+        
+        # Store registration data in Redis
+        if not store_registration_data(email, code, registration_data):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to store registration data"
+            )
+        
+        # Store verification session in Redis
+        registration_key = f"registration:{email}:{code}"
+        if not store_verification_session(
+            email=email,
+            code=code,
+            purpose=purpose,
+            delivery_method=delivery_method,
+            registration_key=registration_key
+        ):
+            logger.warning(f"Failed to store verification session in Redis for {email}")
+    elif user_id:
+        # For existing users, use MongoDB
+        # Send email (stub - just logs for now)
+        if not send_verification_code_email(email, code, purpose):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification code"
+            )
+        
+        # Store code in MongoDB
+        store_verification_code(user_id, code, purpose, email=email)
+    else:
+        # No user_id and not registration - this shouldn't happen
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send verification code"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: user_id required for non-registration flows"
         )
     
-    # Store code
-    store_verification_code(user_id, code, purpose, email=email)
+    # Send email/SMS
+    if delivery_method == "sms":
+        from app.utils.sms_utils import send_verification_code, normalize_phone_number
+        phone = registration_data.get("phone") if registration_data else None
+        if phone:
+            normalized_phone = normalize_phone_number(phone)
+            if not send_verification_code(normalized_phone, code, purpose):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to send verification code"
+                )
+        else:
+            logger.warning(f"No phone number provided for SMS delivery to {email}")
+    else:
+        if not send_verification_code_email(email, code, purpose):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification code"
+            )
     
     return code
+
+
+def verify_code_from_redis(email: str, code: str, purpose: str) -> Optional[dict]:
+    """
+    Verify code from Redis (for registration flow)
+    
+    Args:
+        email: User's email address
+        code: Verification code
+        purpose: Purpose of verification
+        
+    Returns:
+        Verification session data if valid, None otherwise
+    """
+    if not is_redis_available():
+        logger.warning("Redis not available for verification")
+        return None
+    
+    session_data = get_verification_session(email, code, purpose)
+    if not session_data:
+        return None
+    
+    return session_data
+
+
+def complete_registration_from_redis(email: str, code: str) -> dict:
+    """
+    Complete registration by retrieving data from Redis and creating user
+    
+    Args:
+        email: User's email address
+        code: Verification code
+        
+    Returns:
+        Registration data dictionary
+        
+    Raises:
+        HTTPException: If registration data not found or invalid
+    """
+    if not is_redis_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis service unavailable"
+        )
+    
+    # Get registration data from Redis
+    registration_data = get_registration_data(email, code)
+    if not registration_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Registration data expired or not found. Please register again."
+        )
+    
+    return registration_data
 

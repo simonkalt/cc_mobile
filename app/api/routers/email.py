@@ -20,9 +20,12 @@ from app.models.email import (
 from app.services.verification_service import (
     send_and_store_verification_code_email,
     verify_code,
+    verify_code_from_redis,
+    complete_registration_from_redis,
     clear_verification_code,
 )
-from app.services.user_service import get_user_by_email, get_user_by_id
+from app.services.user_service import get_user_by_email, get_user_by_id, create_user_from_registration_data
+from app.utils.redis_utils import delete_registration_data, delete_verification_session
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password
 from app.utils.user_helpers import USERS_COLLECTION
@@ -63,6 +66,48 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             detail=f"Invalid purpose. Must be one of: {', '.join(valid_purposes)}"
         )
     
+    # Handle registration flow (uses Redis)
+    if request.purpose == "finish_registration" and request.registration_data:
+        # Check if user already exists
+        try:
+            existing_user = get_user_by_email(request.email)
+            # User exists, can't register again
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User with this email already exists"
+            )
+        except HTTPException as e:
+            if e.status_code == status.HTTP_404_NOT_FOUND:
+                # User doesn't exist, proceed with registration
+                pass
+            else:
+                raise
+        
+        # Send and store verification code with registration data in Redis
+        try:
+            send_and_store_verification_code_email(
+                user_id=None,  # No user_id for registration flow
+                email=request.email,
+                purpose=request.purpose,
+                registration_data=request.registration_data,
+                delivery_method=request.delivery_method or "email"
+            )
+            
+            logger.info(f"Verification code sent via email for registration: {request.email}")
+            
+            return SendVerificationCodeResponse(
+                success=True,
+                message="Verification code sent successfully",
+                expires_in_minutes=10
+            )
+        except Exception as e:
+            logger.error(f"Error sending verification code for registration: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to send verification code: {str(e)}"
+            )
+    
+    # Handle existing user flows (forgot_password, change_password)
     # Find user by email
     try:
         user = get_user_by_email(request.email)
@@ -253,7 +298,7 @@ async def change_password_endpoint(request: ChangePasswordRequest):
 @router.post("/complete-registration", response_model=RegistrationCompleteResponse)
 async def complete_registration_endpoint(request: CompleteRegistrationRequest):
     """
-    Complete registration by verifying code sent via email during registration
+    Complete registration by verifying code and creating user from Redis data
     """
     if not is_connected():
         raise HTTPException(
@@ -268,34 +313,52 @@ async def complete_registration_endpoint(request: CompleteRegistrationRequest):
             detail="Failed to access users collection"
         )
     
-    # Get user
-    user = get_user_by_email(request.email)
-    
-    # Verify code
-    if not verify_code(user.id, request.code, "finish_registration"):
+    # Check if user already exists (shouldn't happen, but safety check)
+    try:
+        existing_user = get_user_by_email(request.email)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists"
         )
+    except HTTPException as e:
+        if e.status_code != status.HTTP_404_NOT_FOUND:
+            raise
     
-    # Mark email as verified and clear verification code
-    from datetime import datetime
-    
-    collection.update_one(
-        {"_id": ObjectId(user.id)},
-        {
-            "$set": {
-                "isEmailVerified": True,
-                "dateUpdated": datetime.utcnow()
-            },
-            "$unset": {"verification_code": ""}
-        }
-    )
-    
-    logger.info(f"Registration completed via email for user {user.id}")
-    
-    return RegistrationCompleteResponse(
-        success=True,
-        message="Registration completed successfully"
-    )
+    # Verify code and get registration data from Redis
+    try:
+        registration_data = complete_registration_from_redis(request.email, request.code)
+        
+        # Verify the session exists
+        session_data = verify_code_from_redis(request.email, request.code, "finish_registration")
+        if not session_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired verification code"
+            )
+        
+        # Create user from registration data
+        user = create_user_from_registration_data(
+            registration_data=registration_data,
+            is_email_verified=True  # Mark as verified since they completed verification
+        )
+        
+        # Clean up Redis entries
+        delete_registration_data(request.email, request.code)
+        delete_verification_session(request.email, request.code, "finish_registration")
+        
+        logger.info(f"Registration completed via email for user {user.id}")
+        
+        return RegistrationCompleteResponse(
+            success=True,
+            message="Registration completed successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error completing registration: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete registration: {str(e)}"
+        )
 

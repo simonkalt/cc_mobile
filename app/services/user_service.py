@@ -168,6 +168,162 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         )
 
 
+def create_user_from_registration_data(registration_data: dict, is_email_verified: bool = False) -> UserResponse:
+    """
+    Create a user from registration data (used when completing registration from Redis)
+    
+    Args:
+        registration_data: Dictionary containing user registration data
+            - name: User's name
+            - email: User's email
+            - phone: User's phone (optional)
+            - password: Already hashed password
+            - preferences: User preferences (optional)
+        is_email_verified: Whether email is already verified (default: False)
+        
+    Returns:
+        UserResponse object
+        
+    Raises:
+        HTTPException: If user creation fails
+    """
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable"
+        )
+    
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection"
+        )
+    
+    # Check if user already exists
+    existing_user = collection.find_one({"email": registration_data["email"]})
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists"
+        )
+    
+    # Extract preferences if provided
+    preferences = registration_data.get("preferences", {})
+    app_settings = preferences.get("appSettings", {})
+    personality_profiles = app_settings.get("personalityProfiles", [])
+    
+    # If no personality profiles provided or empty, create default profile
+    if not personality_profiles or len(personality_profiles) == 0:
+        default_profile = {
+            "id": str(int(time.time() * 1000)),
+            "name": "Professional",
+            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
+        }
+        personality_profiles = [default_profile]
+        logger.info(f"Created default personality profile for new user: {registration_data['email']}")
+    
+    # Ensure appSettings exists in preferences
+    if "appSettings" not in preferences:
+        preferences["appSettings"] = {}
+    
+    # Set the personality profiles (either provided or default)
+    preferences["appSettings"]["personalityProfiles"] = personality_profiles
+    
+    # Merge provided preferences with defaults
+    default_preferences = {
+        "newsletterOptIn": False,
+        "theme": "light",
+        "appSettings": {
+            "printProperties": {
+                "margins": {
+                    "top": 1.0,
+                    "right": 0.75,
+                    "bottom": 0.25,
+                    "left": 0.75
+                },
+                "fontFamily": "Georgia",
+                "fontSize": 11.0,
+                "lineHeight": 1.15,
+                "pageSize": {
+                    "width": 8.5,
+                    "height": 11.0
+                },
+                "useDefaultFonts": False
+            },
+            "personalityProfiles": personality_profiles,
+            "selectedModel": None,
+            "lastResumeUsed": None,
+            "last_personality_profile_used": None
+        },
+        "formDefaults": {
+            "companyName": "",
+            "hiringManager": "",
+            "adSource": "",
+            "jobDescription": "",
+            "additionalInstructions": "",
+            "tone": "Professional",
+            "address": "",
+            "phoneNumber": "",
+            "resume": ""
+        }
+    }
+    
+    # Deep merge: start with defaults, then overlay provided preferences
+    def deep_merge(default: dict, provided: dict) -> dict:
+        """Recursively merge provided dict into default dict"""
+        result = default.copy()
+        for key, value in provided.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+    
+    final_preferences = deep_merge(default_preferences, preferences)
+    # Ensure personalityProfiles is set
+    final_preferences["appSettings"]["personalityProfiles"] = personality_profiles
+    
+    # Build user document
+    user_doc = {
+        "name": registration_data["name"],
+        "email": registration_data["email"],
+        "hashedPassword": registration_data["password"],  # Already hashed
+        "isActive": True,
+        "isEmailVerified": is_email_verified,
+        "roles": ["user"],
+        "failedLoginAttempts": 0,
+        "lastLogin": None,
+        "passwordChangedAt": None,
+        "avatarUrl": None,
+        "phone": registration_data.get("phone"),
+        "address": registration_data.get("address") or {
+            "street": None,
+            "city": None,
+            "state": None,
+            "zip": None,
+            "country": None
+        },
+        "dateCreated": datetime.utcnow(),
+        "dateUpdated": datetime.utcnow(),
+        "llm_counts": {},
+        "last_llm_used": None,
+        "preferences": final_preferences
+    }
+    
+    try:
+        result = collection.insert_one(user_doc)
+        user_doc["_id"] = result.inserted_id
+        logger.info(f"User created from registration data: {registration_data['email']} (ID: {result.inserted_id})")
+        return user_doc_to_response(user_doc)
+    except Exception as e:
+        logger.error(f"Error creating user from registration data: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
+        )
+
+
 def get_user_by_id(user_id: str) -> UserResponse:
     """Get user by ID"""
     if not is_connected():

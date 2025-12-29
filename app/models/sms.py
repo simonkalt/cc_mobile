@@ -10,6 +10,8 @@ class SendVerificationCodeRequest(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     purpose: str  # "forgot_password", "change_password", "finish_registration"
+    registration_data: Optional[Dict[str, Any]] = None  # For finish_registration flow
+    delivery_method: Optional[str] = "sms"  # "email" or "sms"
 
 
 class VerifyCodeRequest(BaseModel):

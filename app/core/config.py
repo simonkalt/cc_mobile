@@ -67,6 +67,15 @@ class Settings:
     TWILIO_AUTH_TOKEN: Optional[str] = os.getenv("TWILIO_AUTH_TOKEN")
     TWILIO_PHONE_NUMBER: Optional[str] = os.getenv("TWILIO_PHONE_NUMBER")
     
+    # Redis Configuration
+    REDIS_HOST: Optional[str] = os.getenv("REDIS_HOST")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_USERNAME: Optional[str] = os.getenv("REDIS_USERNAME")
+    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
+    REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")
+    
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     PERSONALITY_PROFILES_PATH: Path = Path(__file__).parent.parent.parent / "personality_profiles.json"
