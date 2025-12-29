@@ -3,7 +3,7 @@ Redis utilities for temporary data storage (verification codes, registration dat
 """
 import logging
 import json
-import redis
+import os
 from typing import Optional, Dict, Any
 from datetime import timedelta
 
@@ -11,11 +11,48 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ANSI color codes for Redis logs
+# Check if we're in a terminal that supports colors (not in CI/CD or when output is redirected)
+SUPPORTS_COLOR = os.getenv("TERM") is not None and os.getenv("NO_COLOR") is None
+
+# Redis log colors (magenta/red theme)
+REDIS_COLOR_PREFIX = "\033[95m[REDIS]\033[0m " if SUPPORTS_COLOR else "[REDIS] "
+REDIS_INFO_COLOR = "\033[96m[REDIS]\033[0m " if SUPPORTS_COLOR else "[REDIS] "
+REDIS_WARN_COLOR = "\033[93m[REDIS WARN]\033[0m " if SUPPORTS_COLOR else "[REDIS WARN] "
+REDIS_ERROR_COLOR = "\033[91m[REDIS ERROR]\033[0m " if SUPPORTS_COLOR else "[REDIS ERROR] "
+
+
+def _redis_log_info(message: str) -> None:
+    """Log Redis info message with color"""
+    logger.info(f"{REDIS_INFO_COLOR}{message}")
+
+
+def _redis_log_warning(message: str) -> None:
+    """Log Redis warning message with color"""
+    logger.warning(f"{REDIS_WARN_COLOR}{message}")
+
+
+def _redis_log_error(message: str) -> None:
+    """Log Redis error message with color"""
+    logger.error(f"{REDIS_ERROR_COLOR}{message}")
+
+# Try to import redis
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis = None
+    if SUPPORTS_COLOR:
+        logger.warning(f"{REDIS_WARN_COLOR}redis library not available. Redis operations will not work.")
+    else:
+        logger.warning("[REDIS WARN] redis library not available. Redis operations will not work.")
+
 # Redis client instance (initialized on first use)
-_redis_client: Optional[redis.Redis] = None
+_redis_client: Optional[Any] = None
 
 
-def get_redis_client() -> redis.Redis:
+def get_redis_client():
     """
     Get Redis client instance (singleton pattern)
     
@@ -23,9 +60,13 @@ def get_redis_client() -> redis.Redis:
         Redis client instance
         
     Raises:
+        ImportError: If redis library is not installed
         ConnectionError: If Redis connection fails
     """
     global _redis_client
+    
+    if not REDIS_AVAILABLE:
+        raise ImportError("redis library is not installed. Cannot access Redis.")
     
     if _redis_client is None:
         if not settings.REDIS_HOST:
@@ -59,13 +100,13 @@ def get_redis_client() -> redis.Redis:
             
             # Test connection
             _redis_client.ping()
-            logger.info(f"Connected to Redis at {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+            _redis_log_info(f"✓ Connected to Redis at {settings.REDIS_HOST}:{settings.REDIS_PORT}")
             
         except redis.ConnectionError as e:
-            logger.error(f"Failed to connect to Redis: {e}")
+            _redis_log_error(f"✗ Failed to connect to Redis: {e}")
             raise ConnectionError(f"Redis connection failed: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error connecting to Redis: {e}")
+            _redis_log_error(f"✗ Unexpected error connecting to Redis: {e}")
             raise ConnectionError(f"Redis connection error: {str(e)}")
     
     return _redis_client
@@ -78,12 +119,14 @@ def is_redis_available() -> bool:
     Returns:
         True if Redis is available, False otherwise
     """
+    if not REDIS_AVAILABLE:
+        return False
     try:
         client = get_redis_client()
         client.ping()
         return True
     except Exception as e:
-        logger.warning(f"Redis not available: {e}")
+        _redis_log_warning(f"Redis not available: {e}")
         return False
 
 
@@ -104,7 +147,16 @@ def store_registration_data(
         
     Returns:
         True if stored successfully, False otherwise
+        
+    Raises:
+        ImportError: If redis library is not installed
+        ConnectionError: If Redis connection fails
     """
+    if not REDIS_AVAILABLE:
+        error_msg = "Redis library is not installed. Please install it with: pip install redis"
+        _redis_log_error(error_msg)
+        raise ImportError(error_msg)
+    
     try:
         client = get_redis_client()
         key = f"registration:{email}:{code}"
@@ -116,11 +168,14 @@ def store_registration_data(
             json.dumps(registration_data)
         )
         
-        logger.info(f"Stored registration data in Redis for {email} (expires in {ttl_minutes} minutes)")
+        _redis_log_info(f"✓ Stored registration data in Redis for {email} (expires in {ttl_minutes} minutes)")
         return True
         
+    except (ImportError, ConnectionError):
+        # Re-raise these as-is
+        raise
     except Exception as e:
-        logger.error(f"Error storing registration data in Redis: {e}")
+        _redis_log_error(f"✗ Error storing registration data in Redis: {e}")
         return False
 
 
@@ -141,16 +196,17 @@ def get_registration_data(email: str, code: str) -> Optional[Dict[str, Any]]:
         
         data_json = client.get(key)
         if not data_json:
-            logger.warning(f"Registration data not found in Redis for {email}")
+            _redis_log_warning(f"⚠ Registration data not found in Redis for {email}")
             return None
         
+        _redis_log_info(f"✓ Retrieved registration data from Redis for {email}")
         return json.loads(data_json)
         
     except json.JSONDecodeError as e:
-        logger.error(f"Error parsing registration data from Redis: {e}")
+        _redis_log_error(f"✗ Error parsing registration data from Redis: {e}")
         return None
     except Exception as e:
-        logger.error(f"Error retrieving registration data from Redis: {e}")
+        _redis_log_error(f"✗ Error retrieving registration data from Redis: {e}")
         return None
 
 
@@ -171,14 +227,14 @@ def delete_registration_data(email: str, code: str) -> bool:
         
         deleted = client.delete(key)
         if deleted:
-            logger.info(f"Deleted registration data from Redis for {email}")
+            _redis_log_info(f"✓ Deleted registration data from Redis for {email}")
         else:
-            logger.warning(f"Registration data not found in Redis for deletion: {email}")
+            _redis_log_warning(f"⚠ Registration data not found in Redis for deletion: {email}")
         
         return deleted > 0
         
     except Exception as e:
-        logger.error(f"Error deleting registration data from Redis: {e}")
+        _redis_log_error(f"✗ Error deleting registration data from Redis: {e}")
         return False
 
 
@@ -228,11 +284,11 @@ def store_verification_session(
             json.dumps(session_data)
         )
         
-        logger.info(f"Stored verification session in Redis for {email}, purpose: {purpose}")
+        _redis_log_info(f"✓ Stored verification session in Redis for {email}, purpose: {purpose}")
         return True
         
     except Exception as e:
-        logger.error(f"Error storing verification session in Redis: {e}")
+        _redis_log_error(f"✗ Error storing verification session in Redis: {e}")
         return False
 
 
@@ -254,16 +310,17 @@ def get_verification_session(email: str, code: str, purpose: str) -> Optional[Di
         
         data_json = client.get(key)
         if not data_json:
-            logger.warning(f"Verification session not found in Redis for {email}, purpose: {purpose}")
+            _redis_log_warning(f"⚠ Verification session not found in Redis for {email}, purpose: {purpose}")
             return None
         
+        _redis_log_info(f"✓ Retrieved verification session from Redis for {email}, purpose: {purpose}")
         return json.loads(data_json)
         
     except json.JSONDecodeError as e:
-        logger.error(f"Error parsing verification session data from Redis: {e}")
+        _redis_log_error(f"✗ Error parsing verification session data from Redis: {e}")
         return None
     except Exception as e:
-        logger.error(f"Error retrieving verification session from Redis: {e}")
+        _redis_log_error(f"✗ Error retrieving verification session from Redis: {e}")
         return None
 
 
@@ -285,11 +342,13 @@ def delete_verification_session(email: str, code: str, purpose: str) -> bool:
         
         deleted = client.delete(key)
         if deleted:
-            logger.info(f"Deleted verification session from Redis for {email}, purpose: {purpose}")
+            _redis_log_info(f"✓ Deleted verification session from Redis for {email}, purpose: {purpose}")
+        else:
+            _redis_log_warning(f"⚠ Verification session not found in Redis for deletion: {email}, purpose: {purpose}")
         
         return deleted > 0
         
     except Exception as e:
-        logger.error(f"Error deleting verification session from Redis: {e}")
+        _redis_log_error(f"✗ Error deleting verification session from Redis: {e}")
         return False
 

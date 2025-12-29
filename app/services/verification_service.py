@@ -266,10 +266,23 @@ def send_and_store_verification_code_email(
             registration_data["password"] = hash_password(registration_data["password"])
         
         # Store registration data in Redis
-        if not store_registration_data(email, code, registration_data):
+        try:
+            if not store_registration_data(email, code, registration_data):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to store registration data"
+                )
+        except ImportError as e:
+            logger.error(f"Redis not available: {e}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to store registration data"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Redis service is not available. Please install redis: pip install redis"
+            )
+        except ConnectionError as e:
+            logger.error(f"Redis connection failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Redis connection failed: {str(e)}"
             )
         
         # Store verification session in Redis

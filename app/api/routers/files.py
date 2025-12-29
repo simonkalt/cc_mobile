@@ -515,7 +515,10 @@ async def get_terms_of_service():
     Get the Terms of Service PDF from S3.
     This is a public endpoint that requires no authentication.
     """
+    logger.info("Terms of Service endpoint called")
+    
     if not S3_AVAILABLE:
+        logger.error("S3 not available")
         raise HTTPException(
             status_code=503,
             detail="S3 service is not available. boto3 is not installed.",
@@ -525,8 +528,17 @@ async def get_terms_of_service():
         # S3 path to the Terms of Service PDF
         s3_path = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.pdf"
         
+        logger.info(f"Attempting to download PDF from S3: {s3_path}")
+        
         # Download PDF from S3
         pdf_bytes = download_pdf_from_s3(s3_path)
+        
+        if not pdf_bytes:
+            logger.error("Downloaded PDF is empty")
+            raise HTTPException(
+                status_code=404,
+                detail="Terms of Service PDF not found in S3"
+            )
         
         logger.info(f"Successfully retrieved Terms of Service PDF ({len(pdf_bytes)} bytes)")
         
@@ -541,8 +553,21 @@ async def get_terms_of_service():
         
     except HTTPException:
         raise
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        if error_code == "NoSuchKey" or error_code == "404":
+            raise HTTPException(
+                status_code=404,
+                detail="Terms of Service PDF not found in S3"
+            )
+        raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         error_msg = f"Failed to retrieve Terms of Service: {str(e)}"
-        logger.error(error_msg)
+        logger.error(error_msg, exc_info=True)
+        # Check if it's a "not found" type error
+        if "NoSuchKey" in str(e) or "404" in str(e) or "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Terms of Service PDF not found in S3")
         raise HTTPException(status_code=500, detail=error_msg)
 

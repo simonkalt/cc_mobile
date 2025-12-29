@@ -2,7 +2,7 @@
 SMS verification related Pydantic models
 """
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 class SendVerificationCodeRequest(BaseModel):

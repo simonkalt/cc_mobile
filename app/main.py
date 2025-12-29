@@ -3,6 +3,20 @@ FastAPI application entry point
 """
 import warnings
 import sys
+import logging
+
+# Log Python environment info at startup
+logger = logging.getLogger(__name__)
+logger.info(f"Python executable: {sys.executable}")
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Python path: {sys.path[:3]}...")
+
+# Check redis availability at startup
+try:
+    import redis
+    logger.info(f"✓ Redis library available (version: {getattr(redis, '__version__', 'unknown')})")
+except ImportError as e:
+    logger.warning(f"⚠ Redis library not available: {e}")
 
 # Suppress importlib.metadata compatibility warnings for Python 3.9
 # packages_distributions was added in Python 3.10, but some dependencies try to use it

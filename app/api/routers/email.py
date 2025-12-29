@@ -45,6 +45,8 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
     - change_password: Send code to change password
     - finish_registration: Send code to complete registration
     """
+    logger.info(f"Email send-code request: email={request.email}, purpose={request.purpose}, has_registration_data={request.registration_data is not None}")
+    
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -67,7 +69,14 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
         )
     
     # Handle registration flow (uses Redis)
-    if request.purpose == "finish_registration" and request.registration_data:
+    if request.purpose == "finish_registration":
+        # Registration flow requires registration_data
+        if not request.registration_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="registration_data is required for finish_registration purpose"
+            )
+        
         # Check if user already exists
         try:
             existing_user = get_user_by_email(request.email)
@@ -100,8 +109,10 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
                 message="Verification code sent successfully",
                 expires_in_minutes=10
             )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Error sending verification code for registration: {e}")
+            logger.error(f"Error sending verification code for registration: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to send verification code: {str(e)}"

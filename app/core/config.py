@@ -76,6 +76,15 @@ class Settings:
     REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
     REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")
     
+    # SMTP Configuration
+    SMTP_SERVER: Optional[str] = os.getenv("SMTP_SERVER")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USERNAME: Optional[str] = os.getenv("SMTP_USERNAME")
+    SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
+    SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    SMTP_USE_SSL: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+    FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL")
+    
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     PERSONALITY_PROFILES_PATH: Path = Path(__file__).parent.parent.parent / "personality_profiles.json"
