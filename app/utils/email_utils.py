@@ -91,6 +91,10 @@ def send_verification_code_email(email: str, code: str, purpose: str = "verifica
     Returns:
         True if email sent successfully, False otherwise
     """
+    logger.info(
+        f"Attempting to send verification code email to {email} for purpose: {purpose}, code: {code}"
+    )
+
     purpose_subjects = {
         "forgot_password": "Password Reset Verification Code",
         "change_password": "Password Change Verification Code",
@@ -108,4 +112,9 @@ def send_verification_code_email(email: str, code: str, purpose: str = "verifica
     subject = purpose_subjects.get(purpose, purpose_subjects["verification"])
     body = purpose_messages.get(purpose, purpose_messages["verification"])
 
-    return send_email(email, subject, body)
+    result = send_email(email, subject, body)
+    if result:
+        logger.info(f"✓ Successfully sent verification code email to {email}")
+    else:
+        logger.error(f"✗ Failed to send verification code email to {email}")
+    return result

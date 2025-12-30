@@ -28,6 +28,7 @@ from app.utils.s3_utils import (
     download_pdf_from_s3,
     S3_AVAILABLE,
 )
+from app.utils.pdf_utils import convert_pdf_to_html
 from app.services.user_service import get_user_by_email
 from app.core.config import settings
 from app.db.mongodb import is_connected
@@ -512,8 +513,9 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
 @router.get("/terms-of-service")
 async def get_terms_of_service():
     """
-    Get the Terms of Service PDF from S3.
+    Get the Terms of Service as HTML converted from PDF stored in S3.
     This is a public endpoint that requires no authentication.
+    Returns HTML content that can be displayed directly in the browser.
     """
     logger.info("Terms of Service endpoint called")
     
@@ -542,12 +544,17 @@ async def get_terms_of_service():
         
         logger.info(f"Successfully retrieved Terms of Service PDF ({len(pdf_bytes)} bytes)")
         
-        # Return PDF with proper headers
+        # Convert PDF to HTML
+        html_content = convert_pdf_to_html(pdf_bytes)
+        
+        logger.info(f"Successfully converted Terms of Service PDF to HTML ({len(html_content)} characters)")
+        
+        # Return HTML with proper headers
         return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
+            content=html_content,
+            media_type="text/html; charset=utf-8",
             headers={
-                "Content-Disposition": 'inline; filename="Terms of Service.pdf"'
+                "Content-Disposition": 'inline; filename="Terms of Service.html"'
             }
         )
         

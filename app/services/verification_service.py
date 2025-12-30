@@ -14,6 +14,7 @@ from app.utils.sms_utils import (
     normalize_phone_number,
 )
 from app.utils.email_utils import send_verification_code_email
+import random
 from app.utils.user_helpers import USERS_COLLECTION
 from app.utils.redis_utils import (
     is_redis_available,
@@ -256,8 +257,14 @@ def send_and_store_verification_code_email(
     Returns:
         Generated verification code
     """
-    # Generate code
-    code = generate_verification_code()
+    # Generate code - use real random code for email (SMTP is configured)
+    # SMS still uses hardcoded "000000" until Twilio is approved
+    if delivery_method == "email":
+        code = str(random.randint(100000, 999999))
+        logger.info(f"Generated random verification code for email: {code}")
+    else:
+        code = generate_verification_code()  # Still "000000" for SMS
+        logger.info(f"Using SMS verification code: {code}")
     
     # For registration flow, use Redis
     if purpose == "finish_registration" and registration_data:
@@ -314,24 +321,33 @@ def send_and_store_verification_code_email(
         )
     
     # Send email/SMS
-    if delivery_method == "sms":
-        from app.utils.sms_utils import send_verification_code, normalize_phone_number
-        phone = registration_data.get("phone") if registration_data else None
-        if phone:
-            normalized_phone = normalize_phone_number(phone)
-            if not send_verification_code(normalized_phone, code, purpose):
+    # For registration flow, send email after storing in Redis
+    # For existing users, email was already sent above (MongoDB flow)
+    if purpose == "finish_registration" and registration_data:
+        # Registration flow - send email now
+        if delivery_method == "sms":
+            from app.utils.sms_utils import send_verification_code, normalize_phone_number
+            phone = registration_data.get("phone") if registration_data else None
+            if phone:
+                normalized_phone = normalize_phone_number(phone)
+                logger.info(f"Sending SMS verification code to {normalized_phone} for registration")
+                if not send_verification_code(normalized_phone, code, purpose):
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to send verification code"
+                    )
+            else:
+                logger.warning(f"No phone number provided for SMS delivery to {email}")
+        else:
+            # Send email for registration
+            logger.info(f"Sending email verification code to {email} for registration (code: {code})")
+            if not send_verification_code_email(email, code, purpose):
+                logger.error(f"Failed to send email verification code to {email}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to send verification code"
                 )
-        else:
-            logger.warning(f"No phone number provided for SMS delivery to {email}")
-    else:
-        if not send_verification_code_email(email, code, purpose):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send verification code"
-            )
+            logger.info(f"✓ Email verification code sent successfully to {email}")
     
     return code
 

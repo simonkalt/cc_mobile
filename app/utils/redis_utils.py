@@ -141,7 +141,7 @@ def store_registration_data(
     
     Args:
         email: User's email address
-        code: Verification code
+        code: Verification code (will be normalized to 6 digits, no leading zeros)
         registration_data: Registration data dictionary (password should already be hashed)
         ttl_minutes: Time to live in minutes (default: 10)
         
@@ -159,7 +159,16 @@ def store_registration_data(
     
     try:
         client = get_redis_client()
-        key = f"registration:{email}:{code}"
+        
+        # Normalize code: ensure it's exactly 6 digits (remove leading zeros, pad if needed)
+        # This ensures consistency - codes from random.randint(100000, 999999) are already 6 digits
+        normalized_code = code.lstrip('0') or '0'
+        if len(normalized_code) < 6:
+            normalized_code = normalized_code.zfill(6)
+        elif len(normalized_code) > 6:
+            normalized_code = normalized_code[-6:]  # Take last 6 digits if longer
+        
+        key = f"registration:{email}:{normalized_code}"
         
         # Store as JSON string
         client.setex(
@@ -168,7 +177,7 @@ def store_registration_data(
             json.dumps(registration_data)
         )
         
-        _redis_log_info(f"✓ Stored registration data in Redis for {email} (expires in {ttl_minutes} minutes)")
+        _redis_log_info(f"✓ Stored registration data in Redis for {email} with code '{code}' -> normalized '{normalized_code}' - key: {key} (expires in {ttl_minutes} minutes)")
         return True
         
     except (ImportError, ConnectionError):
@@ -185,21 +194,71 @@ def get_registration_data(email: str, code: str) -> Optional[Dict[str, Any]]:
     
     Args:
         email: User's email address
-        code: Verification code
+        code: Verification code (will be normalized - leading zeros removed)
         
     Returns:
         Registration data dictionary if found, None otherwise
     """
     try:
         client = get_redis_client()
-        key = f"registration:{email}:{code}"
         
-        data_json = client.get(key)
+        # Normalize code: remove leading zeros and ensure it's 6 digits
+        # This handles cases where frontend sends "019283" instead of "192830"
+        normalized_code = code.lstrip('0') or '0'  # Remove leading zeros, but keep at least one digit
+        # Pad to 6 digits if needed (though random codes should already be 6 digits)
+        if len(normalized_code) < 6:
+            normalized_code = normalized_code.zfill(6)
+        
+        # Try both the original code and normalized code
+        keys_to_try = [
+            f"registration:{email}:{code}",  # Original code as received
+            f"registration:{email}:{normalized_code}",  # Normalized code
+        ]
+        
+        _redis_log_info(f"Looking up registration data for {email} - original code: '{code}' (length: {len(code)}), normalized: '{normalized_code}'")
+        
+        data_json = None
+        used_key = None
+        
+        for key in keys_to_try:
+            _redis_log_info(f"  Trying key: {key}")
+            data_json = client.get(key)
+            if data_json:
+                used_key = key
+                break
+        
         if not data_json:
-            _redis_log_warning(f"⚠ Registration data not found in Redis for {email}")
+            _redis_log_warning(f"⚠ Registration data not found in Redis for {email} with code '{code}' (normalized: '{normalized_code}')")
+            # Try to list all keys for this email to help debug (using SCAN instead of KEYS for permissions)
+            try:
+                pattern = f"registration:{email}:*"
+                matching_keys = []
+                cursor = 0
+                # Use SCAN instead of KEYS to avoid permission issues
+                while True:
+                    cursor, keys = client.scan(cursor, match=pattern, count=100)
+                    matching_keys.extend(keys)
+                    if cursor == 0:
+                        break
+                
+                if matching_keys:
+                    _redis_log_info(f"Found {len(matching_keys)} registration keys for {email}:")
+                    # Show what codes are stored
+                    for stored_key in matching_keys:
+                        parts = stored_key.split(":")
+                        if len(parts) >= 3:
+                            stored_code = parts[2]
+                            _redis_log_info(f"  - Stored code: '{stored_code}' (length: {len(stored_code)})")
+                else:
+                    _redis_log_warning(f"No registration keys found for {email}")
+            except Exception as e:
+                _redis_log_warning(f"Could not scan keys for debugging: {e}")
             return None
         
-        _redis_log_info(f"✓ Retrieved registration data from Redis for {email}")
+        _redis_log_info(f"✓ Retrieved registration data from Redis for {email} using key: {used_key}")
+        return json.loads(data_json)
+        
+        _redis_log_info(f"✓ Retrieved registration data from Redis for {email} with code {code}")
         return json.loads(data_json)
         
     except json.JSONDecodeError as e:
