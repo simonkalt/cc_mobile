@@ -69,10 +69,22 @@ else
 fi
 
 # Install/upgrade cffi first (required for cryptography)
-# Force reinstall to rebuild the C extension
+# Only reinstall if the backend is missing
 echo ""
-echo "Ensuring cffi is installed (required for cryptography)..."
-$PIP_CMD install --upgrade --force-reinstall --no-cache-dir cffi
+echo "Checking cffi installation (required for cryptography)..."
+if ! $PYTHON_CMD -c "import _cffi_backend" 2>/dev/null; then
+    echo "⚠️  _cffi_backend not found, installing/rebuilding cffi..."
+    $PIP_CMD install --upgrade --force-reinstall --no-cache-dir cffi
+    # Verify it works after installation
+    if ! $PYTHON_CMD -c "import _cffi_backend" 2>/dev/null; then
+        echo "❌ Failed to install cffi backend. You may need system dependencies:"
+        echo "   sudo apt-get install python3-dev libffi-dev build-essential"
+    else
+        echo "✓ cffi backend installed successfully"
+    fi
+else
+    echo "✓ cffi backend is available"
+fi
 
 # Optionally install all requirements if requirements.txt exists
 if [ -f "requirements.txt" ]; then

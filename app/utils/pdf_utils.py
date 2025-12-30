@@ -19,8 +19,10 @@ except ImportError:
     logger.warning("PyPDF2 not available. PDF reading will not work.")
 
 # Try to import PyMuPDF (fitz) for high-quality PDF to HTML conversion with layout preservation
+_fitz_module = None
 try:
     import fitz  # PyMuPDF
+    _fitz_module = fitz
     PYMUPDF_AVAILABLE = True
     logger.info("PyMuPDF (fitz) is available for PDF to HTML conversion")
 except ImportError as e:
@@ -86,6 +88,94 @@ def read_pdf_file(file_path: str) -> str:
         return f"[Error reading PDF file: {str(e)}]"
 
 
+def _fix_bullet_formatting(html_content: str) -> str:
+    """
+    Post-process HTML to convert bullet characters into proper HTML list elements.
+    Handles various bullet characters (•, -, *, etc.) and converts them to <ul>/<li> structure.
+    
+    Args:
+        html_content: HTML string that may contain bullet characters as text
+        
+    Returns:
+        HTML string with bullets converted to proper list elements
+    """
+    try:
+        from bs4 import BeautifulSoup
+        
+        # Parse HTML
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Find all elements that might contain bullet text
+        for element in soup.find_all(['p', 'div', 'span', 'td']):
+            if not element.string and not element.get_text():
+                continue
+            
+            # Get the raw HTML content to preserve structure
+            element_html = str(element)
+            text_content = element.get_text(separator=' ', strip=False)
+            
+            if not text_content or not text_content.strip():
+                continue
+            
+            # Look for inline bullet patterns: "● Label: description. ● Next: description."
+            # Pattern matches: bullet + label (ends with colon) + description (until next bullet or end)
+            bullet_pattern = r'([●•\-\*·▪▫◦‣⁃○])\s*([A-Z][^:●•\-\*·▪▫◦‣⁃○]*?):\s*([^●•\-\*·▪▫◦‣⁃○]*?)(?=\s*[●•\-\*·▪▫◦‣⁃○]|$)'
+            
+            # Find all bullet items in the text
+            matches = list(re.finditer(bullet_pattern, text_content))
+            
+            if len(matches) >= 2:  # Need at least 2 bullets to make a list
+                bullet_items = []
+                for match in matches:
+                    label = match.group(2).strip()
+                    description = match.group(3).strip().rstrip('.').strip()
+                    # Combine label and description for the list item
+                    if description:
+                        item_text = f"{label}: {description}"
+                    else:
+                        item_text = label
+                    if item_text:
+                        bullet_items.append(item_text)
+                
+                if bullet_items:
+                    # Get text before first bullet
+                    first_match_start = matches[0].start()
+                    text_before = text_content[:first_match_start].strip()
+                    
+                    # Get text after last bullet
+                    last_match_end = matches[-1].end()
+                    text_after = text_content[last_match_end:].strip()
+                    
+                    # Create a <ul> element for the bullets
+                    ul = soup.new_tag('ul')
+                    ul['style'] = 'margin: 1em 0; padding-left: 2em;'
+                    for item_text in bullet_items:
+                        li = soup.new_tag('li')
+                        li.string = item_text
+                        li['style'] = 'margin: 0.5em 0;'
+                        ul.append(li)
+                    
+                    # Replace the element content
+                    element.clear()
+                    if text_before:
+                        before_p = soup.new_tag('p')
+                        before_p.string = text_before
+                        element.append(before_p)
+                    element.append(ul)
+                    if text_after:
+                        after_p = soup.new_tag('p')
+                        after_p.string = text_after
+                        element.append(after_p)
+        
+        return str(soup)
+    except ImportError:
+        logger.warning("BeautifulSoup not available. Skipping bullet formatting fix.")
+        return html_content
+    except Exception as e:
+        logger.warning(f"Error fixing bullet formatting: {e}. Returning original HTML.")
+        return html_content
+
+
 def convert_pdf_to_html(pdf_bytes: bytes) -> str:
     """
     Convert PDF bytes to HTML format preserving original layout and structure.
@@ -100,72 +190,51 @@ def convert_pdf_to_html(pdf_bytes: bytes) -> str:
     Raises:
         ImportError: If PyMuPDF is not available
     """
-    # Try to import fitz if not already available (in case it was installed after module load)
-    if not PYMUPDF_AVAILABLE:
+    # Use the module-level fitz or try to import it
+    global _fitz_module
+    
+    # If PYMUPDF_AVAILABLE is True, _fitz_module should already be set at module level
+    if not PYMUPDF_AVAILABLE or _fitz_module is None:
         try:
-            import fitz
-            # Update the global flag
-            globals()['PYMUPDF_AVAILABLE'] = True
-            globals()['fitz'] = fitz
-            logger.info("PyMuPDF (fitz) imported successfully on demand")
+            # Use importlib to avoid scoping issues with 'fitz' variable name
+            import importlib
+            fitz_module = importlib.import_module('fitz')
+            _fitz_module = fitz_module
+            if not PYMUPDF_AVAILABLE:
+                globals()['PYMUPDF_AVAILABLE'] = True
+                logger.info("PyMuPDF (fitz) imported successfully on demand")
         except ImportError:
             raise ImportError("PyMuPDF (fitz) is not installed. Cannot convert PDF to HTML. Install with: pip install pymupdf")
     
-    # Use fitz from globals or import it
-    if 'fitz' not in globals():
-        import fitz
-    
     try:
-        # Open PDF from bytes
-        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+        # Open PDF from bytes using BytesIO
+        # PyMuPDF needs the stream to stay open, so we use BytesIO
+        pdf_file = BytesIO(pdf_bytes)
+        pdf_document = _fitz_module.open(stream=pdf_file, filetype="pdf")
         
         # Extract HTML using PyMuPDF's built-in HTML conversion
         # This preserves layout, fonts, and formatting automatically
         html_content = ""
+        page_count = len(pdf_document)  # Get page count before closing
         
-        for page_num in range(len(pdf_document)):
-            page = pdf_document[page_num]
-            # Use get_text("xhtml") which outputs HTML with layout preserved
-            page_html = page.get_text("xhtml")
-            html_content += page_html
-            
-            # Add page break between pages (except last page)
-            if page_num < len(pdf_document) - 1:
-                html_content += '<div style="page-break-after: always;"></div>'
+        try:
+            for page_num in range(page_count):
+                page = pdf_document[page_num]
+                # Use get_text("xhtml") which outputs HTML with layout preserved
+                page_html = page.get_text("xhtml")
+                # Ensure page_html is a string
+                if page_html:
+                    html_content += str(page_html)
+                
+                # Add page break between pages (except last page)
+                if page_num < page_count - 1:
+                    html_content += '<div style="page-break-after: always;"></div>'
+        finally:
+            # Always close the document
+            pdf_document.close()
         
-        pdf_document.close()
-        
-        # Wrap in a proper HTML document structure if needed
-        # PyMuPDF's xhtml output should already be valid HTML, but we'll ensure it has proper structure
-        if not html_content.strip().startswith('<!DOCTYPE'):
-            html_document = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Terms of Service</title>
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            color: #333;
-            background-color: #fff;
-        }}
-    </style>
-</head>
-<body>
-{html_content}
-</body>
-</html>"""
-        else:
-            # Already has DOCTYPE, just return as-is
-            html_document = html_content
-        
-        logger.info(f"Successfully converted PDF to HTML using PyMuPDF ({len(pdf_document)} pages)")
-        return html_document
+        logger.info(f"Successfully converted PDF to HTML using PyMuPDF ({page_count} pages)")
+        return html_content
         
     except Exception as e:
         logger.error(f"Error converting PDF to HTML with PyMuPDF: {str(e)}", exc_info=True)

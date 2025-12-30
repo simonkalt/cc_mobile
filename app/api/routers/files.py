@@ -25,10 +25,8 @@ from app.utils.s3_utils import (
     get_s3_client,
     ensure_user_s3_folder,
     ensure_cover_letter_subfolder,
-    download_pdf_from_s3,
     S3_AVAILABLE,
 )
-from app.utils.pdf_utils import convert_pdf_to_html
 from app.services.user_service import get_user_by_email
 from app.core.config import settings
 from app.db.mongodb import is_connected
@@ -513,9 +511,9 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
 @router.get("/terms-of-service")
 async def get_terms_of_service():
     """
-    Get the Terms of Service as HTML converted from PDF stored in S3.
+    Get the Terms of Service as markdown from S3.
     This is a public endpoint that requires no authentication.
-    Returns HTML content that can be displayed directly in the browser.
+    Returns markdown content that can be displayed or rendered by the client.
     """
     logger.info("Terms of Service endpoint called")
     
@@ -527,34 +525,46 @@ async def get_terms_of_service():
         )
 
     try:
-        # S3 path to the Terms of Service PDF
-        s3_path = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.pdf"
+        # S3 path to the Terms of Service markdown file
+        s3_path = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
         
-        logger.info(f"Attempting to download PDF from S3: {s3_path}")
+        logger.info(f"Attempting to download markdown file from S3: {s3_path}")
         
-        # Download PDF from S3
-        pdf_bytes = download_pdf_from_s3(s3_path)
+        # Parse S3 path
+        if s3_path.startswith("s3://"):
+            s3_path = s3_path[5:]  # Remove 's3://' prefix
         
-        if not pdf_bytes:
-            logger.error("Downloaded PDF is empty")
+        # Split bucket and key
+        parts = s3_path.split("/", 1)
+        if len(parts) != 2:
             raise HTTPException(
-                status_code=404,
-                detail="Terms of Service PDF not found in S3"
+                status_code=500,
+                detail=f"Invalid S3 path format: {s3_path}"
             )
         
-        logger.info(f"Successfully retrieved Terms of Service PDF ({len(pdf_bytes)} bytes)")
+        bucket_name = parts[0]
+        object_key = parts[1]
         
-        # Convert PDF to HTML
-        html_content = convert_pdf_to_html(pdf_bytes)
+        # Download markdown file from S3
+        s3_client = get_s3_client()
+        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        markdown_content = response["Body"].read().decode('utf-8')
         
-        logger.info(f"Successfully converted Terms of Service PDF to HTML ({len(html_content)} characters)")
+        if not markdown_content:
+            logger.error("Downloaded markdown file is empty")
+            raise HTTPException(
+                status_code=404,
+                detail="Terms of Service markdown file not found in S3"
+            )
         
-        # Return HTML with proper headers
+        logger.info(f"Successfully retrieved Terms of Service markdown ({len(markdown_content)} characters)")
+        
+        # Return markdown with proper headers
         return Response(
-            content=html_content,
-            media_type="text/html; charset=utf-8",
+            content=markdown_content.encode('utf-8'),
+            media_type="text/markdown; charset=utf-8",
             headers={
-                "Content-Disposition": 'inline; filename="Terms of Service.html"'
+                "Content-Disposition": 'inline; filename="Terms of Service.md"'
             }
         )
         
@@ -567,7 +577,7 @@ async def get_terms_of_service():
         if error_code == "NoSuchKey" or error_code == "404":
             raise HTTPException(
                 status_code=404,
-                detail="Terms of Service PDF not found in S3"
+                detail="Terms of Service markdown file not found in S3"
             )
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
@@ -575,6 +585,6 @@ async def get_terms_of_service():
         logger.error(error_msg, exc_info=True)
         # Check if it's a "not found" type error
         if "NoSuchKey" in str(e) or "404" in str(e) or "not found" in str(e).lower():
-            raise HTTPException(status_code=404, detail="Terms of Service PDF not found in S3")
+            raise HTTPException(status_code=404, detail="Terms of Service markdown file not found in S3")
         raise HTTPException(status_code=500, detail=error_msg)
 

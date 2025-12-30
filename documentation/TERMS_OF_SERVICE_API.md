@@ -1,6 +1,6 @@
 # Terms of Service API Documentation
 
-API endpoint for retrieving the Terms of Service as HTML converted from a PDF document stored in S3. This is a public endpoint that requires no authentication.
+API endpoint for retrieving the Terms of Service as markdown from a file stored in S3. This is a public endpoint that requires no authentication.
 
 ## Base URL
 
@@ -11,11 +11,11 @@ https://your-domain.com  (production)
 
 ## Endpoint
 
-### Get Terms of Service HTML
+### Get Terms of Service Markdown
 
 **GET** `/api/files/terms-of-service`
 
-Retrieves the Terms of Service as HTML content, converted from a PDF document stored in S3. This endpoint is public and requires no authentication or credentials. The HTML can be displayed directly in the browser or embedded in your application.
+Retrieves the Terms of Service as markdown content from a file stored in S3. This endpoint is public and requires no authentication or credentials. The markdown can be displayed directly or rendered using a markdown renderer in your application.
 
 **Request:**
 
@@ -26,51 +26,37 @@ Retrieves the Terms of Service as HTML content, converted from a PDF document st
 
 **Response (200 OK):**
 
-The response is an HTML document with the following headers:
+The response is a markdown document with the following headers:
 
-- `Content-Type: text/html; charset=utf-8`
-- `Content-Disposition: inline; filename="Terms of Service.html"`
+- `Content-Type: text/markdown; charset=utf-8`
+- `Content-Disposition: inline; filename="Terms of Service.md"`
 
 **Response Body:**
 
-The response body contains a complete HTML document with the Terms of Service content. The HTML includes:
-- Proper document structure (`<!DOCTYPE html>`, `<html>`, `<head>`, `<body>`)
-- Embedded CSS styling for readability
-- Responsive design with max-width constraints
-- Formatted text content extracted from the PDF
+The response body contains the raw markdown content of the Terms of Service document. The markdown can be:
+- Displayed as plain text
+- Rendered to HTML using a markdown parser (e.g., `marked`, `markdown-it`, `react-markdown`)
+- Processed and formatted according to your application's needs
 
-**Example Response Structure:**
+**Example Response:**
 
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Terms of Service</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            color: #333;
-        }
-        /* ... additional styles ... */
-    </style>
-</head>
-<body>
-    <!-- Terms of Service content here -->
-</body>
-</html>
+```markdown
+# Terms of Service
+
+## 1. Introduction
+
+Welcome to sAImon Software...
+
+## 2. Acceptance of Terms
+
+By accessing and using this Service...
 ```
 
 **Error Responses:**
 
-- `503 Service Unavailable`: S3 service is not available (boto3 not installed) or PDF conversion libraries are missing
-- `404 Not Found`: Terms of Service PDF not found in S3
-- `500 Internal Server Error`: Failed to retrieve or convert the PDF from S3
+- `503 Service Unavailable`: S3 service is not available (boto3 not installed)
+- `404 Not Found`: Terms of Service markdown file not found in S3
+- `500 Internal Server Error`: Failed to retrieve the markdown file from S3
 
 **Error Response Format:**
 
@@ -82,11 +68,105 @@ The response body contains a complete HTML document with the Terms of Service co
 
 ## React/JavaScript Implementation Examples
 
-### Using Fetch API - Display HTML Directly
+### Using Fetch API - Display Markdown
 
-#### Basic Example - Display in Component
+#### Basic Example - Display as Text
 
 ```javascript
+const TermsOfServiceViewer = () => {
+  const [markdownContent, setMarkdownContent] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchTermsOfService = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch("http://localhost:8000/api/files/terms-of-service");
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to fetch Terms of Service");
+      }
+      
+      const markdown = await response.text();
+      setMarkdownContent(markdown);
+    } catch (err) {
+      setError(err.message);
+      console.error("Error fetching Terms of Service:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTermsOfService();
+  }, []);
+
+  if (loading) return <div>Loading Terms of Service...</div>;
+  if (error) return <div>Error: {error}</div>;
+
+  return (
+    <pre style={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
+      {markdownContent}
+    </pre>
+  );
+};
+```
+
+#### Render Markdown to HTML using react-markdown
+
+```javascript
+import ReactMarkdown from 'react-markdown';
+
+const TermsOfServiceViewer = () => {
+  const [markdownContent, setMarkdownContent] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchTermsOfService = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch("http://localhost:8000/api/files/terms-of-service");
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to fetch Terms of Service");
+      }
+      
+      const markdown = await response.text();
+      setMarkdownContent(markdown);
+    } catch (err) {
+      setError(err.message);
+      console.error("Error fetching Terms of Service:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTermsOfService();
+  }, []);
+
+  if (loading) return <div>Loading Terms of Service...</div>;
+  if (error) return <div>Error: {error}</div>;
+
+  return (
+    <div style={{ maxWidth: "800px", margin: "0 auto", padding: "20px" }}>
+      <ReactMarkdown>{markdownContent}</ReactMarkdown>
+    </div>
+  );
+};
+```
+
+#### Render Markdown using marked library
+
+```javascript
+import { marked } from 'marked';
+
 const TermsOfServiceViewer = () => {
   const [htmlContent, setHtmlContent] = useState("");
   const [loading, setLoading] = useState(false);
@@ -104,7 +184,9 @@ const TermsOfServiceViewer = () => {
         throw new Error(errorData.detail || "Failed to fetch Terms of Service");
       }
       
-      const html = await response.text();
+      const markdown = await response.text();
+      // Convert markdown to HTML
+      const html = marked(markdown);
       setHtmlContent(html);
     } catch (err) {
       setError(err.message);
@@ -124,94 +206,9 @@ const TermsOfServiceViewer = () => {
   return (
     <div 
       dangerouslySetInnerHTML={{ __html: htmlContent }}
-      style={{ maxWidth: "100%", overflow: "auto" }}
+      style={{ maxWidth: "800px", margin: "0 auto", padding: "20px" }}
     />
   );
-};
-```
-
-#### Display HTML in iframe
-
-```javascript
-const TermsOfServiceViewer = () => {
-  const [htmlUrl, setHtmlUrl] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const loadTermsOfService = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const response = await fetch("http://localhost:8000/api/files/terms-of-service");
-      
-      if (!response.ok) {
-        throw new Error("Failed to load Terms of Service");
-      }
-      
-      const html = await response.text();
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      setHtmlUrl(url);
-    } catch (err) {
-      setError(err.message);
-      console.error("Error loading Terms of Service:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadTermsOfService();
-    
-    // Cleanup: revoke URL when component unmounts
-    return () => {
-      if (htmlUrl) {
-        URL.revokeObjectURL(htmlUrl);
-      }
-    };
-  }, []);
-
-  if (loading) return <div>Loading Terms of Service...</div>;
-  if (error) return <div>Error: {error}</div>;
-  if (!htmlUrl) return null;
-
-  return (
-    <iframe
-      src={htmlUrl}
-      width="100%"
-      height="600px"
-      title="Terms of Service"
-      style={{ border: "none" }}
-    />
-  );
-};
-```
-
-#### Open HTML in New Window
-
-```javascript
-const viewTermsOfService = async () => {
-  try {
-    const response = await fetch("http://localhost:8000/api/files/terms-of-service");
-    
-    if (!response.ok) {
-      throw new Error("Failed to load Terms of Service");
-    }
-    
-    const html = await response.text();
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    
-    // Open in new window
-    window.open(url, "_blank");
-    
-    // Clean up URL after a delay
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (error) {
-    console.error("Error viewing Terms of Service:", error);
-    alert("Failed to load Terms of Service. Please try again.");
-  }
 };
 ```
 
@@ -227,11 +224,11 @@ const fetchTermsOfService = async () => {
     const response = await axios.get(
       `${API_BASE_URL}/api/files/terms-of-service`,
       {
-        responseType: "text", // Important: specify text response type for HTML
+        responseType: "text", // Important: specify text response type for markdown
       }
     );
 
-    // response.data contains the HTML string
+    // response.data contains the markdown string
     return response.data;
   } catch (error) {
     console.error("Error fetching Terms of Service:", error);
@@ -244,13 +241,11 @@ const fetchTermsOfService = async () => {
   }
 };
 
-// Usage: Display HTML
+// Usage: Display markdown
 const displayTerms = async () => {
-  const html = await fetchTermsOfService();
-  // Use dangerouslySetInnerHTML or create a blob URL
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  window.open(url, "_blank");
+  const markdown = await fetchTermsOfService();
+  // Render markdown using your preferred library
+  console.log(markdown);
 };
 ```
 
@@ -258,10 +253,12 @@ const displayTerms = async () => {
 
 ```javascript
 import { useState, useCallback } from "react";
+import ReactMarkdown from 'react-markdown';
 
 const useTermsOfService = (baseUrl = "http://localhost:8000") => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [markdown, setMarkdown] = useState("");
 
   const fetchTermsOfService = useCallback(async () => {
     setLoading(true);
@@ -275,8 +272,9 @@ const useTermsOfService = (baseUrl = "http://localhost:8000") => {
         throw new Error(errorData.detail || "Failed to fetch Terms of Service");
       }
       
-      const html = await response.text();
-      return html;
+      const markdownContent = await response.text();
+      setMarkdown(markdownContent);
+      return markdownContent;
     } catch (err) {
       const errorMessage = err.message || "Unknown error occurred";
       setError(errorMessage);
@@ -286,34 +284,9 @@ const useTermsOfService = (baseUrl = "http://localhost:8000") => {
     }
   }, [baseUrl]);
 
-  const viewTermsOfService = useCallback(async () => {
-    try {
-      const html = await fetchTermsOfService();
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      
-      // Clean up after a delay (optional)
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (err) {
-      console.error("Error viewing Terms of Service:", err);
-    }
-  }, [fetchTermsOfService]);
-
-  const getTermsOfServiceHTML = useCallback(async () => {
-    try {
-      const html = await fetchTermsOfService();
-      return html;
-    } catch (err) {
-      console.error("Error fetching Terms of Service:", err);
-      return null;
-    }
-  }, [fetchTermsOfService]);
-
   return {
     fetchTermsOfService,
-    viewTermsOfService,
-    getTermsOfServiceHTML,
+    markdown,
     loading,
     error,
   };
@@ -322,35 +295,24 @@ const useTermsOfService = (baseUrl = "http://localhost:8000") => {
 // Usage in component
 const MyComponent = () => {
   const { 
-    viewTermsOfService, 
-    getTermsOfServiceHTML, 
+    fetchTermsOfService, 
+    markdown, 
     loading, 
     error 
   } = useTermsOfService();
-  
-  const [htmlContent, setHtmlContent] = useState("");
 
-  const handleDisplayInline = async () => {
-    const html = await getTermsOfServiceHTML();
-    if (html) {
-      setHtmlContent(html);
-    }
-  };
+  useEffect(() => {
+    fetchTermsOfService();
+  }, [fetchTermsOfService]);
 
   return (
     <div>
-      <button onClick={viewTermsOfService} disabled={loading}>
-        {loading ? "Loading..." : "View Terms of Service"}
-      </button>
-      <button onClick={handleDisplayInline} disabled={loading}>
-        Display Inline
-      </button>
+      {loading && <div>Loading Terms of Service...</div>}
       {error && <div style={{ color: "red" }}>Error: {error}</div>}
-      {htmlContent && (
-        <div 
-          dangerouslySetInnerHTML={{ __html: htmlContent }}
-          style={{ marginTop: "20px", border: "1px solid #ccc", padding: "20px" }}
-        />
+      {markdown && (
+        <div style={{ maxWidth: "800px", margin: "0 auto", padding: "20px" }}>
+          <ReactMarkdown>{markdown}</ReactMarkdown>
+        </div>
       )}
     </div>
   );
@@ -361,10 +323,11 @@ const MyComponent = () => {
 
 ```javascript
 import React, { useState } from "react";
+import ReactMarkdown from 'react-markdown';
 
 const TermsOfServiceModal = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [htmlContent, setHtmlContent] = useState("");
+  const [markdownContent, setMarkdownContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -379,8 +342,8 @@ const TermsOfServiceModal = () => {
         throw new Error("Failed to load Terms of Service");
       }
       
-      const html = await response.text();
-      setHtmlContent(html);
+      const markdown = await response.text();
+      setMarkdownContent(markdown);
       setIsOpen(true);
     } catch (err) {
       setError(err.message);
@@ -436,7 +399,7 @@ const TermsOfServiceModal = () => {
             {error ? (
               <div style={{ color: "red" }}>Error: {error}</div>
             ) : (
-              <div dangerouslySetInnerHTML={{ __html: htmlContent }} />
+              <ReactMarkdown>{markdownContent}</ReactMarkdown>
             )}
           </div>
         </div>
@@ -448,37 +411,71 @@ const TermsOfServiceModal = () => {
 export default TermsOfServiceModal;
 ```
 
+## Markdown Rendering Libraries
+
+### Popular Options:
+
+1. **react-markdown** (React)
+   ```bash
+   npm install react-markdown
+   ```
+   ```javascript
+   import ReactMarkdown from 'react-markdown';
+   <ReactMarkdown>{markdown}</ReactMarkdown>
+   ```
+
+2. **marked** (Vanilla JS / React)
+   ```bash
+   npm install marked
+   ```
+   ```javascript
+   import { marked } from 'marked';
+   const html = marked(markdown);
+   ```
+
+3. **markdown-it** (Vanilla JS)
+   ```bash
+   npm install markdown-it
+   ```
+   ```javascript
+   import MarkdownIt from 'markdown-it';
+   const md = new MarkdownIt();
+   const html = md.render(markdown);
+   ```
+
+4. **remark** (Unified ecosystem)
+   ```bash
+   npm install remark remark-react
+   ```
+   ```javascript
+   import { remark } from 'remark';
+   import remarkReact from 'remark-react';
+   const result = await remark().use(remarkReact).process(markdown);
+   ```
+
 ## Important Notes
 
 1. **No Authentication Required**: This endpoint is public and does not require any authentication credentials or tokens.
 
-2. **Response Type**: The endpoint returns HTML content (text/html), not JSON or binary PDF data. Make sure to handle it as text.
+2. **Response Type**: The endpoint returns markdown content (text/markdown), not HTML or JSON. Make sure to handle it as text.
 
-3. **HTML Content**: The returned HTML is a complete, self-contained document with embedded CSS styling. It can be:
-   - Displayed directly using `dangerouslySetInnerHTML` (React)
-   - Loaded in an iframe
-   - Opened in a new window/tab
-   - Embedded in your application's layout
+3. **Markdown Content**: The returned markdown is plain text that can be:
+   - Displayed as-is (plain text)
+   - Rendered to HTML using a markdown parser
+   - Processed and formatted according to your application's needs
 
 4. **CORS**: Make sure your frontend URL is included in the `CORS_ORIGINS` environment variable on the backend, or it's in the default allowed origins (localhost:3000, localhost:3001, etc.).
 
 5. **Base URL**: For production, replace `http://localhost:8000` with your actual backend URL (e.g., `https://your-app.onrender.com`).
 
-6. **Memory Management**: When creating blob URLs with `URL.createObjectURL()`, remember to revoke them with `URL.revokeObjectURL()` to prevent memory leaks, especially in long-running applications.
-
-7. **Error Handling**: Always handle errors appropriately and provide user feedback. The endpoint may fail if:
+6. **Error Handling**: Always handle errors appropriately and provide user feedback. The endpoint may fail if:
    - S3 service is unavailable
-   - The PDF file doesn't exist in S3
-   - PDF conversion libraries are not installed
+   - The markdown file doesn't exist in S3
    - Network connectivity issues occur
 
-8. **PDF Conversion**: The endpoint automatically converts the PDF to HTML using:
-   - PyMuPDF (fitz) if available - provides better formatting preservation
-   - PyPDF2 as fallback - extracts text with basic HTML formatting
+7. **File Location**: The source markdown file is stored at `s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md` in S3.
 
-9. **File Location**: The source PDF is stored at `s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.pdf` in S3.
-
-10. **Security Note**: When using `dangerouslySetInnerHTML` in React, ensure the HTML content is trusted. Since this content comes from your own backend, it should be safe, but be aware of XSS risks if the content is modified.
+8. **Security Note**: When rendering markdown to HTML, ensure you're using a trusted markdown parser that sanitizes HTML output to prevent XSS attacks. Libraries like `react-markdown` handle this automatically.
 
 ## Related Endpoints
 
