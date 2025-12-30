@@ -72,17 +72,43 @@ def connect_to_mongodb() -> bool:
 
 
 def close_mongodb_connection() -> None:
-    """Close MongoDB connection"""
+    """Close MongoDB connection with timeout to prevent hanging"""
     global mongodb_client, mongodb_db
     
     if mongodb_client is not None:
         try:
-            mongodb_client.close()
+            import threading
+            
+            close_complete = threading.Event()
+            close_error = None
+            
+            def close_with_timeout():
+                nonlocal close_error
+                try:
+                    mongodb_client.close()
+                except Exception as e:
+                    close_error = e
+                finally:
+                    close_complete.set()
+            
+            # Run close in a daemon thread
+            close_thread = threading.Thread(target=close_with_timeout, daemon=True)
+            close_thread.start()
+            
+            # Wait up to 2 seconds for close to complete
+            if not close_complete.wait(timeout=2.0):
+                logger.warning("MongoDB close timed out after 2 seconds, forcing shutdown")
+            elif close_error:
+                logger.error(f"Error closing MongoDB connection: {close_error}")
+            else:
+                logger.debug("MongoDB connection closed successfully")
         except Exception as e:
-            logger.error(f"Error closing MongoDB connection: {e}")
+            logger.error(f"Error during MongoDB connection cleanup: {e}")
         finally:
+            # Always clear references, even if close timed out
             mongodb_client = None
             mongodb_db = None
+            logger.info("MongoDB connection cleanup completed")
 
 
 def get_database():

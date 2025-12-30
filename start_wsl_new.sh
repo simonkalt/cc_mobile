@@ -96,4 +96,5 @@ fi
 # Start the server
 echo ""
 echo "Starting FastAPI server..."
-$PYTHON_CMD -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+echo "Note: Use Ctrl+C to stop. If it hangs, press Ctrl+C again to force quit."
+$PYTHON_CMD -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 --timeout-keep-alive 5

@@ -207,8 +207,13 @@ async def lifespan(app: FastAPI):
 
     yield
     # Shutdown
+    logger.info("Starting application shutdown...")
     if MONGODB_AVAILABLE:
-        close_mongodb_connection()
+        try:
+            close_mongodb_connection()
+        except Exception as e:
+            logger.error(f"Error during MongoDB shutdown: {e}")
+    logger.info("Application shutdown completed")
 
 
 # Create the FastAPI app instance
