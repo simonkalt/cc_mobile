@@ -9,6 +9,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
+env.zip
+stripe_backup_codetxt
 
 # Distribution / packaging
 build/
