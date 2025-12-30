@@ -68,6 +68,12 @@ else
     echo "✓ pymupdf is available"
 fi
 
+# Install/upgrade cffi first (required for cryptography)
+# Force reinstall to rebuild the C extension
+echo ""
+echo "Ensuring cffi is installed (required for cryptography)..."
+$PIP_CMD install --upgrade --force-reinstall --no-cache-dir cffi
+
 # Optionally install all requirements if requirements.txt exists
 if [ -f "requirements.txt" ]; then
     echo ""
