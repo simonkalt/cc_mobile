@@ -7,9 +7,18 @@ import datetime
 import base64
 import logging
 import re
+import sys
 from typing import Optional
 
 from fastapi import HTTPException, status
+
+# Try to import colorama for better color support in WSL/Windows
+try:
+    import colorama
+    colorama.init(autoreset=True)
+    COLORAMA_AVAILABLE = True
+except ImportError:
+    COLORAMA_AVAILABLE = False
 
 from app.core.config import settings
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
@@ -487,6 +496,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info(
                     "Additional instructions appended to Gemini prompt as final override"
                 )
+            # Log prompt in purple for debugging (using print for better WSL support)
+            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{msg}")
             if not GOOGLE_AVAILABLE or not settings.GEMINI_API_KEY:
                 raise ValueError("Google Generative AI not available or API key not set")
             genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -529,6 +542,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info(
                     "Additional instructions appended to ChatGPT messages as final override"
                 )
+            # Log prompt in purple for debugging (using print for better WSL support)
+            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
             # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
             if gpt_model == "gpt-5.2":
                 response = client.chat.completions.create(
@@ -572,6 +589,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info(
                     "Additional instructions appended to Grok messages as final override"
                 )
+            # Log prompt in purple for debugging (using print for better WSL support)
+            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{json.dumps(messages_list, indent=2)}")
             data = {"model": xai_model, "messages": messages_list}
             response = requests.post(
                 "https://api.x.ai/v1/chat/completions",
@@ -586,6 +607,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         elif llm == "OCI" or llm == "oci-generative-ai":
             # Include personality instruction prominently at the start
             full_prompt = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            # Log prompt in purple for debugging (using print for better WSL support)
+            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{full_prompt}")
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
 
@@ -615,6 +640,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info(
                     "Additional instructions appended to Llama messages as final override"
                 )
+            # Log prompt in purple for debugging (using print for better WSL support)
+            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response["message"]["content"]
 
@@ -644,6 +673,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                     "Additional instructions appended to Claude messages as final override"
                 )
             messages = [{"role": "user", "content": content_list}]
+            # Log prompt in purple for debugging (using print for better WSL support)
+            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\nSystem: {system_message}\nMessages: {json.dumps(messages, indent=2)}")
             response = client.messages.create(
                 model=claude_model,
                 system=system_message,

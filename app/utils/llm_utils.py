@@ -4,10 +4,19 @@ LLM communication utilities
 import logging
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
 from app.core.config import settings
+
+# Try to import colorama for better color support in WSL/Windows
+try:
+    import colorama
+    colorama.init(autoreset=True)
+    COLORAMA_AVAILABLE = True
+except ImportError:
+    COLORAMA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -105,23 +114,25 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             return None
             
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt},
+        ]
+        # Log prompt in purple for debugging (using print for better WSL support)
+        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
         # Use high max_completion_tokens for GPT-5.2
         if model == "gpt-5.2":
             response = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
                 max_completion_tokens=128000,  # GPT-5.2 uses max_completion_tokens
             )
         else:
             response = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt},
-                ],
+                messages=messages,
                 max_tokens=16000,  # Older GPT models use max_tokens
             )
         return_response = response.choices[0].message.content
@@ -132,10 +143,15 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             return None
             
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        messages = [{"role": "user", "content": prompt}]
+        # Log prompt in purple for debugging (using print for better WSL support)
+        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\nSystem: You are a helpful assistant.\nMessages: {json.dumps(messages, indent=2)}")
         response = client.messages.create(
             model=model,
             system="You are a helpful assistant.",
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             max_tokens=20000,
             temperature=1,
         )
@@ -149,6 +165,10 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             return None
             
         genai.configure(api_key=settings.GOOGLE_API_KEY)
+        # Log prompt in purple for debugging (using print for better WSL support)
+        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{prompt}")
         client = genai.GenerativeModel(model)
         response = client.generate_content(contents=prompt)
         return_response = response.text
@@ -162,13 +182,18 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             "Authorization": f"Bearer {settings.XAI_API_KEY}",
             "Content-Type": "application/json",
         }
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt},
+        ]
         data = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
         }
+        # Log prompt in purple for debugging (using print for better WSL support)
+        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
         response = requests.post(
             "https://api.x.ai/v1/chat/completions",
             json=data,
@@ -180,6 +205,10 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
         return_response = result["choices"][0]["message"]["content"]
         
     elif model == "oci-generative-ai":
+        # Log prompt in purple for debugging (using print for better WSL support)
+        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{prompt}")
         # OCI integration - requires OCI config file
         return get_oc_info(prompt)
 
@@ -277,6 +306,10 @@ def get_oc_info(prompt: str) -> str:
         message.role = "USER"
         message.content = [oci_content]
 
+        # Log prompt in purple for debugging (using print for better WSL support)
+        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
+        print(f"{purple_start}=== PROMPT TO LLM (OCI) ==={purple_end}\n{prompt}")
         # Create chat request
         chat_request = oci.generative_ai_inference.models.GenericChatRequest()
         chat_request.api_format = (
