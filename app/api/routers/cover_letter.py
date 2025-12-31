@@ -72,7 +72,7 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
     )
 
     # Pass resume_text directly as resume to get_job_info
-    # Since it's explicitly marked as text, get_job_info will treat it as plain text
+    # Set is_plain_text=True to skip file processing (S3, local files, base64)
     result = get_job_info(
         llm=request.llm,
         date_input=request.date_input,
@@ -87,6 +87,7 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
         phone_number=request.phone_number,
         user_id=request.user_id,
         user_email=request.user_email,
+        is_plain_text=True,  # Skip file processing for pasted text
     )
     return result
 

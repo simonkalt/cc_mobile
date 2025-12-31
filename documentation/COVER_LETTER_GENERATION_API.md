@@ -87,6 +87,16 @@ Generate a cover letter based on job information. This endpoint accepts resume c
 
 Generate a cover letter using explicitly pasted resume text. This endpoint is designed for cases where the user pastes resume content directly into a text field instead of uploading a file.
 
+**Important:** This endpoint accepts **all the same parameters** as `/api/job-info`, including:
+- Personality profiles (via `user_id` or `user_email`)
+- Custom tone settings
+- Additional instructions
+- Company name, hiring manager, ad source
+- Address and phone number
+- Job description
+
+The only difference is that this endpoint uses `resume_text` (plain text) instead of `resume` (which can be text, S3 key, or base64 PDF).
+
 **Use this endpoint when:**
 - User pastes resume text directly into a text field
 - You want to explicitly indicate that the resume is plain text (not a file path or S3 key)
@@ -114,19 +124,21 @@ Generate a cover letter using explicitly pasted resume text. This endpoint is de
 
 **Request Fields:**
 
-- `llm` (required): LLM model to use
+All fields are identical to `/api/job-info` except for the resume field:
+
+- `llm` (required): LLM model to use (e.g., "gpt-4", "gpt-3.5-turbo", "claude-3-opus", "grok-4-fast-reasoning")
 - `date_input` (required): Date for the cover letter (format: YYYY-MM-DD)
 - `company_name` (required): Name of the company
 - `hiring_manager` (required): Name of the hiring manager (can be empty string)
 - `ad_source` (required): Source of the job posting (can be empty string)
-- `resume_text` (required): **Plain text resume content** (pasted by user)
+- `resume_text` (required): **Plain text resume content** (pasted by user) - This is the only difference from `/api/job-info` (which uses `resume`)
 - `jd` (required): Job description text
-- `additional_instructions` (optional): Additional instructions (default: "")
-- `tone` (optional): Tone of the cover letter (default: "Professional")
+- `additional_instructions` (optional): Additional instructions for customizing the cover letter (default: "")
+- `tone` (optional): Tone of the cover letter (default: "Professional"). Can be customized based on personality profiles when `user_id` or `user_email` is provided
 - `address` (optional): Address (City, State) (default: "")
 - `phone_number` (optional): Phone number (default: "")
-- `user_id` (optional): User ID for accessing custom personality profiles
-- `user_email` (optional): User email (will be resolved to user_id)
+- `user_id` (optional): User ID for accessing custom personality profiles and user preferences
+- `user_email` (optional): User email for accessing custom personality profiles (will be resolved to user_id)
 
 **Response (200 OK):**
 
@@ -167,13 +179,14 @@ async function generateCoverLetterWithPastedResume(resumeText, jobInfo, userId) 
       company_name: jobInfo.companyName,
       hiring_manager: jobInfo.hiringManager || '',
       ad_source: jobInfo.adSource || '',
-      resume_text: resumeText,  // Pasted resume text
+      resume_text: resumeText,  // Pasted resume text (only difference from file version)
       jd: jobInfo.jobDescription,
-      additional_instructions: jobInfo.additionalInstructions || '',
-      tone: jobInfo.tone || 'Professional',
+      additional_instructions: jobInfo.additionalInstructions || '',  // Custom instructions
+      tone: jobInfo.tone || 'Professional',  // Tone setting (can use personality profiles)
       address: jobInfo.address || '',
       phone_number: jobInfo.phoneNumber || '',
-      user_id: userId,
+      user_id: userId,  // Enables personality profiles and user preferences
+      // user_email: 'user@example.com',  // Alternative to user_id
     }),
   });
 
@@ -285,9 +298,13 @@ curl -X POST "http://localhost:8000/api/cover-letter/generate-with-text-resume" 
     "jd": "We are looking for a software engineer with experience in React and Node.js.",
     "additional_instructions": "Emphasize my React experience",
     "tone": "Professional",
+    "address": "San Francisco, CA",
+    "phone_number": "+1-555-123-4567",
     "user_id": "507f1f77bcf86cd799439011"
   }'
 ```
+
+**Note:** All parameters shown above (including `additional_instructions`, `tone`, `address`, `phone_number`, and `user_id` for personality profiles) work exactly the same as the `/api/job-info` endpoint. The only difference is using `resume_text` instead of `resume`.
 
 #### Generate with S3 Resume File
 
@@ -404,7 +421,13 @@ try {
 
 1. **Resume Processing**: The `/api/job-info` endpoint automatically detects the resume format (text, S3 key, or base64 PDF). For explicit text input, use `/api/cover-letter/generate-with-text-resume`.
 
-2. **User Identification**: Providing `user_id` or `user_email` enables access to custom personality profiles and user preferences.
+2. **Parameter Parity**: Both endpoints (`/api/job-info` and `/api/cover-letter/generate-with-text-resume`) accept **exactly the same parameters** except for the resume field:
+   - `/api/job-info` uses `resume` (can be text, S3 key, or base64 PDF)
+   - `/api/cover-letter/generate-with-text-resume` uses `resume_text` (plain text only)
+   
+   All other parameters (personality profiles via `user_id`/`user_email`, `tone`, `additional_instructions`, `company_name`, `hiring_manager`, `ad_source`, `address`, `phone_number`, etc.) work identically on both endpoints.
+
+3. **User Identification**: Providing `user_id` or `user_email` enables access to custom personality profiles and user preferences.
 
 3. **Date Format**: The `date_input` should be in `YYYY-MM-DD` format (e.g., "2024-01-15").
 

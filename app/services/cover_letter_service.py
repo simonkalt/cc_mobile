@@ -91,6 +91,7 @@ def get_job_info(
     phone_number: str = "",
     user_id: Optional[str] = None,
     user_email: Optional[str] = None,
+    is_plain_text: bool = False,
 ):
     """
     Generate cover letter based on job information using specified LLM.
@@ -99,6 +100,7 @@ def get_job_info(
     Args:
         user_id: Optional user ID to access custom personality profiles
         user_email: Optional user email to access custom personality profiles
+        is_plain_text: If True, skip all file processing (S3, local files, base64) and treat resume as plain text
     """
     # Get today's date if not provided
     today_date = (
@@ -108,8 +110,12 @@ def get_job_info(
     # Check if resume is a file path, S3 key, or base64 data
     resume_content = resume
 
+    # If explicitly marked as plain text, skip all file processing
+    if is_plain_text:
+        logger.info("Resume marked as plain text, skipping file processing")
+        resume_content = resume
     # First, check if it's base64 encoded data
-    if (
+    elif (
         resume
         and len(resume) > 100
         and not resume.endswith(".pdf")
@@ -131,7 +137,8 @@ def get_job_info(
             logger.debug(f"Resume field is not base64 encoded: {str(e)}")
 
     # If base64 decode didn't work, try S3 or local file paths
-    if resume_content == resume and resume:
+    # Skip if explicitly marked as plain text
+    if resume_content == resume and resume and not is_plain_text:
         # Check if it looks like an S3 key (contains '/' - format: user_id/filename or just filename)
         # S3 keys from the client will be in format: user_id/filename.pdf
         is_s3_key = "/" in resume
