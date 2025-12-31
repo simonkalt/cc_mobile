@@ -26,27 +26,32 @@ def get_personality_profiles(
     try:
         user = None
         if user_id:
+            logger.info(f"Fetching personality profiles for user_id: {user_id}")
             user = get_user_by_id(user_id)
         elif user_email:
+            logger.info(f"Fetching personality profiles for user_email: {user_email}")
             user = get_user_by_email(user_email)
 
         if not user:
+            logger.warning(f"User not found: user_id={user_id}, user_email={user_email}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
 
+        logger.info(f"User found: id={user.id}, email={user.email}")
+        
         # Get user's custom personality profiles
         # Note: user_doc_to_response already normalizes personalityProfiles to {"id", "name", "description"} structure
         user_prefs = user.preferences if user.preferences else {}
-        logger.debug(f"User preferences type: {type(user_prefs)}, keys: {list(user_prefs.keys()) if isinstance(user_prefs, dict) else 'N/A'}")
+        logger.info(f"User preferences type: {type(user_prefs)}, is None: {user_prefs is None}, keys: {list(user_prefs.keys()) if isinstance(user_prefs, dict) else 'N/A'}")
         
         if isinstance(user_prefs, dict):
             app_settings = user_prefs.get("appSettings", {})
-            logger.debug(f"App settings type: {type(app_settings)}, keys: {list(app_settings.keys()) if isinstance(app_settings, dict) else 'N/A'}")
+            logger.info(f"App settings type: {type(app_settings)}, is None: {app_settings is None}, keys: {list(app_settings.keys()) if isinstance(app_settings, dict) else 'N/A'}")
             
             if isinstance(app_settings, dict):
                 custom_profiles = app_settings.get("personalityProfiles", [])
-                logger.info(f"Found {len(custom_profiles) if isinstance(custom_profiles, list) else 0} personality profile(s) in database")
+                logger.info(f"Found personalityProfiles: type={type(custom_profiles)}, length={len(custom_profiles) if isinstance(custom_profiles, list) else 'N/A'}, value={custom_profiles}")
                 
                 # Ensure profiles are normalized (should already be normalized, but verify)
                 if custom_profiles:
@@ -95,7 +100,16 @@ def get_personality_profiles(
                         "value": profile.get("name", "Unknown"),  # For UI compatibility
                     }
                 )
+            else:
+                logger.warning(f"Invalid profile skipped: {profile}")
 
+        logger.info(f"Returning {len(profiles)} personality profile(s) for user {user_id or user_email}")
+        
+        # If no profiles found, log a warning and return empty array
+        # (Don't create default here - that should be done during registration)
+        if len(profiles) == 0:
+            logger.warning(f"No personality profiles found for user {user_id or user_email}. User preferences structure: {user_prefs}")
+        
         return {"profiles": profiles}
     except HTTPException:
         raise

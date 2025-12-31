@@ -461,11 +461,54 @@ Apply this personality throughout the entire cover letter. This instruction take
 
     message = json.dumps(message_data)
 
-    # Prepare additional instructions to be appended last (so they override all other instructions)
+    # Prepare additional instructions - enhance by default, override ONLY if explicitly requested
     additional_instructions_text = ""
     if additional_instructions and additional_instructions.strip():
-        # Use very explicit override language that LLMs will prioritize
-        additional_instructions_text = f"""
+        # Check if the additional instructions explicitly request an override
+        # Override mode should ONLY trigger if user explicitly commands it with very specific language
+        # Default behavior is ALWAYS enhancement mode
+        instructions_lower = additional_instructions.lower().strip()
+        
+        # EXTREMELY strict override detection - user must explicitly command override
+        # Override mode ONLY triggers if instructions start with explicit override markers
+        # This prevents accidental triggering from normal instructions
+        
+        # Check if instructions start with explicit override markers
+        # Must literally start with one of these exact phrases (case-insensitive)
+        override_markers = [
+            "override:",
+            "override ",
+            "ignore all previous:",
+            "ignore all previous ",
+            "ignore previous:",
+            "ignore previous ",
+            "disregard all previous:",
+            "disregard all previous ",
+            "disregard previous:",
+            "disregard previous "
+        ]
+        
+        starts_with_override = any(instructions_lower.startswith(marker) for marker in override_markers)
+        
+        # Also check for explicit override phrases anywhere in the text (but be very strict)
+        explicit_override_phrases = [
+            "override all previous instructions",
+            "ignore all previous instructions",
+            "disregard all previous instructions"
+        ]
+        
+        contains_explicit_override = any(phrase in instructions_lower for phrase in explicit_override_phrases)
+        
+        # ONLY trigger override if user explicitly commands it
+        is_override = starts_with_override or contains_explicit_override
+        
+        # Log detection for debugging
+        logger.info(f"Additional instructions override detection: starts_with_override={starts_with_override}, contains_explicit_override={contains_explicit_override}, is_override={is_override}")
+        logger.info(f"First 200 chars of instructions: {additional_instructions[:200]}")
+        
+        if is_override:
+            # User explicitly requested override - use override language
+            additional_instructions_text = f"""
 
 === FINAL OVERRIDE INSTRUCTIONS - HIGHEST PRIORITY ===
 IGNORE ALL PREVIOUS INSTRUCTIONS ABOUT LENGTH, TONE, STYLE, OR FORMATTING.
@@ -480,9 +523,25 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
 === END OVERRIDE INSTRUCTIONS ===
 """
-        logger.info(
-            f"Additional instructions provided ({len(additional_instructions)} chars) - will override ALL other instructions"
-        )
+            logger.info(
+                f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE detected (explicit override requested)"
+            )
+        else:
+            # User wants to enhance/supplement - add as additional guidance
+            additional_instructions_text = f"""
+
+=== ADDITIONAL INSTRUCTIONS ===
+Please also take into account the following additional guidance when generating the cover letter.
+These instructions should enhance and work together with the personality profile, system instructions, and other guidance provided:
+
+{additional_instructions}
+
+Please incorporate these instructions while maintaining consistency with all other provided guidance.
+=== END ADDITIONAL INSTRUCTIONS ===
+"""
+            logger.info(
+                f"Additional instructions provided ({len(additional_instructions)} chars) - ENHANCEMENT MODE (will supplement other instructions)"
+            )
 
     r = ""
 
@@ -493,13 +552,19 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             msg = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             logger.info("Personality instruction included in Gemini prompt")
             if additional_instructions_text:
-                logger.info(
-                    "Additional instructions appended to Gemini prompt as final override"
-                )
-            # Log prompt in purple for debugging (using print for better WSL support)
-            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{msg}")
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.info(
+                        "Additional instructions appended to Gemini prompt (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.info(
+                        "Additional instructions appended to Gemini prompt (ENHANCEMENT MODE)"
+                    )
+            # Log prompt for debugging
+            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{msg}")
+            # Also print to stdout for immediate visibility
+            print(f"=== PROMPT TO LLM ({llm}) ===\n{msg}")
+            sys.stdout.flush()
             if not GOOGLE_AVAILABLE or not settings.GEMINI_API_KEY:
                 raise ValueError("Google Generative AI not available or API key not set")
             genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -534,18 +599,25 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 {"role": "user", "content": f"Company Name: {company_name}"},
                 {"role": "user", "content": f"Ad Source: {ad_source}"},
             ]
-            # Append additional instructions last as a separate, high-priority message
+            # Append additional instructions last as a separate message
             if additional_instructions_text:
                 messages.append(
                     {"role": "user", "content": additional_instructions_text.strip()}
                 )
-                logger.info(
-                    "Additional instructions appended to ChatGPT messages as final override"
-                )
-            # Log prompt in purple for debugging (using print for better WSL support)
-            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.info(
+                        "Additional instructions appended to ChatGPT messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.info(
+                        "Additional instructions appended to ChatGPT messages (ENHANCEMENT MODE)"
+                    )
+            # Log prompt for debugging
+            prompt_json = json.dumps(messages, indent=2)
+            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
+            # Also print to stdout for immediate visibility
+            print(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
+            sys.stdout.flush()
             # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
             if gpt_model == "gpt-5.2":
                 response = client.chat.completions.create(
@@ -581,18 +653,25 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 {"role": "user", "content": f"Ad Source: {ad_source}"},
             ]
             logger.info("Personality instruction included in Grok messages")
-            # Append additional instructions last so they override all previous instructions
+            # Append additional instructions last
             if additional_instructions_text:
                 messages_list.append(
                     {"role": "user", "content": additional_instructions_text.strip()}
                 )
-                logger.info(
-                    "Additional instructions appended to Grok messages as final override"
-                )
-            # Log prompt in purple for debugging (using print for better WSL support)
-            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{json.dumps(messages_list, indent=2)}")
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.info(
+                        "Additional instructions appended to Grok messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.info(
+                        "Additional instructions appended to Grok messages (ENHANCEMENT MODE)"
+                    )
+            # Log prompt for debugging
+            prompt_json = json.dumps(messages_list, indent=2)
+            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
+            # Also print to stdout for immediate visibility
+            print(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
+            sys.stdout.flush()
             data = {"model": xai_model, "messages": messages_list}
             response = requests.post(
                 "https://api.x.ai/v1/chat/completions",
@@ -607,10 +686,11 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         elif llm == "OCI" or llm == "oci-generative-ai":
             # Include personality instruction prominently at the start
             full_prompt = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
-            # Log prompt in purple for debugging (using print for better WSL support)
-            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{full_prompt}")
+            # Log prompt for debugging
+            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{full_prompt}")
+            # Also print to stdout for immediate visibility
+            print(f"=== PROMPT TO LLM ({llm}) ===\n{full_prompt}")
+            sys.stdout.flush()
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
 
@@ -632,18 +712,25 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 {"role": "user", "content": message_llama},
             ]
             logger.info("Personality instruction included in Llama messages")
-            # Append additional instructions last so they override all previous instructions
+            # Append additional instructions last
             if additional_instructions_text:
                 messages.append(
                     {"role": "user", "content": additional_instructions_text.strip()}
                 )
-                logger.info(
-                    "Additional instructions appended to Llama messages as final override"
-                )
-            # Log prompt in purple for debugging (using print for better WSL support)
-            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.info(
+                        "Additional instructions appended to Llama messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.info(
+                        "Additional instructions appended to Llama messages (ENHANCEMENT MODE)"
+                    )
+            # Log prompt for debugging
+            prompt_json = json.dumps(messages, indent=2)
+            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
+            # Also print to stdout for immediate visibility
+            print(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
+            sys.stdout.flush()
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response["message"]["content"]
 
@@ -664,19 +751,26 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 {"type": "text", "text": f"Ad Source: {ad_source}"},
             ]
             logger.info("Personality instruction included in Claude messages")
-            # Append additional instructions last so they override all previous instructions
+            # Append additional instructions last
             if additional_instructions_text:
                 content_list.append(
                     {"type": "text", "text": additional_instructions_text.strip()}
                 )
-                logger.info(
-                    "Additional instructions appended to Claude messages as final override"
-                )
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.info(
+                        "Additional instructions appended to Claude messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.info(
+                        "Additional instructions appended to Claude messages (ENHANCEMENT MODE)"
+                    )
             messages = [{"role": "user", "content": content_list}]
-            # Log prompt in purple for debugging (using print for better WSL support)
-            purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-            print(f"{purple_start}=== PROMPT TO LLM ({llm}) ==={purple_end}\nSystem: {system_message}\nMessages: {json.dumps(messages, indent=2)}")
+            # Log prompt for debugging
+            prompt_json = json.dumps(messages, indent=2)
+            logger.info(f"=== PROMPT TO LLM ({llm}) ===\nSystem: {system_message}\nMessages: {prompt_json}")
+            # Also print to stdout for immediate visibility
+            print(f"=== PROMPT TO LLM ({llm}) ===\nSystem: {system_message}\nMessages: {prompt_json}")
+            sys.stdout.flush()
             response = client.messages.create(
                 model=claude_model,
                 system=system_message,

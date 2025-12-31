@@ -31,3 +31,4 @@ requests>=2.31.0
 selenium>=4.15.0
 twilio
 redis
+stripe>=7.0.0

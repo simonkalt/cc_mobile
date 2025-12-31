@@ -85,6 +85,11 @@ class Settings:
     SMTP_USE_SSL: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
     FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL")
     
+    # Stripe Configuration
+    STRIPE_TEST_API_KEY: Optional[str] = os.getenv("STRIPE_TEST_API_KEY")
+    STRIPE_API_KEY: Optional[str] = os.getenv("STRIPE_API_KEY")  # For production
+    STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv("STRIPE_WEBHOOK_SECRET")
+    
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     PERSONALITY_PROFILES_PATH: Path = Path(__file__).parent.parent.parent / "personality_profiles.json"
