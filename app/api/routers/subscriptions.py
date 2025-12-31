@@ -33,12 +33,16 @@ def list_subscription(user_id: str):
     Returns:
         SubscriptionResponse with subscription details
     """
+    logger.info(f"Subscription request received for user_id: {user_id}")
     try:
-        return get_user_subscription(user_id)
-    except HTTPException:
+        subscription = get_user_subscription(user_id)
+        logger.info(f"Successfully retrieved subscription for user {user_id}: status={subscription.subscriptionStatus}")
+        return subscription
+    except HTTPException as e:
+        logger.warning(f"HTTP error retrieving subscription for user {user_id}: {e.status_code} - {e.detail}")
         raise
     except Exception as e:
-        logger.error(f"Error retrieving subscription: {e}")
+        logger.error(f"Error retrieving subscription for user {user_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving subscription: {str(e)}"

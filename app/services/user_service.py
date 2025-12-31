@@ -152,7 +152,16 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},  # Initialize empty LLM usage counts object
         "last_llm_used": None,  # Initialize last LLM used field
-        "preferences": final_preferences
+        "preferences": final_preferences,
+        # Initialize free subscription for new users
+        "subscriptionId": None,
+        "subscriptionStatus": "free",
+        "subscriptionPlan": "free",
+        "subscriptionCurrentPeriodEnd": None,
+        "lastPaymentDate": None,
+        "stripeCustomerId": None,
+        "generation_credits": 10,  # Default to 10 free generation credits for new users
+        "max_credits": 10,  # Fixed maximum credits for free tier
     }
     
     try:
@@ -308,7 +317,16 @@ def create_user_from_registration_data(registration_data: dict, is_email_verifie
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},
         "last_llm_used": None,
-        "preferences": final_preferences
+        "preferences": final_preferences,
+        # Initialize free subscription for new users
+        "subscriptionId": None,
+        "subscriptionStatus": "free",
+        "subscriptionPlan": "free",
+        "subscriptionCurrentPeriodEnd": None,
+        "lastPaymentDate": None,
+        "stripeCustomerId": None,
+        "generation_credits": 10,  # Default to 10 free generation credits for new users
+        "max_credits": 10,  # Fixed maximum credits for free tier
     }
     
     try:

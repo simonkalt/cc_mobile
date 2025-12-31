@@ -114,3 +114,92 @@ Do you want to proceed with deletion? (yes/no):
 - [S3 Setup Guide](../documentation/ENV_SETUP_S3.md)
 - [MongoDB Setup Guide](../documentation/MONGODB_SETUP.md)
 
+---
+
+## migrate_users_to_free_subscription.py
+
+A migration script to assign free subscription to all existing users in the database that are missing subscription fields.
+
+### What it does
+
+1. **Connects to MongoDB**: Uses the same connection settings as the main application
+2. **Scans Users**: Finds all users in the database
+3. **Identifies Missing Fields**: Finds users without subscription fields or with null/undefined values
+4. **Updates Users**: Sets free subscription fields for users that need them
+5. **Reports Results**: Shows summary of how many users were updated
+
+### Usage
+
+```bash
+# From the project root directory
+python scripts/migrate_users_to_free_subscription.py
+```
+
+Or if you're in the scripts directory:
+
+```bash
+python migrate_users_to_free_subscription.py
+```
+
+### Requirements
+
+- Python 3.7+
+- MongoDB connection configured (MONGODB_URI in .env)
+- Required Python packages: `pymongo`
+
+### Fields Updated
+
+For users missing subscription fields, the script sets:
+- `subscriptionStatus`: "free"
+- `subscriptionPlan`: "free"
+- `subscriptionId`: null
+- `subscriptionCurrentPeriodEnd`: null
+- `lastPaymentDate`: null
+- `stripeCustomerId`: null
+- `generation_credits`: 10 (if missing or null)
+
+### Safety Features
+
+- **Non-destructive**: Only updates users that are missing subscription fields
+- **Preserves Existing Data**: Won't overwrite existing subscription information
+- **Safe to Re-run**: Can be run multiple times without issues
+- **Detailed Logging**: Shows which users are being updated
+- **Error Handling**: Continues with other users if one fails
+
+### Example Output
+
+```
+2024-12-31 12:00:00 - INFO - Starting user subscription migration...
+2024-12-31 12:00:00 - INFO - This script will assign free subscription to all users missing subscription fields.
+2024-12-31 12:00:00 - INFO - Connecting to MongoDB...
+2024-12-31 12:00:00 - INFO - Found 150 total users in database
+2024-12-31 12:00:00 - INFO - Found 120 users that need migration
+2024-12-31 12:00:00 - INFO - Updated user user@example.com (507f1f77bcf86cd799439011) with free subscription
+...
+2024-12-31 12:00:01 - INFO - ============================================================
+2024-12-31 12:00:01 - INFO - Migration Summary:
+2024-12-31 12:00:01 - INFO -   Total users in database: 150
+2024-12-31 12:00:01 - INFO -   Users needing migration: 120
+2024-12-31 12:00:01 - INFO -   Successfully updated: 120
+2024-12-31 12:00:01 - INFO -   Skipped/Failed: 0
+2024-12-31 12:00:01 - INFO - ============================================================
+2024-12-31 12:00:01 - INFO - Migration completed successfully!
+```
+
+### Notes
+
+- The script only updates users that are missing subscription fields
+- Users with existing subscription data (even if it's "free") are not modified
+- The script is idempotent - safe to run multiple times
+- All updates include a `dateUpdated` timestamp
+
+### Troubleshooting
+
+**"MongoDB is not connected"**
+- Verify `MONGODB_URI` is set in your `.env` file
+- Check network connectivity to MongoDB Atlas
+
+**"Failed to access collection"**
+- Ensure `MONGODB_COLLECTION_NAME` is set correctly (default: "users")
+- Verify database permissions
+

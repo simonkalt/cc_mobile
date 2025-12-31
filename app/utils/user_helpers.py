@@ -115,4 +115,12 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         llm_counts=user_doc.get("llm_counts"),
         last_llm_used=user_doc.get("last_llm_used"),
         generation_credits=user_doc.get("generation_credits"),
+        max_credits=user_doc.get("max_credits"),
+        # Subscription fields
+        subscriptionId=user_doc.get("subscriptionId"),
+        subscriptionStatus=user_doc.get("subscriptionStatus", "free"),
+        subscriptionPlan=user_doc.get("subscriptionPlan", "free"),
+        subscriptionCurrentPeriodEnd=user_doc.get("subscriptionCurrentPeriodEnd"),
+        lastPaymentDate=user_doc.get("lastPaymentDate"),
+        stripeCustomerId=user_doc.get("stripeCustomerId"),
     )

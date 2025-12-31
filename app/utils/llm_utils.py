@@ -118,10 +118,6 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": prompt},
         ]
-        # Log prompt in purple for debugging (using print for better WSL support)
-        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
         # Use high max_completion_tokens for GPT-5.2
         if model == "gpt-5.2":
             response = client.chat.completions.create(
@@ -144,10 +140,6 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         messages = [{"role": "user", "content": prompt}]
-        # Log prompt in purple for debugging (using print for better WSL support)
-        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\nSystem: You are a helpful assistant.\nMessages: {json.dumps(messages, indent=2)}")
         response = client.messages.create(
             model=model,
             system="You are a helpful assistant.",
@@ -165,10 +157,6 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             return None
             
         genai.configure(api_key=settings.GOOGLE_API_KEY)
-        # Log prompt in purple for debugging (using print for better WSL support)
-        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{prompt}")
         client = genai.GenerativeModel(model)
         response = client.generate_content(contents=prompt)
         return_response = response.text
@@ -190,10 +178,6 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             "model": model,
             "messages": messages,
         }
-        # Log prompt in purple for debugging (using print for better WSL support)
-        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{json.dumps(messages, indent=2)}")
         response = requests.post(
             "https://api.x.ai/v1/chat/completions",
             json=data,
@@ -205,10 +189,6 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
         return_response = result["choices"][0]["message"]["content"]
         
     elif model == "oci-generative-ai":
-        # Log prompt in purple for debugging (using print for better WSL support)
-        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        print(f"{purple_start}=== PROMPT TO LLM ({model}) ==={purple_end}\n{prompt}")
         # OCI integration - requires OCI config file
         return get_oc_info(prompt)
 
@@ -306,10 +286,6 @@ def get_oc_info(prompt: str) -> str:
         message.role = "USER"
         message.content = [oci_content]
 
-        # Log prompt in purple for debugging (using print for better WSL support)
-        purple_start = "\033[95m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        purple_end = "\033[0m" if COLORAMA_AVAILABLE or sys.stdout.isatty() else ""
-        print(f"{purple_start}=== PROMPT TO LLM (OCI) ==={purple_end}\n{prompt}")
         # Create chat request
         chat_request = oci.generative_ai_inference.models.GenericChatRequest()
         chat_request.api_format = (

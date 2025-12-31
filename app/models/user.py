@@ -94,6 +94,14 @@ class UserResponse(BaseModel):
     llm_counts: Optional[dict] = None
     last_llm_used: Optional[str] = None
     generation_credits: Optional[int] = None
+    max_credits: Optional[int] = None
+    # Subscription fields
+    subscriptionId: Optional[str] = None
+    subscriptionStatus: Optional[str] = "free"  # free, active, canceled, past_due, trialing
+    subscriptionPlan: Optional[str] = "free"  # free, basic, premium, enterprise
+    subscriptionCurrentPeriodEnd: Optional[datetime] = None
+    lastPaymentDate: Optional[datetime] = None
+    stripeCustomerId: Optional[str] = None
 
     class Config:
         from_attributes = True

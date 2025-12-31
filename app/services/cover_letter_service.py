@@ -1,13 +1,13 @@
 """
 Cover letter generation service
 """
+
 import os
 import json
 import datetime
 import base64
 import logging
 import re
-import sys
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -15,6 +15,7 @@ from fastapi import HTTPException, status
 # Try to import colorama for better color support in WSL/Windows
 try:
     import colorama
+
     colorama.init(autoreset=True)
     COLORAMA_AVAILABLE = True
 except ImportError:
@@ -40,30 +41,35 @@ logger = logging.getLogger(__name__)
 # Try to import LLM libraries
 try:
     from openai import OpenAI
+
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
 
 try:
     import anthropic
+
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 try:
     import google.generativeai as genai
+
     GOOGLE_AVAILABLE = True
 except ImportError:
     GOOGLE_AVAILABLE = False
 
 try:
     import requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
     import ollama
+
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
@@ -80,6 +86,7 @@ xai_model = "grok-4-fast-reasoning"
 # Try to load GPT model from LLM config
 try:
     from llm_config_endpoint import load_llm_config
+
     config = load_llm_config()
     gpt_model = config.get("internalModel", "gpt-5.2")
     logger.info(f"Loaded GPT model from config: {gpt_model}")
@@ -113,9 +120,7 @@ def get_job_info(
         is_plain_text: If True, skip all file processing (S3, local files, base64) and treat resume as plain text
     """
     # Get today's date if not provided
-    today_date = (
-        date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
-    )
+    today_date = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
 
     # Check if resume is a file path, S3 key, or base64 data
     resume_content = resume
@@ -126,10 +131,7 @@ def get_job_info(
         resume_content = resume
     # First, check if it's base64 encoded data
     elif (
-        resume
-        and len(resume) > 100
-        and not resume.endswith(".pdf")
-        and not resume.endswith(".PDF")
+        resume and len(resume) > 100 and not resume.endswith(".pdf") and not resume.endswith(".PDF")
     ):
         try:
             # Try to decode as base64
@@ -191,9 +193,7 @@ def get_job_info(
                         logger.info(f"Downloading PDF from S3: {s3_path}")
                         pdf_bytes = download_pdf_from_s3(s3_path)
                         resume_content = read_pdf_from_bytes(pdf_bytes)
-                        logger.info(
-                            "Successfully downloaded and extracted text from S3 PDF"
-                        )
+                        logger.info("Successfully downloaded and extracted text from S3 PDF")
                     except Exception as e:
                         logger.warning(
                             f"Failed to download from S3: {str(e)}. Will try local file paths."
@@ -207,7 +207,7 @@ def get_job_info(
             # MongoDB ObjectId is 24 characters, so check if first part is 24 chars
             parts = resume.split("/", 1)
             is_s3_key_format = len(parts) == 2 and len(parts[0]) == 24
-            
+
             # Only try local paths if it doesn't look like an S3 key
             if not is_s3_key_format:
                 # Get the current working directory
@@ -267,7 +267,7 @@ def get_job_info(
                     logger.warning(
                         f"PDF file not found locally. Tried paths: {possible_paths[:5]}... (showing first 5)"
                     )
-            
+
             # If we haven't successfully extracted content, return the original
             if resume_content == resume:
                 if is_s3_key_format:
@@ -286,9 +286,7 @@ def get_job_info(
 
     # Require user_id or user_email to access personality profiles
     if not user_id and not user_email:
-        logger.warning(
-            "No user_id or user_email provided. Cannot retrieve personality profiles."
-        )
+        logger.warning("No user_id or user_email provided. Cannot retrieve personality profiles.")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="user_id or user_email is required to access personality profiles",
@@ -320,9 +318,7 @@ def get_job_info(
                 )
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Get user's custom personality profiles
         # user is a UserResponse Pydantic model, so access preferences as attribute
@@ -337,11 +333,7 @@ def get_job_info(
                     # Verify structure and filter out invalid profiles
                     normalized_profiles = []
                     for profile in custom_profiles:
-                        if (
-                            isinstance(profile, dict)
-                            and profile.get("id")
-                            and profile.get("name")
-                        ):
+                        if isinstance(profile, dict) and profile.get("id") and profile.get("name"):
                             # Extract only id, name, description
                             normalized_profiles.append(
                                 {
@@ -361,17 +353,13 @@ def get_job_info(
         )
 
         if not custom_profiles:
-            logger.warning(
-                f"No personality profiles found for user. Available profiles: []"
-            )
+            logger.warning(f"No personality profiles found for user. Available profiles: []")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No personality profiles found for user. Please add personality profiles in your user preferences.",
             )
 
-        logger.info(
-            f"Found {len(custom_profiles)} custom personality profiles for user"
-        )
+        logger.info(f"Found {len(custom_profiles)} custom personality profiles for user")
         # Try to find matching profile by name (case-insensitive) or ID
         # Normalize profiles to ensure structure is {"id", "name", "description"} only
         profile_found = False
@@ -469,11 +457,11 @@ Apply this personality throughout the entire cover letter. This instruction take
         # Override mode should ONLY trigger if user explicitly commands it with very specific language
         # Default behavior is ALWAYS enhancement mode
         instructions_lower = additional_instructions.lower().strip()
-        
+
         # EXTREMELY strict override detection - user must explicitly command override
         # Override mode ONLY triggers if instructions start with explicit override markers
         # This prevents accidental triggering from normal instructions
-        
+
         # Check if instructions start with explicit override markers
         # Must literally start with one of these exact phrases (case-insensitive)
         override_markers = [
@@ -486,27 +474,33 @@ Apply this personality throughout the entire cover letter. This instruction take
             "disregard all previous:",
             "disregard all previous ",
             "disregard previous:",
-            "disregard previous "
+            "disregard previous ",
         ]
-        
-        starts_with_override = any(instructions_lower.startswith(marker) for marker in override_markers)
-        
+
+        starts_with_override = any(
+            instructions_lower.startswith(marker) for marker in override_markers
+        )
+
         # Also check for explicit override phrases anywhere in the text (but be very strict)
         explicit_override_phrases = [
             "override all previous instructions",
             "ignore all previous instructions",
-            "disregard all previous instructions"
+            "disregard all previous instructions",
         ]
-        
-        contains_explicit_override = any(phrase in instructions_lower for phrase in explicit_override_phrases)
-        
+
+        contains_explicit_override = any(
+            phrase in instructions_lower for phrase in explicit_override_phrases
+        )
+
         # ONLY trigger override if user explicitly commands it
         is_override = starts_with_override or contains_explicit_override
-        
+
         # Log detection for debugging
-        logger.info(f"Additional instructions override detection: starts_with_override={starts_with_override}, contains_explicit_override={contains_explicit_override}, is_override={is_override}")
+        logger.info(
+            f"Additional instructions override detection: starts_with_override={starts_with_override}, contains_explicit_override={contains_explicit_override}, is_override={is_override}"
+        )
         logger.info(f"First 200 chars of instructions: {additional_instructions[:200]}")
-        
+
         if is_override:
             # User explicitly requested override - use override language
             additional_instructions_text = f"""
@@ -524,9 +518,9 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
 === END OVERRIDE INSTRUCTIONS ===
 """
-            logger.info(
-                f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE detected (explicit override requested)"
-            )
+            # logger.info(
+            #     f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE detected (explicit override requested)"
+            # )
         else:
             # User wants to enhance/supplement - add as additional guidance
             additional_instructions_text = f"""
@@ -540,9 +534,9 @@ These instructions should enhance and work together with the personality profile
 Please incorporate these instructions while maintaining consistency with all other provided guidance.
 === END ADDITIONAL INSTRUCTIONS ===
 """
-            logger.info(
-                f"Additional instructions provided ({len(additional_instructions)} chars) - ENHANCEMENT MODE (will supplement other instructions)"
-            )
+            # logger.info(
+            #     f"Additional instructions provided ({len(additional_instructions)} chars) - ENHANCEMENT MODE (will supplement other instructions)"
+            # )
 
     r = ""
 
@@ -551,21 +545,15 @@ Please incorporate these instructions while maintaining consistency with all oth
         if llm == "Gemini" or llm == "gemini-2.5-flash":
             # Include personality instruction prominently at the start
             msg = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
-            logger.info("Personality instruction included in Gemini prompt")
             if additional_instructions_text:
                 if "OVERRIDE" in additional_instructions_text:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Gemini prompt (OVERRIDE MODE)"
                     )
                 else:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Gemini prompt (ENHANCEMENT MODE)"
                     )
-            # Log prompt for debugging
-            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{msg}")
-            # Also print to stdout for immediate visibility
-            print(f"=== PROMPT TO LLM ({llm}) ===\n{msg}")
-            sys.stdout.flush()
             if not GOOGLE_AVAILABLE or not settings.GEMINI_API_KEY:
                 raise ValueError("Google Generative AI not available or API key not set")
             genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -579,9 +567,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                 "max_output_tokens": 8192,  # Increase max tokens to prevent truncation
             }
 
-            response = model.generate_content(
-                contents=msg, generation_config=generation_config
-            )
+            response = model.generate_content(contents=msg, generation_config=generation_config)
             r = response.text
             logger.info(f"Gemini response length: {len(r)} characters")
 
@@ -602,23 +588,15 @@ Please incorporate these instructions while maintaining consistency with all oth
             ]
             # Append additional instructions last as a separate message
             if additional_instructions_text:
-                messages.append(
-                    {"role": "user", "content": additional_instructions_text.strip()}
-                )
+                messages.append({"role": "user", "content": additional_instructions_text.strip()})
                 if "OVERRIDE" in additional_instructions_text:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to ChatGPT messages (OVERRIDE MODE)"
                     )
                 else:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to ChatGPT messages (ENHANCEMENT MODE)"
                     )
-            # Log prompt for debugging
-            prompt_json = json.dumps(messages, indent=2)
-            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
-            # Also print to stdout for immediate visibility
-            print(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
-            sys.stdout.flush()
             # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
             if gpt_model == "gpt-5.2":
                 response = client.chat.completions.create(
@@ -653,26 +631,19 @@ Please incorporate these instructions while maintaining consistency with all oth
                 {"role": "user", "content": f"Company Name: {company_name}"},
                 {"role": "user", "content": f"Ad Source: {ad_source}"},
             ]
-            logger.info("Personality instruction included in Grok messages")
             # Append additional instructions last
             if additional_instructions_text:
                 messages_list.append(
                     {"role": "user", "content": additional_instructions_text.strip()}
                 )
                 if "OVERRIDE" in additional_instructions_text:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Grok messages (OVERRIDE MODE)"
                     )
                 else:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Grok messages (ENHANCEMENT MODE)"
                     )
-            # Log prompt for debugging
-            prompt_json = json.dumps(messages_list, indent=2)
-            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
-            # Also print to stdout for immediate visibility
-            print(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
-            sys.stdout.flush()
             data = {"model": xai_model, "messages": messages_list}
             response = requests.post(
                 "https://api.x.ai/v1/chat/completions",
@@ -687,11 +658,6 @@ Please incorporate these instructions while maintaining consistency with all oth
         elif llm == "OCI" or llm == "oci-generative-ai":
             # Include personality instruction prominently at the start
             full_prompt = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
-            # Log prompt for debugging
-            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{full_prompt}")
-            # Also print to stdout for immediate visibility
-            print(f"=== PROMPT TO LLM ({llm}) ===\n{full_prompt}")
-            sys.stdout.flush()
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
 
@@ -703,7 +669,9 @@ Please incorporate these instructions while maintaining consistency with all oth
 
             # Use the same message_data that includes the personality profile (tone field)
             # This ensures the personality profile description is included in Llama prompts
-            message_llama = message  # Use the original message which includes the tone/personality profile
+            message_llama = (
+                message  # Use the original message which includes the tone/personality profile
+            )
             messages = [
                 {"role": "system", "content": system_message},
                 {
@@ -712,32 +680,21 @@ Please incorporate these instructions while maintaining consistency with all oth
                 },  # Add personality instruction as separate, prominent message
                 {"role": "user", "content": message_llama},
             ]
-            logger.info("Personality instruction included in Llama messages")
             # Append additional instructions last
             if additional_instructions_text:
-                messages.append(
-                    {"role": "user", "content": additional_instructions_text.strip()}
-                )
+                messages.append({"role": "user", "content": additional_instructions_text.strip()})
                 if "OVERRIDE" in additional_instructions_text:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Llama messages (OVERRIDE MODE)"
                     )
                 else:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Llama messages (ENHANCEMENT MODE)"
                     )
-            # Log prompt for debugging
-            prompt_json = json.dumps(messages, indent=2)
-            logger.info(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
-            # Also print to stdout for immediate visibility
-            print(f"=== PROMPT TO LLM ({llm}) ===\n{prompt_json}")
-            sys.stdout.flush()
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response["message"]["content"]
 
-        elif (
-            llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514"
-        ):
+        elif llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514":
             if not ANTHROPIC_AVAILABLE or not settings.ANTHROPIC_API_KEY:
                 raise ValueError("Anthropic not available or API key not set")
             client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -751,27 +708,18 @@ Please incorporate these instructions while maintaining consistency with all oth
                 {"type": "text", "text": f"Company Name: {company_name}"},
                 {"type": "text", "text": f"Ad Source: {ad_source}"},
             ]
-            logger.info("Personality instruction included in Claude messages")
             # Append additional instructions last
             if additional_instructions_text:
-                content_list.append(
-                    {"type": "text", "text": additional_instructions_text.strip()}
-                )
+                content_list.append({"type": "text", "text": additional_instructions_text.strip()})
                 if "OVERRIDE" in additional_instructions_text:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Claude messages (OVERRIDE MODE)"
                     )
                 else:
-                    logger.info(
+                    logger.debug(
                         "Additional instructions appended to Claude messages (ENHANCEMENT MODE)"
                     )
             messages = [{"role": "user", "content": content_list}]
-            # Log prompt for debugging
-            prompt_json = json.dumps(messages, indent=2)
-            logger.info(f"=== PROMPT TO LLM ({llm}) ===\nSystem: {system_message}\nMessages: {prompt_json}")
-            # Also print to stdout for immediate visibility
-            print(f"=== PROMPT TO LLM ({llm}) ===\nSystem: {system_message}\nMessages: {prompt_json}")
-            sys.stdout.flush()
             response = client.messages.create(
                 model=claude_model,
                 system=system_message,
@@ -793,7 +741,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                 )
             except Exception as e:
                 logger.warning(f"Failed to increment LLM usage count: {e}")
-            
+
             # Decrement generation credits if user has no subscription
             try:
                 decrement_generation_credits(user_id)
@@ -809,11 +757,13 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info(
                     f"Incremented LLM usage count for {normalized_llm} (user_email: {user_email})"
                 )
-                
+
                 # Decrement generation credits if user has no subscription
                 try:
                     decrement_generation_credits(user.id)
-                    logger.info(f"Decremented generation credits for user {user.id} (if applicable)")
+                    logger.info(
+                        f"Decremented generation credits for user {user.id} (if applicable)"
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to decrement generation credits: {e}")
             except Exception as e:
@@ -871,10 +821,10 @@ Please incorporate these instructions while maintaining consistency with all oth
 
         # Get raw HTML from LLM response
         raw_html = json_r.get("html", "")
-        
+
         # Strip unwanted \r and \n characters from HTML
         raw_html = raw_html.replace("\r", "").replace("\n", " ")
-        raw_html = re.sub(r' +', ' ', raw_html)
+        raw_html = re.sub(r" +", " ", raw_html)
 
         # Apply user's print settings to HTML
         # Note: The user object was already retrieved earlier for personality profiles
@@ -910,9 +860,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                             styled_html = raw_html
                         else:
                             # Get print properties with defaults
-                            font_family = print_props.get(
-                                "fontFamily", "Times New Roman"
-                            )
+                            font_family = print_props.get("fontFamily", "Times New Roman")
                             font_size = print_props.get("fontSize", 12)
                             line_height = print_props.get("lineHeight", 1.6)
 
@@ -929,8 +877,8 @@ Please incorporate these instructions while maintaining consistency with all oth
 
         # Final cleanup: strip any remaining \r or \n from HTML before returning
         styled_html = styled_html.replace("\r", "").replace("\n", " ")
-        styled_html = re.sub(r' +', ' ', styled_html)
-        
+        styled_html = re.sub(r" +", " ", styled_html)
+
         return {"markdown": markdown_content, "html": styled_html}
 
     except json.JSONDecodeError as e:
@@ -939,8 +887,8 @@ Please incorporate these instructions while maintaining consistency with all oth
         error_html = f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
         # Clean HTML of unwanted characters
         error_html = error_html.replace("\r", "").replace("\n", " ")
-        error_html = re.sub(r' +', ' ', error_html)
-        
+        error_html = re.sub(r" +", " ", error_html)
+
         return {
             "markdown": f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}",
             "html": error_html,
@@ -950,6 +898,5 @@ Please incorporate these instructions while maintaining consistency with all oth
         error_html = f"<p>Error: {str(e)}</p>"
         # Clean HTML of unwanted characters
         error_html = error_html.replace("\r", "").replace("\n", " ")
-        error_html = re.sub(r' +', ' ', error_html)
+        error_html = re.sub(r" +", " ", error_html)
         return {"markdown": f"Error: {str(e)}", "html": error_html}
-

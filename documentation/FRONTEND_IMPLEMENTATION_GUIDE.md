@@ -623,6 +623,18 @@ export const getUserCredits = async (userId) => {
   }
 };
 
+// Get user's max credits
+export const getUserMaxCredits = async (userId) => {
+  try {
+    const user = await getUser(userId);
+    // max_credits will be null/undefined if not set, default to 10
+    return user.max_credits ?? 10;
+  } catch (error) {
+    console.error("Failed to get user max credits:", error);
+    return 10; // Default to 10 on error
+  }
+};
+
 export const updateUser = async (userId, updates) => {
   try {
     const response = await apiClient.put(
@@ -1292,7 +1304,10 @@ const CoverLetterGenerator = () => {
     <div>
       {!hasSubscription && credits !== null && (
         <div className="credits-display">
-          <p>Generation Credits: {credits}</p>
+          <p>
+            You have <b>{credits}</b> of {user.max_credits ?? 10} free
+            generation credits.
+          </p>
         </div>
       )}
       {/* Rest of component */}
@@ -1329,7 +1344,10 @@ const UserProfile = () => {
       {!hasSubscription && (
         <div className="credits-section">
           <h3>Generation Credits</h3>
-          <p>Remaining: {credits ?? 0}</p>
+          <p>
+            You have <b>{credits ?? 0}</b> of {user.max_credits ?? 10} free
+            generation credits.
+          </p>
           {credits === 0 && (
             <p className="warning">
               You have no credits remaining. Upgrade to a subscription plan for
@@ -1355,8 +1373,10 @@ const UserProfile = () => {
 - `generation_credits` is only decremented for users with subscription status "free"
 - Users with active subscriptions (status: "active", "trialing", etc.) have unlimited generations
 - The field may be `null` or `undefined` for users who haven't had credits set yet (defaults to 0)
+- `max_credits` is the fixed maximum credits for the free tier (defaults to 10)
 - Credits are automatically decremented on the backend after successful cover letter generation
 - Always refresh user data after generating a cover letter to get updated credit count
+- Display format: "You have {generation_credits} of {max_credits} free generation credits"
 
 ---
 
