@@ -114,4 +114,5 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         lastLogin=user_doc.get("lastLogin"),
         llm_counts=user_doc.get("llm_counts"),
         last_llm_used=user_doc.get("last_llm_used"),
+        generation_credits=user_doc.get("generation_credits"),
     )

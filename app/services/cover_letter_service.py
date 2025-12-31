@@ -32,6 +32,7 @@ from app.services.user_service import (
     get_user_by_id,
     get_user_by_email,
     increment_llm_usage_count,
+    decrement_generation_credits,
 )
 
 logger = logging.getLogger(__name__)
@@ -792,6 +793,13 @@ Please incorporate these instructions while maintaining consistency with all oth
                 )
             except Exception as e:
                 logger.warning(f"Failed to increment LLM usage count: {e}")
+            
+            # Decrement generation credits if user has no subscription
+            try:
+                decrement_generation_credits(user_id)
+                logger.info(f"Decremented generation credits for user {user_id} (if applicable)")
+            except Exception as e:
+                logger.warning(f"Failed to decrement generation credits: {e}")
         elif user_email:
             # Try to get user_id from email
             try:
@@ -801,6 +809,13 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info(
                     f"Incremented LLM usage count for {normalized_llm} (user_email: {user_email})"
                 )
+                
+                # Decrement generation credits if user has no subscription
+                try:
+                    decrement_generation_credits(user.id)
+                    logger.info(f"Decremented generation credits for user {user.id} (if applicable)")
+                except Exception as e:
+                    logger.warning(f"Failed to decrement generation credits: {e}")
             except Exception as e:
                 logger.warning(f"Failed to increment LLM usage count from email: {e}")
 

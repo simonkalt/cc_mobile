@@ -611,6 +611,18 @@ export const getUser = async (userId) => {
   }
 };
 
+// Get user's generation credits
+export const getUserCredits = async (userId) => {
+  try {
+    const user = await getUser(userId);
+    // generation_credits will be null/undefined if not set, default to 0
+    return user.generation_credits ?? 0;
+  } catch (error) {
+    console.error("Failed to get user credits:", error);
+    return 0; // Default to 0 on error
+  }
+};
+
 export const updateUser = async (userId, updates) => {
   try {
     const response = await apiClient.put(
@@ -1206,6 +1218,145 @@ const UserSettings = () => {
 
 export default UserSettings;
 ```
+
+---
+
+## Generation Credits
+
+### Overview
+
+For users without an active subscription (subscription status is "free"), the system tracks `generation_credits` which are decremented each time a cover letter is generated.
+
+### Accessing Credits
+
+The `generation_credits` field is included in the user object returned by all user endpoints:
+
+```javascript
+// Get user data (includes generation_credits)
+const user = await getUser(userId);
+const credits = user.generation_credits ?? 0; // Default to 0 if null/undefined
+
+console.log(`User has ${credits} generation credits remaining`);
+```
+
+### Example: Check Credits Before Generation
+
+```javascript
+// src/components/CoverLetterGenerator.js
+import { getUser } from "../services/userService";
+
+const CoverLetterGenerator = () => {
+  const [credits, setCredits] = useState(null);
+  const { user } = useUser();
+
+  useEffect(() => {
+    if (user?.id) {
+      loadCredits();
+    }
+  }, [user]);
+
+  const loadCredits = async () => {
+    try {
+      const userData = await getUser(user.id);
+      setCredits(userData.generation_credits ?? 0);
+    } catch (error) {
+      console.error("Failed to load credits:", error);
+      setCredits(0);
+    }
+  };
+
+  const handleGenerate = async () => {
+    // Check if user has subscription
+    const hasSubscription =
+      user?.subscriptionStatus && user.subscriptionStatus !== "free";
+
+    // For free users, check credits
+    if (!hasSubscription) {
+      if (credits === null) {
+        await loadCredits(); // Refresh credits
+      }
+
+      if (credits <= 0) {
+        alert(
+          "You have no generation credits remaining. Please upgrade your plan or purchase credits."
+        );
+        return;
+      }
+    }
+
+    // Proceed with generation
+    // ... generation logic
+  };
+
+  return (
+    <div>
+      {!hasSubscription && credits !== null && (
+        <div className="credits-display">
+          <p>Generation Credits: {credits}</p>
+        </div>
+      )}
+      {/* Rest of component */}
+    </div>
+  );
+};
+```
+
+### Example: Display Credits in User Profile
+
+```javascript
+// src/components/UserProfile.js
+import { getUser } from "../services/userService";
+import { useUser } from "../context/UserContext";
+
+const UserProfile = () => {
+  const { user, refreshUser } = useUser();
+  const [credits, setCredits] = useState(null);
+
+  useEffect(() => {
+    if (user?.id) {
+      // Credits are included in user object
+      setCredits(user.generation_credits ?? 0);
+    }
+  }, [user]);
+
+  const hasSubscription =
+    user?.subscriptionStatus && user.subscriptionStatus !== "free";
+
+  return (
+    <div className="user-profile">
+      <h2>User Profile</h2>
+
+      {!hasSubscription && (
+        <div className="credits-section">
+          <h3>Generation Credits</h3>
+          <p>Remaining: {credits ?? 0}</p>
+          {credits === 0 && (
+            <p className="warning">
+              You have no credits remaining. Upgrade to a subscription plan for
+              unlimited generations.
+            </p>
+          )}
+        </div>
+      )}
+
+      {hasSubscription && (
+        <div className="subscription-info">
+          <p>Active Subscription: {user.subscriptionStatus}</p>
+          <p>Unlimited cover letter generations</p>
+        </div>
+      )}
+    </div>
+  );
+};
+```
+
+### Notes
+
+- `generation_credits` is only decremented for users with subscription status "free"
+- Users with active subscriptions (status: "active", "trialing", etc.) have unlimited generations
+- The field may be `null` or `undefined` for users who haven't had credits set yet (defaults to 0)
+- Credits are automatically decremented on the backend after successful cover letter generation
+- Always refresh user data after generating a cover letter to get updated credit count
 
 ---
 

@@ -743,3 +743,74 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
         logger.error(f"Error incrementing LLM usage count: {e}")
         return False
 
+
+def decrement_generation_credits(user_id: str) -> bool:
+    """
+    Decrement generation_credits for a user if they have no active subscription.
+    Only decrements if credits > 0.
+    
+    Args:
+        user_id: User ID
+        
+    Returns:
+        True if credits were decremented, False otherwise (including if user has subscription)
+    """
+    if not is_connected():
+        logger.warning("Database connection unavailable. Cannot decrement generation credits.")
+        return False
+    
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        logger.warning("Failed to access users collection. Cannot decrement generation credits.")
+        return False
+    
+    try:
+        user_id_obj = ObjectId(user_id)
+    except Exception:
+        logger.warning(f"Invalid user ID format: {user_id}")
+        return False
+    
+    try:
+        user = collection.find_one({"_id": user_id_obj})
+        if not user:
+            logger.warning(f"User {user_id} not found. Cannot decrement generation credits.")
+            return False
+        
+        # Check subscription status - only decrement if user has no subscription (status is "free")
+        subscription_status = user.get("subscriptionStatus", "free")
+        if subscription_status != "free":
+            logger.debug(f"User {user_id} has subscription status '{subscription_status}'. Skipping credit decrement.")
+            return False
+        
+        # Get current credits (default to 0 if not set)
+        current_credits = user.get("generation_credits", 0)
+        
+        # Only decrement if credits > 0
+        if current_credits <= 0:
+            logger.debug(f"User {user_id} has no generation credits ({current_credits}). Cannot decrement.")
+            return False
+        
+        # Decrement credits
+        result = collection.update_one(
+            {"_id": user_id_obj},
+            {
+                "$inc": {"generation_credits": -1},
+                "$set": {
+                    "dateUpdated": datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.matched_count > 0:
+            updated_user = collection.find_one({"_id": user_id_obj})
+            if updated_user:
+                new_credits = updated_user.get("generation_credits", 0)
+                logger.info(f"Decremented generation credits for user {user_id}: {current_credits} -> {new_credits}")
+            return True
+        else:
+            logger.warning(f"User {user_id} not found. Cannot decrement generation credits.")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error decrementing generation credits: {e}")
+        return False

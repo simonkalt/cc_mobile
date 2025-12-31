@@ -93,6 +93,7 @@ class UserResponse(BaseModel):
     lastLogin: Optional[datetime] = None
     llm_counts: Optional[dict] = None
     last_llm_used: Optional[str] = None
+    generation_credits: Optional[int] = None
 
     class Config:
         from_attributes = True
