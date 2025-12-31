@@ -16,11 +16,25 @@ class SubscriptionResponse(BaseModel):
     stripeCustomerId: Optional[str] = None
 
 
+class CreatePaymentIntentRequest(BaseModel):
+    """Request to create a PaymentIntent for PaymentSheet"""
+    user_id: str
+    price_id: str  # Stripe Price ID (e.g., price_xxx)
+
+
+class CreatePaymentIntentResponse(BaseModel):
+    """Response containing PaymentIntent details for PaymentSheet"""
+    client_secret: str
+    customer_id: Optional[str] = None
+    customer_ephemeral_key_secret: Optional[str] = None
+
+
 class SubscribeRequest(BaseModel):
     """Request to create a new subscription"""
     user_id: str
     price_id: str  # Stripe Price ID (e.g., price_xxx)
-    payment_method_id: Optional[str] = None  # For card payment
+    payment_intent_id: Optional[str] = None  # PaymentIntent ID from PaymentSheet
+    payment_method_id: Optional[str] = None  # Legacy support - for card payment
     trial_days: Optional[int] = None
 
 

@@ -8,13 +8,16 @@ from app.models.subscription import (
     SubscriptionResponse,
     SubscribeRequest,
     UpgradeRequest,
-    CancelRequest
+    CancelRequest,
+    CreatePaymentIntentRequest,
+    CreatePaymentIntentResponse
 )
 from app.services.subscription_service import (
     get_user_subscription,
     create_subscription,
     upgrade_subscription,
-    cancel_subscription
+    cancel_subscription,
+    create_payment_intent
 )
 
 logger = logging.getLogger(__name__)
@@ -49,13 +52,42 @@ def list_subscription(user_id: str):
         )
 
 
+@router.post("/subscriptions/create-payment-intent", response_model=CreatePaymentIntentResponse)
+def create_payment_intent_endpoint(request: CreatePaymentIntentRequest):
+    """
+    Create a PaymentIntent for subscription payment via PaymentSheet.
+    This is PCI compliant - card data never touches our servers.
+    
+    Args:
+        request: CreatePaymentIntentRequest with user_id and price_id
+        
+    Returns:
+        CreatePaymentIntentResponse with client_secret, customer_id, and ephemeral_key_secret
+    """
+    try:
+        result = create_payment_intent(
+            user_id=request.user_id,
+            price_id=request.price_id
+        )
+        return CreatePaymentIntentResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating payment intent: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating payment intent: {str(e)}"
+        )
+
+
 @router.post("/subscriptions/subscribe")
 def subscribe(request: SubscribeRequest):
     """
-    Create a new subscription for a user
+    Create a new subscription for a user.
+    Supports both PaymentSheet (payment_intent_id) and legacy (payment_method_id) flows.
     
     Args:
-        request: SubscribeRequest with user_id, price_id, and optional payment_method_id
+        request: SubscribeRequest with user_id, price_id, and optional payment_intent_id or payment_method_id
         
     Returns:
         Subscription information
@@ -64,6 +96,7 @@ def subscribe(request: SubscribeRequest):
         subscription = create_subscription(
             user_id=request.user_id,
             price_id=request.price_id,
+            payment_intent_id=request.payment_intent_id,
             payment_method_id=request.payment_method_id,
             trial_days=request.trial_days
         )
@@ -71,15 +104,28 @@ def subscribe(request: SubscribeRequest):
         # Get updated subscription info
         subscription_info = get_user_subscription(request.user_id)
         
+        # Get user to include generation_credits and max_credits
+        from app.services.user_service import get_user_by_id
+        try:
+            user = get_user_by_id(request.user_id)
+            generation_credits = user.generation_credits
+            max_credits = user.max_credits
+        except Exception:
+            generation_credits = None
+            max_credits = None
+        
         return {
-            "message": "Subscription created successfully",
-            "subscription": subscription_info.dict(),
-            "stripe_subscription_id": subscription.id
+            "subscription_id": subscription.id,
+            "subscriptionStatus": subscription_info.subscriptionStatus,
+            "subscriptionPlan": subscription_info.subscriptionPlan,
+            "subscriptionCurrentPeriodEnd": subscription_info.subscriptionCurrentPeriodEnd,
+            "generation_credits": generation_credits,
+            "max_credits": max_credits
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating subscription: {e}")
+        logger.error(f"Error creating subscription: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating subscription: {str(e)}"
