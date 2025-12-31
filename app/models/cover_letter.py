@@ -20,7 +20,24 @@ class JobInfoRequest(BaseModel):
     company_name: str
     hiring_manager: str
     ad_source: str
-    resume: str
+    resume: str  # Can be: plain text, S3 key (user_id/filename.pdf), or base64-encoded PDF
+    jd: str  # Job description
+    additional_instructions: str = ""
+    tone: str = "Professional"
+    address: str = ""  # City, State
+    phone_number: str = ""
+    user_id: Optional[str] = None  # Optional user ID to access custom personality profiles
+    user_email: Optional[str] = None  # Optional user email to access custom personality profiles
+
+
+class CoverLetterWithTextResumeRequest(BaseModel):
+    """Request model for generating cover letter with pasted resume text"""
+    llm: str
+    date_input: str
+    company_name: str
+    hiring_manager: str
+    ad_source: str
+    resume_text: str  # Plain text resume content (pasted by user)
     jd: str  # Job description
     additional_instructions: str = ""
     tone: str = "Professional"
