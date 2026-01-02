@@ -1039,7 +1039,22 @@ def get_raw_stripe_products(force_refresh: bool = False) -> dict:
 
             products_data.append(product_dict)
 
-        logger.info(f"Fetched {len(products_data)} raw Stripe products")
+        # Sort products by metadata "index" field (ascending order)
+        # Products without an "index" field will be sorted to the end
+        def get_index(product):
+            metadata = product.get("metadata", {})
+            index_str = metadata.get("index")
+            if index_str is None:
+                return float("inf")  # Put items without index at the end
+            try:
+                return int(index_str)
+            except (ValueError, TypeError):
+                # If index is not a valid integer, put it at the end
+                return float("inf")
+
+        products_data.sort(key=get_index)
+
+        logger.info(f"Fetched {len(products_data)} raw Stripe products (sorted by metadata.index)")
 
         return {
             "object": "list",
