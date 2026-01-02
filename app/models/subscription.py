@@ -11,6 +11,7 @@ class SubscriptionResponse(BaseModel):
     subscriptionId: Optional[str] = None
     subscriptionStatus: str = "free"  # free, active, canceled, past_due, trialing
     subscriptionPlan: str = "free"  # free, basic, premium, enterprise
+    productId: Optional[str] = None  # Stripe Product ID
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
     lastPaymentDate: Optional[datetime] = None
     stripeCustomerId: Optional[str] = None

@@ -133,10 +133,66 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
+    # Get product ID - either from database or fetch from Stripe if we have a subscription
+    product_id = user.get("subscriptionProductId")
+    
+    # If we don't have product_id stored but have a subscription, try to get it from Stripe
+    if not product_id and user.get("subscriptionId") and STRIPE_AVAILABLE:
+        try:
+            stripe_to_use = _get_stripe_module()
+            if stripe_to_use:
+                subscription_id = user.get("subscriptionId")
+                logger.info(f"Fetching product ID from Stripe for subscription {subscription_id}")
+                
+                # Retrieve subscription with expanded price data
+                subscription = stripe_to_use.Subscription.retrieve(
+                    subscription_id,
+                    expand=["items.data.price.product"]
+                )
+                
+                # Access items correctly - items is a ListObject, use .data to get the list
+                items_data = subscription.items.data if hasattr(subscription.items, 'data') else []
+                if items_data and len(items_data) > 0:
+                    price_obj = items_data[0].price
+                    
+                    # Try to get product ID from expanded price object first
+                    if hasattr(price_obj, "product") and price_obj.product:
+                        if isinstance(price_obj.product, str):
+                            product_id = price_obj.product
+                        elif hasattr(price_obj.product, "id"):
+                            product_id = price_obj.product.id
+                    
+                    # If not expanded, retrieve price separately
+                    if not product_id:
+                        price_id = price_obj.id if hasattr(price_obj, "id") else str(price_obj)
+                        logger.debug(f"Retrieving price {price_id} to get product ID")
+                        price = stripe_to_use.Price.retrieve(price_id, expand=["product"])
+                        
+                        if hasattr(price, "product"):
+                            if isinstance(price.product, str):
+                                product_id = price.product
+                            elif hasattr(price.product, "id"):
+                                product_id = price.product.id
+                    
+                    # Update database with product ID for future use
+                    if product_id:
+                        logger.info(f"Found product ID {product_id} for subscription {subscription_id}")
+                        collection.update_one(
+                            {"_id": user_id_obj},
+                            {"$set": {"subscriptionProductId": product_id}}
+                        )
+                    else:
+                        logger.warning(f"Could not extract product ID from subscription {subscription_id}")
+                else:
+                    logger.warning(f"Subscription {subscription_id} has no items")
+        except Exception as e:
+            logger.error(f"Could not fetch product ID from Stripe: {e}", exc_info=True)
+    
     return SubscriptionResponse(
         subscriptionId=user.get("subscriptionId"),
         subscriptionStatus=user.get("subscriptionStatus", "free"),
         subscriptionPlan=user.get("subscriptionPlan", "free"),
+        productId=product_id,
         subscriptionCurrentPeriodEnd=user.get("subscriptionCurrentPeriodEnd"),
         lastPaymentDate=user.get("lastPaymentDate"),
         stripeCustomerId=user.get("stripeCustomerId"),
@@ -148,6 +204,7 @@ def update_user_subscription(
     subscription_id: Optional[str] = None,
     subscription_status: str = "free",
     subscription_plan: str = "free",
+    subscription_product_id: Optional[str] = None,
     stripe_customer_id: Optional[str] = None,
     current_period_end: Optional[datetime] = None,
     last_payment_date: Optional[datetime] = None,
@@ -160,6 +217,7 @@ def update_user_subscription(
         subscription_id: Stripe subscription ID
         subscription_status: Subscription status
         subscription_plan: Subscription plan name
+        subscription_product_id: Stripe Product ID
         stripe_customer_id: Stripe customer ID
         current_period_end: Current period end date
         last_payment_date: Last payment date
@@ -188,6 +246,7 @@ def update_user_subscription(
         "subscriptionId": subscription_id,
         "subscriptionStatus": subscription_status,
         "subscriptionPlan": subscription_plan,
+        "subscriptionProductId": subscription_product_id,
         "subscriptionCurrentPeriodEnd": current_period_end,
         "lastPaymentDate": last_payment_date,
         "stripeCustomerId": stripe_customer_id,
@@ -654,6 +713,16 @@ def create_subscription(
             subscription_params["trial_period_days"] = trial_days
         
         logger.info(f"Creating subscription for customer {customer_id} with price {price_id}")
+        
+        # Get product ID from price before creating subscription
+        product_id = None
+        try:
+            price = stripe_to_use.Price.retrieve(price_id)
+            product_id = price.product if isinstance(price.product, str) else price.product.id
+            logger.debug(f"Retrieved product ID {product_id} from price {price_id}")
+        except Exception as e:
+            logger.warning(f"Could not retrieve product ID from price {price_id}: {e}")
+        
         subscription = stripe_to_use.Subscription.create(**subscription_params)
         
         # Note: PaymentIntent is already confirmed by PaymentSheet before this point
@@ -666,6 +735,7 @@ def create_subscription(
             subscription_id=subscription.id,
             subscription_status=subscription.status,
             subscription_plan=price_id,  # Store price_id as plan identifier
+            subscription_product_id=product_id,  # Store product ID
             stripe_customer_id=customer_id,
             current_period_end=current_period_end,
         )
@@ -691,10 +761,26 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
     Returns:
         Updated Stripe subscription object
     """
-    if not STRIPE_AVAILABLE:
+    # Use _get_stripe_module() to ensure API key is properly configured
+    stripe_to_use = _get_stripe_module()
+    
+    if stripe_to_use is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
         )
+    
+    # Verify API key is set
+    if not stripe_to_use.api_key:
+        stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
+        if not stripe_api_key:
+            logger.error("Stripe API key not configured (STRIPE_API_KEY or STRIPE_TEST_API_KEY)")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
+            )
+        stripe_to_use.api_key = stripe_api_key
+        logger.debug("Stripe API key set in upgrade_subscription")
     
     # Get current subscription
     subscription_info = get_user_subscription(user_id)
@@ -706,10 +792,19 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
     
     try:
         # Retrieve current subscription
-        subscription = stripe.Subscription.retrieve(subscription_info.subscriptionId)
+        subscription = stripe_to_use.Subscription.retrieve(subscription_info.subscriptionId)
+        
+        # Get product ID from new price before updating subscription
+        product_id = None
+        try:
+            price = stripe_to_use.Price.retrieve(new_price_id)
+            product_id = price.product if isinstance(price.product, str) else price.product.id
+            logger.debug(f"Retrieved product ID {product_id} from price {new_price_id}")
+        except Exception as e:
+            logger.warning(f"Could not retrieve product ID from price {new_price_id}: {e}")
         
         # Update subscription with new price
-        updated_subscription = stripe.Subscription.modify(
+        updated_subscription = stripe_to_use.Subscription.modify(
             subscription.id,
             items=[
                 {
@@ -728,12 +823,13 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             subscription_id=updated_subscription.id,
             subscription_status=updated_subscription.status,
             subscription_plan=new_price_id,
+            subscription_product_id=product_id,  # Store product ID
             current_period_end=current_period_end,
         )
         
         logger.info(f"Upgraded subscription {updated_subscription.id} for user {user_id}")
         return updated_subscription
-    except stripe.error.StripeError as e:
+    except stripe_to_use.error.StripeError as e:
         logger.error(f"Stripe error upgrading subscription: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
