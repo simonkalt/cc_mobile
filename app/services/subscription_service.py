@@ -915,20 +915,36 @@ def get_subscription_plans(force_refresh: bool = False) -> dict:
 
     # Try to fetch dynamically from Stripe
     plans = []
+    stripe_fetch_successful = False
 
     if STRIPE_AVAILABLE:
         # Get campaign filter from environment if set
         campaign_filter = getattr(settings, "STRIPE_PRODUCT_CAMPAIGN", None)
 
+        if campaign_filter:
+            logger.warning(
+                f"⚠️ Campaign filter is set to: '{campaign_filter}' - products without matching metadata will be excluded"
+            )
+
         try:
             plans = _fetch_stripe_products_and_prices(campaign_filter=campaign_filter)
+            stripe_fetch_successful = True
+            if len(plans) > 0:
+                logger.info(f"✅ Successfully fetched {len(plans)} plans from Stripe")
+            else:
+                logger.warning(
+                    f"⚠️ Stripe fetch succeeded but returned 0 plans. Check logs above for details."
+                )
         except Exception as e:
-            logger.warning(f"Error fetching plans from Stripe: {e}")
+            logger.error(f"❌ Error fetching plans from Stripe: {e}", exc_info=True)
             plans = []
+            stripe_fetch_successful = False
 
-    # Fallback to environment variables if no plans found
-    if not plans:
-        logger.info("No plans found from Stripe, falling back to environment variables")
+    # Fallback to environment variables ONLY if Stripe fetch failed or returned no plans
+    if not plans and not stripe_fetch_successful:
+        logger.warning(
+            "⚠️ No plans found from Stripe and fetch failed, falling back to environment variables (STRIPE_PRICE_ID_MONTHLY, STRIPE_PRICE_ID_ANNUAL)"
+        )
         monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
         annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
 
