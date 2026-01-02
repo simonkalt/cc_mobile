@@ -28,9 +28,24 @@ if STRIPE_AVAILABLE:
     stripe_api_key = settings.STRIPE_TEST_API_KEY or settings.STRIPE_API_KEY
     if stripe_api_key:
         stripe.api_key = stripe_api_key
-        logger.info("Stripe API key configured")
+        # Log which key type is being used (without exposing the key)
+        key_type = "test" if settings.STRIPE_TEST_API_KEY else "production"
+        logger.info(f"Stripe API key configured ({key_type} mode)")
+        # Verify the key format (Stripe keys start with sk_test_ or sk_live_)
+        if stripe_api_key.startswith("sk_test_"):
+            logger.debug("Using Stripe test API key")
+        elif stripe_api_key.startswith("sk_live_"):
+            logger.warning("Using Stripe PRODUCTION API key - ensure this is intentional")
+        else:
+            logger.warning(
+                f"Stripe API key format unexpected (starts with: {stripe_api_key[:7]}...)"
+            )
     else:
-        logger.warning("Stripe API key not found in environment variables")
+        logger.warning(
+            "Stripe API key not found in environment variables (STRIPE_TEST_API_KEY or STRIPE_API_KEY)"
+        )
+else:
+    logger.warning("Stripe library not available - subscription features will not work")
 
 
 def get_user_subscription(user_id: str) -> SubscriptionResponse:
@@ -180,18 +195,64 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
     Returns:
         Dictionary with client_secret, customer_id, and ephemeral_key_secret
     """
-    if not STRIPE_AVAILABLE:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
-        )
+    # Ensure stripe is imported - use importlib to avoid scope issues
+    import importlib
+    import sys
 
-    # Get user info
-    collection = get_collection(USERS_COLLECTION)
-    if not collection:
+    if STRIPE_AVAILABLE:
+        # stripe is already available at module level - get it via sys.modules to avoid scope issues
+        stripe_to_use = sys.modules.get("stripe")
+        if stripe_to_use is None:
+            # Fallback: import it
+            stripe_to_use = importlib.import_module("stripe")
+        stripe_available = True
+    else:
+        # Try runtime import in case Stripe was installed after server startup
+        try:
+            stripe_to_use = importlib.import_module("stripe")
+            stripe_available = True
+            logger.info(
+                "Stripe imported successfully at runtime (was not available at module load)"
+            )
+        except ImportError as e:
+            stripe_available = False
+            logger.error(f"Stripe import failed at runtime: {e}")
+            logger.error(
+                f"Stripe library not available. STRIPE_AVAILABLE={STRIPE_AVAILABLE}, "
+                f"Python={sys.executable}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
+            )
+
+    if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection",
+            detail="Stripe module could not be loaded",
         )
+
+    # Use stripe_to_use throughout the function to avoid scope issues
+
+    if not is_connected():
+        logger.error("Database connection unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+
+    # Get user info - check database first to avoid PyMongo collection bool() issue
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    if db is None:
+        logger.error("MongoDB database not initialized")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+
+    collection = get_collection(USERS_COLLECTION)
 
     try:
         user_id_obj = ObjectId(user_id)
@@ -215,10 +276,10 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
             update_user_subscription(user_id=user_id, stripe_customer_id=stripe_customer_id)
 
         # Get price details
-        price = stripe.Price.retrieve(price_id)
+        price = stripe_to_use.Price.retrieve(price_id)
 
         # Create PaymentIntent
-        payment_intent = stripe.PaymentIntent.create(
+        payment_intent = stripe_to_use.PaymentIntent.create(
             amount=int(price.unit_amount),  # Amount in cents
             currency=price.currency,
             customer=stripe_customer_id,
@@ -227,7 +288,7 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
         )
 
         # Create ephemeral key for customer (allows PaymentSheet to access customer)
-        ephemeral_key = stripe.EphemeralKey.create(
+        ephemeral_key = stripe_to_use.EphemeralKey.create(
             customer=stripe_customer_id,
             stripe_version="2023-10-16",  # Use latest Stripe API version
         )
@@ -240,7 +301,7 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
             "customer_ephemeral_key_secret": ephemeral_key.secret,
         }
 
-    except stripe.error.StripeError as e:
+    except stripe_to_use.error.StripeError as e:
         logger.error(f"Stripe error creating payment intent: {e}")
         error_message = (
             str(e.user_message) if hasattr(e, "user_message") else "Payment processing failed"
@@ -293,13 +354,17 @@ def create_subscription(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
         )
 
-    # Get user info to create customer if needed
-    collection = get_collection(USERS_COLLECTION)
-    if not collection:
+    # Get user info to create customer if needed - check database first
+    from app.db.mongodb import get_database
+
+    db = get_database()
+    if db is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection",
+            detail="Database connection unavailable",
         )
+
+    collection = get_collection(USERS_COLLECTION)
 
     try:
         user_id_obj = ObjectId(user_id)
@@ -536,3 +601,97 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to cancel subscription: {str(e)}",
         )
+
+
+def get_subscription_plans() -> dict:
+    """
+    Get available subscription plans with Stripe Price IDs.
+    This endpoint can be public (no auth required).
+
+    Returns:
+        Dictionary with 'plans' list containing plan information
+    """
+    # Get Price IDs from environment variables
+    monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
+    annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
+
+    # If Price IDs are not configured, return empty plans or use defaults
+    if not monthly_price_id or not annual_price_id:
+        logger.warning(
+            "Stripe Price IDs not configured. Set STRIPE_PRICE_ID_MONTHLY and STRIPE_PRICE_ID_ANNUAL environment variables."
+        )
+        # Return empty plans if not configured
+        return {"plans": []}
+
+    # Optionally verify prices exist in Stripe (if Stripe is available)
+    if STRIPE_AVAILABLE:
+        try:
+            import importlib
+            import sys
+
+            # Get stripe module
+            stripe_module = sys.modules.get("stripe")
+            if stripe_module is None:
+                stripe_module = importlib.import_module("stripe")
+
+            # Verify monthly price exists
+            try:
+                monthly_price = stripe_module.Price.retrieve(monthly_price_id)
+                logger.debug(f"Verified monthly price: {monthly_price_id}")
+            except stripe_module.error.InvalidRequestError:
+                logger.warning(f"Monthly price ID {monthly_price_id} not found in Stripe")
+                monthly_price_id = None
+
+            # Verify annual price exists
+            try:
+                annual_price = stripe_module.Price.retrieve(annual_price_id)
+                logger.debug(f"Verified annual price: {annual_price_id}")
+            except stripe_module.error.InvalidRequestError:
+                logger.warning(f"Annual price ID {annual_price_id} not found in Stripe")
+                annual_price_id = None
+
+        except Exception as e:
+            logger.warning(f"Could not verify prices in Stripe: {e}")
+            # Continue anyway - return plans with configured IDs
+
+    # Build plans list
+    plans = []
+
+    if monthly_price_id:
+        plans.append(
+            {
+                "id": "monthly",
+                "name": "Monthly",
+                "interval": "month",
+                "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
+                "priceId": monthly_price_id,
+                "features": [
+                    "Unlimited cover letter generations",
+                    "All AI models available",
+                    "Priority support",
+                    "Cancel anytime",
+                ],
+                "popular": False,
+            }
+        )
+
+    if annual_price_id:
+        plans.append(
+            {
+                "id": "annual",
+                "name": "Annual",
+                "interval": "year",
+                "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
+                "priceId": annual_price_id,
+                "features": [
+                    "Unlimited cover letter generations",
+                    "All AI models available",
+                    "Priority support",
+                    "Best value - save with annual billing",
+                    "Cancel anytime",
+                ],
+                "popular": True,  # Mark annual as popular/recommended
+            }
+        )
+
+    return {"plans": plans}

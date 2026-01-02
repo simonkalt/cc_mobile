@@ -217,6 +217,36 @@ async def health_check():
         "mongodb": "connected" if is_connected() else "disconnected"
     }
     
+    # Add Stripe health check
+    try:
+        from app.services.subscription_service import STRIPE_AVAILABLE
+        import stripe
+        from app.core.config import settings
+        
+        health_info["stripe"] = {
+            "library_available": STRIPE_AVAILABLE,
+            "api_key_configured": bool(settings.STRIPE_TEST_API_KEY or settings.STRIPE_API_KEY),
+            "test_key_present": bool(settings.STRIPE_TEST_API_KEY),
+            "production_key_present": bool(settings.STRIPE_API_KEY),
+        }
+        
+        # Test Stripe connection if available and configured
+        if STRIPE_AVAILABLE and (settings.STRIPE_TEST_API_KEY or settings.STRIPE_API_KEY):
+            try:
+                # Make a simple API call to verify connection
+                stripe.Account.retrieve()
+                health_info["stripe"]["connection"] = "ok"
+            except stripe.error.AuthenticationError:
+                health_info["stripe"]["connection"] = "authentication_failed"
+            except stripe.error.APIConnectionError:
+                health_info["stripe"]["connection"] = "connection_error"
+            except Exception as e:
+                health_info["stripe"]["connection"] = f"error: {str(e)}"
+        else:
+            health_info["stripe"]["connection"] = "not_configured"
+    except Exception as e:
+        health_info["stripe"] = {"error": str(e)}
+    
     # Add detailed database info if connected
     if is_connected():
         try:
@@ -260,6 +290,64 @@ async def health_check():
         health_info["registered_routes"] = [r for r in routes if "/api/users" in r["path"]]
     except Exception as e:
         health_info["routes_error"] = str(e)
+    
+    return health_info
+
+
+@app.get("/api/health/stripe")
+async def stripe_health_check():
+    """
+    Dedicated Stripe health check endpoint
+    Returns detailed information about Stripe configuration and connectivity
+    """
+    from app.services.subscription_service import STRIPE_AVAILABLE
+    from app.core.config import settings
+    
+    health_info = {
+        "stripe_library_available": STRIPE_AVAILABLE,
+        "status": "unknown"
+    }
+    
+    if not STRIPE_AVAILABLE:
+        health_info["status"] = "library_not_available"
+        health_info["message"] = "Stripe Python library is not installed. Install with: pip install stripe>=7.0.0"
+        return health_info
+    
+    # Check API key configuration
+    stripe_api_key = settings.STRIPE_TEST_API_KEY or settings.STRIPE_API_KEY
+    if not stripe_api_key:
+        health_info["status"] = "not_configured"
+        health_info["message"] = "Stripe API key not found. Set STRIPE_TEST_API_KEY or STRIPE_API_KEY in environment variables."
+        health_info["test_key_present"] = bool(settings.STRIPE_TEST_API_KEY)
+        health_info["production_key_present"] = bool(settings.STRIPE_API_KEY)
+        return health_info
+    
+    # Test Stripe API connection
+    try:
+        import stripe
+        account = stripe.Account.retrieve()
+        health_info["status"] = "healthy"
+        health_info["message"] = "Stripe API connection successful"
+        health_info["account_id"] = account.id
+        health_info["account_type"] = account.type
+        health_info["api_key_type"] = "test" if settings.STRIPE_TEST_API_KEY else "production"
+        health_info["api_key_prefix"] = stripe_api_key[:7] + "..." if len(stripe_api_key) > 7 else "***"
+    except stripe.error.AuthenticationError as e:
+        health_info["status"] = "authentication_failed"
+        health_info["message"] = f"Stripe authentication failed: {str(e)}"
+        health_info["error_code"] = getattr(e, 'code', None)
+    except stripe.error.APIConnectionError as e:
+        health_info["status"] = "connection_error"
+        health_info["message"] = f"Stripe API connection error: {str(e)}"
+    except stripe.error.StripeError as e:
+        health_info["status"] = "stripe_error"
+        health_info["message"] = f"Stripe error: {str(e)}"
+        health_info["error_type"] = e.__class__.__name__
+        health_info["error_code"] = getattr(e, 'code', None)
+    except Exception as e:
+        health_info["status"] = "error"
+        health_info["message"] = f"Unexpected error: {str(e)}"
+        health_info["error_type"] = e.__class__.__name__
     
     return health_info
 

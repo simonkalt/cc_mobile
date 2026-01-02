@@ -49,3 +49,24 @@ class CancelRequest(BaseModel):
     user_id: str
     cancel_immediately: bool = False  # If True, cancel immediately; if False, cancel at period end
 
+
+class SubscriptionPlanFeature(BaseModel):
+    """Feature included in a subscription plan"""
+    feature: str
+
+
+class SubscriptionPlan(BaseModel):
+    """Subscription plan information"""
+    id: str  # e.g., "monthly", "annual"
+    name: str  # e.g., "Monthly", "Annual"
+    interval: str  # "month" or "year"
+    description: str
+    priceId: str  # Stripe Price ID
+    features: list[str]
+    popular: Optional[bool] = False  # Mark recommended plan
+
+
+class SubscriptionPlansResponse(BaseModel):
+    """Response containing available subscription plans"""
+    plans: list[SubscriptionPlan]
+
