@@ -41,8 +41,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi import Request, status
 import logging
-import os
-import signal
 import sys
 
 from app.core.config import settings, get_cors_origins
@@ -55,26 +53,8 @@ setup_logging()
 
 logger = logging.getLogger(__name__)
 
-# Track shutdown state for signal handling
-_shutdown_in_progress = False
-
-def force_exit_handler(signum, frame):
-    """Force exit on second Ctrl+C during shutdown"""
-    global _shutdown_in_progress
-    if _shutdown_in_progress:
-        logger.warning("Force exit requested - terminating immediately")
-        os._exit(1)  # Use os._exit to bypass cleanup and force immediate termination
-    else:
-        _shutdown_in_progress = True
-        logger.info("Shutdown signal received - initiating graceful shutdown")
-
-# Register signal handler for graceful shutdown (works on WSL/Linux/macOS)
-try:
-    if sys.platform != "win32":  # Signal handlers work on Unix-like systems (WSL, Linux, macOS)
-        signal.signal(signal.SIGINT, force_exit_handler)
-        signal.signal(signal.SIGTERM, force_exit_handler)
-except Exception as e:
-    logger.debug(f"Could not set up signal handlers: {e}")
+# Note: We let uvicorn handle SIGINT/SIGTERM signals natively
+# The lifespan context manager below handles cleanup during shutdown
 
 
 @asynccontextmanager
@@ -87,41 +67,15 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown - aggressive cleanup to prevent hanging
-    global _shutdown_in_progress
-    _shutdown_in_progress = True
+    # Shutdown - minimal cleanup, let uvicorn handle task cancellation
     logger.info("Shutting down application...")
     try:
-        import asyncio
-        
-        # Cancel all pending tasks first
-        try:
-            loop = asyncio.get_running_loop()
-            tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
-            if tasks:
-                logger.info(f"Cancelling {len(tasks)} pending tasks...")
-                for task in tasks:
-                    task.cancel()
-                # Wait briefly for cancellations, but don't block
-                await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
-            logger.debug(f"Error cancelling tasks: {e}")
-        
-        # Run MongoDB cleanup with very short timeout - non-blocking
-        try:
-            loop = asyncio.get_running_loop()
-            await asyncio.wait_for(
-                loop.run_in_executor(None, close_mongodb_connection),
-                timeout=0.5  # Very short timeout - 500ms
-            )
-        except asyncio.TimeoutError:
-            logger.warning("MongoDB cleanup timeout - continuing shutdown")
-        except Exception as e:
-            logger.warning(f"MongoDB cleanup error (non-critical): {e}")
-        
+        # MongoDB cleanup is already non-blocking (runs in daemon thread)
+        # Just call it and return immediately - don't wait
+        close_mongodb_connection()
         logger.info("Application shutdown complete")
     except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+        logger.warning(f"Error during shutdown (non-critical): {e}")
 
 
 # Create the FastAPI app instance

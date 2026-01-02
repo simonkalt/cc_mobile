@@ -23,6 +23,9 @@ from app.models.subscription import SubscriptionResponse
 
 logger = logging.getLogger(__name__)
 
+# Stripe API version - must be consistent across all endpoints
+STRIPE_API_VERSION = "2023-10-16"
+
 # Simple in-memory cache for Stripe products/prices
 _stripe_plans_cache: Optional[Dict] = None
 _stripe_plans_cache_time: Optional[datetime] = None
@@ -50,6 +53,8 @@ def _get_stripe_module():
         stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
         if stripe_api_key:
             stripe_module.api_key = stripe_api_key
+            # Set API version for consistency
+            stripe_module.api_version = STRIPE_API_VERSION
         return stripe_module
     else:
         # Try runtime import in case Stripe was installed after server startup
@@ -59,6 +64,8 @@ def _get_stripe_module():
             stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
             if stripe_api_key:
                 stripe_module.api_key = stripe_api_key
+                # Set API version for consistency
+                stripe_module.api_version = STRIPE_API_VERSION
             return stripe_module
         except ImportError:
             return None
@@ -70,9 +77,11 @@ if STRIPE_AVAILABLE:
     stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
     if stripe_api_key:
         stripe.api_key = stripe_api_key
+        # Set global Stripe API version for consistency across all endpoints
+        stripe.api_version = STRIPE_API_VERSION
         # Log which key type is being used (without exposing the key)
         key_type = "production" if settings.STRIPE_API_KEY else "test"
-        logger.info(f"Stripe API key configured ({key_type} mode)")
+        logger.info(f"Stripe API key configured ({key_type} mode), API version: {STRIPE_API_VERSION}")
         # Verify the key format (Stripe keys start with sk_test_ or sk_live_)
         if stripe_api_key.startswith("sk_live_"):
             logger.info("Using Stripe PRODUCTION API key")
@@ -208,16 +217,32 @@ def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None)
     Returns:
         Stripe customer ID
     """
-    if not STRIPE_AVAILABLE:
+    # Use _get_stripe_module() to ensure API key is properly configured
+    stripe_to_use = _get_stripe_module()
+    
+    if stripe_to_use is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0"
         )
     
+    # Verify API key is set
+    if not stripe_to_use.api_key:
+        stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
+        if not stripe_api_key:
+            logger.error("Stripe API key not configured (STRIPE_API_KEY or STRIPE_TEST_API_KEY)")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
+            )
+        stripe_to_use.api_key = stripe_api_key
+        logger.debug("Stripe API key set in create_stripe_customer")
+    
     try:
-        customer = stripe.Customer.create(email=email, name=name, metadata={"user_id": user_id})
+        customer = stripe_to_use.Customer.create(email=email, name=name, metadata={"user_id": user_id})
         logger.info(f"Created Stripe customer {customer.id} for user {user_id}")
         return customer.id
-    except stripe.error.StripeError as e:
+    except stripe_to_use.error.StripeError as e:
         logger.error(f"Stripe error creating customer: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -237,42 +262,26 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
     Returns:
         Dictionary with client_secret, customer_id, and ephemeral_key_secret
     """
-    # Ensure stripe is imported - use importlib to avoid scope issues
-    import importlib
-    import sys
-
-    if STRIPE_AVAILABLE:
-        # stripe is already available at module level - get it via sys.modules to avoid scope issues
-        stripe_to_use = sys.modules.get("stripe")
-        if stripe_to_use is None:
-            # Fallback: import it
-            stripe_to_use = importlib.import_module("stripe")
-        stripe_available = True
-    else:
-        # Try runtime import in case Stripe was installed after server startup
-        try:
-            stripe_to_use = importlib.import_module("stripe")
-            stripe_available = True
-            logger.info(
-                "Stripe imported successfully at runtime (was not available at module load)"
-            )
-        except ImportError as e:
-            stripe_available = False
-            logger.error(f"Stripe import failed at runtime: {e}")
-            logger.error(
-                f"Stripe library not available. STRIPE_AVAILABLE={STRIPE_AVAILABLE}, "
-                f"Python={sys.executable}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
-            )
-
+    # Use _get_stripe_module() to ensure API key is properly configured
+    stripe_to_use = _get_stripe_module()
+    
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Stripe module could not be loaded",
+            detail="Stripe module could not be loaded. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
         )
+
+    # Verify API key is set
+    if not stripe_to_use.api_key:
+        stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
+        if not stripe_api_key:
+            logger.error("Stripe API key not configured (STRIPE_API_KEY or STRIPE_TEST_API_KEY)")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
+            )
+        stripe_to_use.api_key = stripe_api_key
+        logger.debug("Stripe API key set in create_payment_intent")
 
     # Use stripe_to_use throughout the function to avoid scope issues
 
@@ -352,7 +361,7 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
         # Create ephemeral key for customer (allows PaymentSheet to access customer)
         ephemeral_key = stripe_to_use.EphemeralKey.create(
             customer=stripe_customer_id,
-            stripe_version="2023-10-16",  # Use latest Stripe API version
+            stripe_version=STRIPE_API_VERSION,  # Use consistent Stripe API version
         )
 
         logger.info(f"Created PaymentIntent {payment_intent.id} for user {user_id}")
@@ -411,10 +420,26 @@ def create_subscription(
     Returns:
         Stripe subscription object
     """
-    if not STRIPE_AVAILABLE:
+    # Use _get_stripe_module() to ensure API key is properly configured
+    stripe_to_use = _get_stripe_module()
+    
+    if stripe_to_use is None:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
         )
+
+    # Verify API key is set
+    if not stripe_to_use.api_key:
+        stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
+        if not stripe_api_key:
+            logger.error("Stripe API key not configured (STRIPE_API_KEY or STRIPE_TEST_API_KEY)")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
+            )
+        stripe_to_use.api_key = stripe_api_key
+        logger.debug("Stripe API key set in create_subscription")
 
     # Get user info to create customer if needed - check database first
     from app.db.mongodb import get_database
@@ -439,57 +464,59 @@ def create_subscription(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Get or create customer
+    # Get or create customer - ensure customer exists in Stripe
     if not customer_id:
         customer_id = user.get("stripeCustomerId")
-        if not customer_id:
-            # No customer ID in database - create new customer
-            customer_id = create_stripe_customer(
-                user_id=user_id, email=user.get("email", ""), name=user.get("name")
-            )
-            # Update user with customer ID
-            update_user_subscription(user_id=user_id, stripe_customer_id=customer_id)
-        else:
-            # Customer ID exists in database - verify it exists in Stripe
-            stripe_to_use = _get_stripe_module()
-            if stripe_to_use is None:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Stripe module could not be loaded",
+    
+    # Verify customer exists in Stripe, create if it doesn't
+    if customer_id:
+        try:
+            stripe_to_use.Customer.retrieve(customer_id)
+            logger.debug(f"Verified existing Stripe customer {customer_id} for user {user_id}")
+        except stripe_to_use.error.InvalidRequestError as e:
+            # Customer doesn't exist in Stripe (maybe deleted or wrong account)
+            if "No such customer" in str(e) or e.code == "resource_missing":
+                logger.warning(
+                    f"Customer {customer_id} not found in Stripe for user {user_id}, creating new customer"
                 )
-            try:
-                stripe_to_use.Customer.retrieve(customer_id)
-                logger.debug(f"Verified existing Stripe customer {customer_id} for user {user_id}")
-            except stripe_to_use.error.InvalidRequestError as e:
-                # Customer doesn't exist in Stripe (maybe deleted or wrong account)
-                if "No such customer" in str(e) or e.code == "resource_missing":
-                    logger.warning(
-                        f"Customer {customer_id} not found in Stripe for user {user_id}, creating new customer"
-                    )
-                    customer_id = create_stripe_customer(
-                        user_id=user_id, email=user.get("email", ""), name=user.get("name")
-                    )
-                    # Update user with new customer ID
-                    update_user_subscription(user_id=user_id, stripe_customer_id=customer_id)
-                else:
-                    # Some other error - re-raise it
-                    raise
+                customer_id = create_stripe_customer(
+                    user_id=user_id, email=user.get("email", ""), name=user.get("name")
+                )
+                # Update user with new customer ID
+                update_user_subscription(user_id=user_id, stripe_customer_id=customer_id)
+            else:
+                # Some other error - re-raise it
+                raise
+    else:
+        # No customer ID in database - create new customer
+        logger.info(f"No Stripe customer found for user {user_id}, creating new customer")
+        customer_id = create_stripe_customer(
+            user_id=user_id, email=user.get("email", ""), name=user.get("name")
+        )
+        # Update user with customer ID
+        update_user_subscription(user_id=user_id, stripe_customer_id=customer_id)
     
     if not customer_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer ID required")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Failed to create or retrieve Stripe customer"
+        )
 
-    # Handle PaymentIntent flow (PaymentSheet)
+    # Handle PaymentIntent flow (PaymentSheet) - MUST be done BEFORE creating subscription
+    payment_method_id = None
     if payment_intent_id:
         try:
-            # Retrieve PaymentIntent to get payment method
-            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+            # Step 1: Retrieve PaymentIntent
+            payment_intent = stripe_to_use.PaymentIntent.retrieve(payment_intent_id)
+            logger.debug(f"Retrieved PaymentIntent {payment_intent_id}, status: {payment_intent.status}")
 
             if payment_intent.status != "succeeded":
                 raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Payment not completed"
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED, 
+                    detail=f"Payment not completed. PaymentIntent status: {payment_intent.status}"
                 )
 
-            # Get payment method from PaymentIntent
+            # Step 2: Get payment method from PaymentIntent
             payment_method_id = payment_intent.payment_method
 
             if not payment_method_id:
@@ -498,17 +525,85 @@ def create_subscription(
                     detail="Payment method not found in PaymentIntent",
                 )
 
-            # Attach payment method to customer
-            stripe.PaymentMethod.attach(payment_method_id, customer=customer_id)
+            logger.debug(f"Payment method ID from PaymentIntent: {payment_method_id}")
 
-            # Set as default payment method
-            stripe.Customer.modify(
-                customer_id, invoice_settings={"default_payment_method": payment_method_id}
-            )
+            # Step 3: Check if payment method is already attached, then attach if needed
+            payment_method_attached = False
+            try:
+                # First, retrieve the payment method to check if it's already attached
+                payment_method = stripe_to_use.PaymentMethod.retrieve(payment_method_id)
+                
+                if payment_method.customer == customer_id:
+                    # Payment method is already attached to this customer
+                    logger.info(f"Payment method {payment_method_id} already attached to customer {customer_id}")
+                    payment_method_attached = True
+                elif payment_method.customer is None:
+                    # Payment method is not attached to any customer - try to attach it
+                    try:
+                        stripe_to_use.PaymentMethod.attach(
+                            payment_method_id,
+                            customer=customer_id
+                        )
+                        logger.info(f"Attached payment method {payment_method_id} to customer {customer_id}")
+                        payment_method_attached = True
+                    except stripe_to_use.error.InvalidRequestError as attach_error:
+                        # Check if it's the "previously used" error
+                        error_msg = str(attach_error).lower()
+                        if "previously used" in error_msg or "may not be used again" in error_msg:
+                            logger.warning(
+                                f"Payment method {payment_method_id} was previously used and cannot be attached. "
+                                f"This may happen if PaymentIntent was confirmed without attaching the payment method. "
+                                f"Will proceed with subscription creation - the payment method from the successful "
+                                f"PaymentIntent will be used directly."
+                            )
+                            payment_method_attached = False
+                        else:
+                            raise
+                else:
+                    # Payment method is attached to a different customer
+                    if payment_method.customer != customer_id:
+                        logger.warning(
+                            f"Payment method {payment_method_id} is attached to customer {payment_method.customer}, "
+                            f"not {customer_id}. This should not happen in normal flow."
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Payment method belongs to a different customer"
+                        )
+                    else:
+                        payment_method_attached = True
+            except stripe_to_use.error.InvalidRequestError as e:
+                # If we can't retrieve the payment method, log and continue
+                error_msg = str(e).lower()
+                if "no such payment_method" in error_msg:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Payment method {payment_method_id} not found"
+                    )
+                else:
+                    logger.warning(f"Could not retrieve payment method {payment_method_id}: {e}")
+                    # Continue - we'll use the payment method from PaymentIntent
 
-            payment_method_id = payment_method_id  # Use this for subscription
+            # Step 4: Set as default payment method BEFORE creating subscription (only if attached)
+            if payment_method_attached:
+                try:
+                    stripe_to_use.Customer.modify(
+                        customer_id,
+                        invoice_settings={
+                            "default_payment_method": payment_method_id
+                        }
+                    )
+                    logger.info(f"Set payment method {payment_method_id} as default for customer {customer_id}")
+                except stripe_to_use.error.StripeError as e:
+                    logger.warning(f"Could not set payment method as default: {e}")
+                    # Continue - subscription creation will still work
+            else:
+                logger.info(
+                    f"Payment method {payment_method_id} not attached, so not setting as default. "
+                    f"Subscription will use payment method from PaymentIntent."
+                )
 
-        except stripe.error.StripeError as e:
+        except stripe_to_use.error.StripeError as e:
             logger.error(f"Stripe error processing payment intent: {e}")
             error_message = (
                 str(e.user_message) if hasattr(e, "user_message") else "Payment processing failed"
@@ -525,27 +620,42 @@ def create_subscription(
                 },
         )
     
+    # Step 5: THEN create the subscription (after payment method is attached and set as default)
     try:
         subscription_params = {
             "customer": customer_id,
             "items": [{"price": price_id}],
             "metadata": {"user_id": user_id},
-            "payment_behavior": "default_incomplete",
-            "payment_settings": {
-                "payment_method_types": ["card"],
-                "save_default_payment_method": "on_subscription",
-            },
             "expand": ["latest_invoice.payment_intent"],
+        }
+        
+        # Only set default_payment_method if it was successfully attached to the customer
+        # Stripe requires the payment method to be attached before it can be used in subscription
+        if payment_method_id and payment_method_attached:
+            subscription_params["default_payment_method"] = payment_method_id
+            logger.info(f"Using attached payment method {payment_method_id} for subscription")
+        elif payment_method_id and not payment_method_attached:
+            # Payment method couldn't be attached (e.g., "previously used" error)
+            # Don't set it as default_payment_method - Stripe will use the payment from PaymentIntent
+            logger.warning(
+                f"Payment method {payment_method_id} not attached, so not setting as default_payment_method. "
+                f"Subscription will use payment from PaymentIntent."
+            )
+        
+        # Payment is already completed via PaymentIntent, so subscription should be active
+        subscription_params["payment_behavior"] = "default_incomplete"
+        
+        subscription_params["payment_settings"] = {
+            "payment_method_types": ["card"],
+            "save_default_payment_method": "on_subscription",
         }
         
         if trial_days:
             subscription_params["trial_period_days"] = trial_days
         
-        if payment_method_id:
-            subscription_params["default_payment_method"] = payment_method_id
+        logger.info(f"Creating subscription for customer {customer_id} with price {price_id}")
+        subscription = stripe_to_use.Subscription.create(**subscription_params)
         
-        subscription = stripe.Subscription.create(**subscription_params)
-
         # Note: PaymentIntent is already confirmed by PaymentSheet before this point
         # We just need to ensure the subscription uses the payment method from the PaymentIntent
         
@@ -562,7 +672,7 @@ def create_subscription(
         
         logger.info(f"Created subscription {subscription.id} for user {user_id}")
         return subscription
-    except stripe.error.StripeError as e:
+    except stripe_to_use.error.StripeError as e:
         logger.error(f"Stripe error creating subscription: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
