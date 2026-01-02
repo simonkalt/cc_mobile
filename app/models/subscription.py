@@ -57,11 +57,15 @@ class SubscriptionPlanFeature(BaseModel):
 
 class SubscriptionPlan(BaseModel):
     """Subscription plan information"""
-    id: str  # e.g., "monthly", "annual"
-    name: str  # e.g., "Monthly", "Annual"
+    id: str  # e.g., "monthly", "annual", or dynamically generated from product
+    name: str  # e.g., "Monthly", "Annual", or product name
     interval: str  # "month" or "year"
+    interval_count: Optional[int] = 1  # Number of intervals (e.g., 3 for "every 3 months")
     description: str
     priceId: str  # Stripe Price ID
+    amount: Optional[float] = None  # Price amount (in currency units)
+    currency: Optional[str] = None  # Currency code (e.g., "USD")
+    productId: Optional[str] = None  # Stripe Product ID
     features: list[str]
     popular: Optional[bool] = False  # Mark recommended plan
 

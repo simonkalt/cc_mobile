@@ -3,17 +3,18 @@ Subscription service - Stripe integration for subscription management
 """
 
 import logging
-from typing import Optional
-from datetime import datetime
+from typing import Optional, Dict, List
+from datetime import datetime, timedelta
 from bson import ObjectId
 from fastapi import HTTPException, status
 
 try:
-    import stripe
+    import stripe  # type: ignore[import-untyped]
 
     STRIPE_AVAILABLE = True
 except ImportError:
     STRIPE_AVAILABLE = False
+    stripe = None  # type: ignore[assignment]
 
 from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
@@ -22,20 +23,61 @@ from app.models.subscription import SubscriptionResponse
 
 logger = logging.getLogger(__name__)
 
+# Simple in-memory cache for Stripe products/prices
+_stripe_plans_cache: Optional[Dict] = None
+_stripe_plans_cache_time: Optional[datetime] = None
+_stripe_plans_cache_ttl: timedelta = timedelta(minutes=5)  # Cache for 5 minutes
+
+
+def _get_stripe_module():
+    """
+    Helper function to get the Stripe module dynamically.
+    Avoids scope issues with local imports.
+
+    Returns:
+        Stripe module or None if not available
+    """
+    import importlib
+    import sys
+
+    if STRIPE_AVAILABLE:
+        # stripe is already available at module level - get it via sys.modules to avoid scope issues
+        stripe_module = sys.modules.get("stripe")
+        if stripe_module is None:
+            # Fallback: import it
+            stripe_module = importlib.import_module("stripe")
+        # Ensure API key is set - prioritize production key over test key
+        stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
+        if stripe_api_key:
+            stripe_module.api_key = stripe_api_key
+        return stripe_module
+    else:
+        # Try runtime import in case Stripe was installed after server startup
+        try:
+            stripe_module = importlib.import_module("stripe")
+            # Set API key if available - prioritize production key over test key
+            stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
+            if stripe_api_key:
+                stripe_module.api_key = stripe_api_key
+            return stripe_module
+        except ImportError:
+            return None
+
+
 # Initialize Stripe
 if STRIPE_AVAILABLE:
-    # Use test key if available, otherwise use production key
-    stripe_api_key = settings.STRIPE_TEST_API_KEY or settings.STRIPE_API_KEY
+    # Prioritize production key over test key
+    stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
     if stripe_api_key:
         stripe.api_key = stripe_api_key
         # Log which key type is being used (without exposing the key)
-        key_type = "test" if settings.STRIPE_TEST_API_KEY else "production"
+        key_type = "production" if settings.STRIPE_API_KEY else "test"
         logger.info(f"Stripe API key configured ({key_type} mode)")
         # Verify the key format (Stripe keys start with sk_test_ or sk_live_)
-        if stripe_api_key.startswith("sk_test_"):
-            logger.debug("Using Stripe test API key")
-        elif stripe_api_key.startswith("sk_live_"):
-            logger.warning("Using Stripe PRODUCTION API key - ensure this is intentional")
+        if stripe_api_key.startswith("sk_live_"):
+            logger.info("Using Stripe PRODUCTION API key")
+        elif stripe_api_key.startswith("sk_test_"):
+            logger.warning("Using Stripe TEST API key - ensure this is for development only")
         else:
             logger.warning(
                 f"Stripe API key format unexpected (starts with: {stripe_api_key[:7]}...)"
@@ -603,95 +645,335 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
         )
 
 
-def get_subscription_plans() -> dict:
+def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> List[Dict]:
+    """
+    Fetch active products and their prices from Stripe.
+
+    Args:
+        campaign_filter: Optional metadata filter for products (e.g., "campaign:premium")
+                         If provided, only products with matching metadata will be returned.
+
+    Returns:
+        List of plan dictionaries with product and price information
+    """
+    if not STRIPE_AVAILABLE:
+        logger.warning("Stripe library not available - cannot fetch products dynamically")
+        return []
+
+    try:
+        stripe_module = _get_stripe_module()
+        if stripe_module is None:
+            logger.error("Failed to get Stripe module")
+            return []
+
+        # Log campaign filter status
+        if campaign_filter:
+            logger.info(
+                f"Campaign filter active: '{campaign_filter}' - will filter products by metadata"
+            )
+        else:
+            logger.info("No campaign filter - fetching all active products")
+
+        plans = []
+
+        # Fetch active products
+        try:
+            # Build product list parameters
+            product_params = {"active": True, "limit": 100}
+
+            # If campaign filter is provided, we'll filter after fetching
+            # (Stripe metadata filtering requires specific query format)
+            products = stripe_module.Product.list(**product_params)
+
+            logger.info(f"Found {len(products.data)} active products in Stripe")
+
+            if len(products.data) == 0:
+                logger.warning(
+                    "No active products found in Stripe. Check that products are marked as 'active' in Stripe Dashboard."
+                )
+                return []
+
+            products_processed = 0
+            products_filtered = 0
+            products_without_recurring_prices = 0
+
+            # Process each product
+            for product in products.data:
+                logger.debug(
+                    f"Processing product: {product.id} - {product.name} (metadata: {product.metadata})"
+                )
+
+                # Apply campaign filter if provided
+                if campaign_filter:
+                    product_metadata = product.metadata or {}
+                    # Check if campaign filter matches any metadata value
+                    if campaign_filter not in product_metadata.values():
+                        # Also check if it's a key
+                        if campaign_filter not in product_metadata:
+                            logger.debug(
+                                f"Product {product.id} filtered out by campaign filter '{campaign_filter}' (metadata: {product_metadata})"
+                            )
+                            products_filtered += 1
+                            continue
+
+                products_processed += 1
+
+                # Fetch prices for this product
+                try:
+                    prices = stripe_module.Price.list(product=product.id, active=True, limit=100)
+
+                    logger.debug(f"Product {product.id} has {len(prices.data)} active prices")
+
+                    recurring_prices_found = 0
+
+                    # Process each price
+                    for price in prices.data:
+                        logger.debug(
+                            f"  Price {price.id}: type={price.type}, active={price.active}"
+                        )
+
+                        # Only include recurring prices (subscriptions)
+                        if price.type != "recurring":
+                            logger.debug(
+                                f"  Price {price.id} skipped: not a recurring price (type: {price.type})"
+                            )
+                            continue
+
+                        if not price.active:
+                            logger.debug(f"  Price {price.id} skipped: not active")
+                            continue
+
+                        recurring_prices_found += 1
+
+                        # Extract interval information
+                        interval = price.recurring.interval if price.recurring else "month"
+                        interval_count = price.recurring.interval_count if price.recurring else 1
+
+                        # Format interval for display
+                        if interval_count > 1:
+                            interval_display = f"{interval_count} {interval}s"
+                        else:
+                            interval_display = interval
+
+                        # Get amount and currency
+                        amount = price.unit_amount / 100 if price.unit_amount else 0
+                        currency = price.currency.upper() if price.currency else "USD"
+
+                        # Build plan ID from product and interval
+                        plan_id = f"{product.id}_{interval}_{interval_count}".lower().replace(
+                            "_", "-"
+                        )
+
+                        # Build plan name from product name and interval
+                        plan_name = product.name or "Subscription"
+                        if interval_count == 1:
+                            if interval == "month":
+                                plan_name = f"{plan_name} (Monthly)"
+                            elif interval == "year":
+                                plan_name = f"{plan_name} (Annual)"
+                            else:
+                                plan_name = f"{plan_name} ({interval_display.capitalize()})"
+                        else:
+                            plan_name = f"{plan_name} ({interval_display.capitalize()})"
+
+                        # Build description from product description or default
+                        description = product.description or f"{plan_name} subscription plan"
+
+                        # Extract features from product metadata if available
+                        features = []
+                        if product.metadata:
+                            # Look for features in metadata
+                            feature_list = product.metadata.get("features")
+                            if feature_list:
+                                # Features might be comma-separated or JSON
+                                try:
+                                    import json
+
+                                    features = (
+                                        json.loads(feature_list)
+                                        if feature_list.startswith("[")
+                                        else feature_list.split(",")
+                                    )
+                                except:
+                                    features = [f.strip() for f in feature_list.split(",")]
+
+                        # Default features if none found
+                        if not features:
+                            features = [
+                                "Unlimited cover letter generations",
+                                "All AI models available",
+                                "Priority support",
+                                "Cancel anytime",
+                            ]
+
+                        # Determine if this is a popular/recommended plan
+                        # Check metadata or default annual to popular
+                        popular = False
+                        if product.metadata:
+                            popular_str = product.metadata.get("popular", "false").lower()
+                            popular = popular_str in ("true", "1", "yes")
+                        elif interval == "year":
+                            popular = True  # Default annual to popular
+
+                        plan_dict = {
+                            "id": plan_id,
+                            "name": plan_name,
+                            "interval": interval,
+                            "interval_count": interval_count,
+                            "description": description,
+                            "priceId": price.id,
+                            "amount": amount,
+                            "currency": currency,
+                            "productId": product.id,
+                            "features": features,
+                            "popular": popular,
+                        }
+
+                        plans.append(plan_dict)
+                        logger.info(
+                            f"Added plan: {plan_name} (Price: {price.id}, Product: {product.id})"
+                        )
+
+                    if recurring_prices_found == 0:
+                        logger.warning(
+                            f"Product {product.id} ({product.name}) has no active recurring prices"
+                        )
+                        products_without_recurring_prices += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"Error fetching prices for product {product.id} ({product.name}): {e}",
+                        exc_info=True,
+                    )
+                    continue
+
+            # Log summary
+            logger.info(
+                f"Product processing summary: {products_processed} processed, "
+                f"{products_filtered} filtered by campaign, "
+                f"{products_without_recurring_prices} without recurring prices, "
+                f"{len(plans)} plans created"
+            )
+
+        except Exception as e:
+            logger.error(f"Error fetching products from Stripe: {e}", exc_info=True)
+            logger.error(f"Error type: {type(e).__name__}, Error details: {str(e)}")
+            return []
+
+        # Sort plans: popular first, then by interval (year before month), then by interval_count
+        plans.sort(
+            key=lambda x: (
+                not x.get("popular", False),  # Popular plans first
+                x.get("interval") != "year",  # Year before month
+                x.get("interval_count", 1),  # Lower interval_count first
+            )
+        )
+
+        if len(plans) == 0:
+            logger.warning(
+                "No subscription plans found. Possible reasons:\n"
+                "  1. Products are not marked as 'active' in Stripe\n"
+                "  2. Products don't have active recurring prices\n"
+                "  3. Campaign filter is excluding all products\n"
+                "  4. Stripe API key doesn't have access to products"
+            )
+        else:
+            logger.info(f"Successfully fetched {len(plans)} subscription plans from Stripe")
+
+        return plans
+
+    except Exception as e:
+        logger.error(f"Unexpected error fetching Stripe products: {e}", exc_info=True)
+        logger.error(f"Error type: {type(e).__name__}, Error details: {str(e)}")
+        return []
+
+
+def get_subscription_plans(force_refresh: bool = False) -> dict:
     """
     Get available subscription plans with Stripe Price IDs.
-    This endpoint can be public (no auth required).
+    Dynamically fetches products and prices from Stripe, with caching.
+    Falls back to environment variables if Stripe is unavailable or no products found.
+
+    Args:
+        force_refresh: If True, bypass cache and fetch fresh data from Stripe
 
     Returns:
         Dictionary with 'plans' list containing plan information
     """
-    # Get Price IDs from environment variables
-    monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
-    annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
+    global _stripe_plans_cache, _stripe_plans_cache_time
 
-    # If Price IDs are not configured, return empty plans or use defaults
-    if not monthly_price_id or not annual_price_id:
-        logger.warning(
-            "Stripe Price IDs not configured. Set STRIPE_PRICE_ID_MONTHLY and STRIPE_PRICE_ID_ANNUAL environment variables."
-        )
-        # Return empty plans if not configured
-        return {"plans": []}
+    # Check cache first (unless force refresh)
+    if (
+        not force_refresh
+        and _stripe_plans_cache is not None
+        and _stripe_plans_cache_time is not None
+    ):
+        cache_age = datetime.now() - _stripe_plans_cache_time
+        if cache_age < _stripe_plans_cache_ttl:
+            logger.debug(f"Returning cached plans (age: {cache_age.total_seconds():.1f}s)")
+            return _stripe_plans_cache
 
-    # Optionally verify prices exist in Stripe (if Stripe is available)
-    if STRIPE_AVAILABLE:
-        try:
-            import importlib
-            import sys
-
-            # Get stripe module
-            stripe_module = sys.modules.get("stripe")
-            if stripe_module is None:
-                stripe_module = importlib.import_module("stripe")
-
-            # Verify monthly price exists
-            try:
-                monthly_price = stripe_module.Price.retrieve(monthly_price_id)
-                logger.debug(f"Verified monthly price: {monthly_price_id}")
-            except stripe_module.error.InvalidRequestError:
-                logger.warning(f"Monthly price ID {monthly_price_id} not found in Stripe")
-                monthly_price_id = None
-
-            # Verify annual price exists
-            try:
-                annual_price = stripe_module.Price.retrieve(annual_price_id)
-                logger.debug(f"Verified annual price: {annual_price_id}")
-            except stripe_module.error.InvalidRequestError:
-                logger.warning(f"Annual price ID {annual_price_id} not found in Stripe")
-                annual_price_id = None
-
-        except Exception as e:
-            logger.warning(f"Could not verify prices in Stripe: {e}")
-            # Continue anyway - return plans with configured IDs
-
-    # Build plans list
+    # Try to fetch dynamically from Stripe
     plans = []
 
-    if monthly_price_id:
-        plans.append(
-            {
-                "id": "monthly",
-                "name": "Monthly",
-                "interval": "month",
-                "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
-                "priceId": monthly_price_id,
-                "features": [
-                    "Unlimited cover letter generations",
-                    "All AI models available",
-                    "Priority support",
-                    "Cancel anytime",
-                ],
-                "popular": False,
-            }
-        )
+    if STRIPE_AVAILABLE:
+        # Get campaign filter from environment if set
+        campaign_filter = getattr(settings, "STRIPE_PRODUCT_CAMPAIGN", None)
 
-    if annual_price_id:
-        plans.append(
-            {
-                "id": "annual",
-                "name": "Annual",
-                "interval": "year",
-                "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
-                "priceId": annual_price_id,
-                "features": [
-                    "Unlimited cover letter generations",
-                    "All AI models available",
-                    "Priority support",
-                    "Best value - save with annual billing",
-                    "Cancel anytime",
-                ],
-                "popular": True,  # Mark annual as popular/recommended
-            }
-        )
+        try:
+            plans = _fetch_stripe_products_and_prices(campaign_filter=campaign_filter)
+        except Exception as e:
+            logger.warning(f"Error fetching plans from Stripe: {e}")
+            plans = []
 
-    return {"plans": plans}
+    # Fallback to environment variables if no plans found
+    if not plans:
+        logger.info("No plans found from Stripe, falling back to environment variables")
+        monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
+        annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
+
+        if monthly_price_id:
+            plans.append(
+                {
+                    "id": "monthly",
+                    "name": "Monthly",
+                    "interval": "month",
+                    "interval_count": 1,
+                    "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
+                    "priceId": monthly_price_id,
+                    "features": [
+                        "Unlimited cover letter generations",
+                        "All AI models available",
+                        "Priority support",
+                        "Cancel anytime",
+                    ],
+                    "popular": False,
+                }
+            )
+
+        if annual_price_id:
+            plans.append(
+                {
+                    "id": "annual",
+                    "name": "Annual",
+                    "interval": "year",
+                    "interval_count": 1,
+                    "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
+                    "priceId": annual_price_id,
+                    "features": [
+                        "Unlimited cover letter generations",
+                        "All AI models available",
+                        "Priority support",
+                        "Best value - save with annual billing",
+                        "Cancel anytime",
+                    ],
+                    "popular": True,
+                }
+            )
+
+    # Update cache
+    result = {"plans": plans}
+    _stripe_plans_cache = result
+    _stripe_plans_cache_time = datetime.now()
+
+    return result

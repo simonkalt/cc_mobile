@@ -75,16 +75,20 @@ def debug_stripe():
 
 
 @router.get("/subscriptions/plans", response_model=SubscriptionPlansResponse)
-def get_plans():
+def get_plans(force_refresh: bool = False):
     """
     Get available subscription plans with Stripe Price IDs.
+    Dynamically fetches products and prices from Stripe.
     This endpoint is public (no auth required).
+    
+    Args:
+        force_refresh: If True, bypass cache and fetch fresh data from Stripe (default: False)
     
     Returns:
         SubscriptionPlansResponse with available plans
     """
     try:
-        plans_data = get_subscription_plans()
+        plans_data = get_subscription_plans(force_refresh=force_refresh)
         logger.info(f"Returning {len(plans_data.get('plans', []))} subscription plans")
         return SubscriptionPlansResponse(**plans_data)
     except Exception as e:
