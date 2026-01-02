@@ -1,0 +1,36 @@
+{
+    "id": "prod-tha6p4iasmlbst-year-1",
+    "name": "Annual (Annual)",
+    "interval": "year",
+    "interval_count": 1,
+    "description": "Get one month free with the Annual payment option!",
+    "priceId": "price_1SkAwSQvXIwo0A0o52l0K5KS",
+    "amount": 149.99,
+    "currency": "USD",
+    "productId": "prod_Tha6p4iaSmlbSt",
+    "features": [
+        "Unlimited cover letter generations",
+        "All AI models available",
+        "Priority support",
+        "Cancel anytime"
+    ],
+    "popular": true
+},
+{
+    "id": "prod-tha3qomyk2cxud-month-1",
+    "name": "Monthly Tier (Monthly)",
+    "interval": "month",
+    "interval_count": 1,
+    "description": "Monthly payment allows you to cancel any time resume any time you want.",
+    "priceId": "price_1SkAtTQvXIwo0A0ojXgSly5n",
+    "amount": 13.99,
+    "currency": "USD",
+    "productId": "prod_Tha3qOMYK2CXuD",
+    "features": [
+        "Unlimited cover letter generations",
+        "All AI models available",
+        "Priority support",
+        "Cancel anytime"
+    ],
+    "popular": false
+}

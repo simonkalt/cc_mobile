@@ -93,10 +93,10 @@ else:
 def get_user_subscription(user_id: str) -> SubscriptionResponse:
     """
     Get user's subscription information from database
-
+    
     Args:
         user_id: User ID
-
+        
     Returns:
         SubscriptionResponse with subscription details
     """
@@ -105,25 +105,25 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection unavailable",
         )
-
+    
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection",
         )
-
+    
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-
+    
     user = collection.find_one({"_id": user_id_obj})
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
+    
     return SubscriptionResponse(
         subscriptionId=user.get("subscriptionId"),
         subscriptionStatus=user.get("subscriptionStatus", "free"),
@@ -145,7 +145,7 @@ def update_user_subscription(
 ) -> None:
     """
     Update user's subscription information in database
-
+    
     Args:
         user_id: User ID
         subscription_id: Stripe subscription ID
@@ -160,21 +160,21 @@ def update_user_subscription(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection unavailable",
         )
-
+    
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection",
         )
-
+    
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-
+    
     update_data = {
         "subscriptionId": subscription_id,
         "subscriptionStatus": subscription_status,
@@ -184,27 +184,27 @@ def update_user_subscription(
         "stripeCustomerId": stripe_customer_id,
         "dateUpdated": datetime.utcnow(),
     }
-
+    
     # Remove None values
     update_data = {k: v for k, v in update_data.items() if v is not None}
-
+    
     result = collection.update_one({"_id": user_id_obj}, {"$set": update_data})
-
+    
     if result.matched_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
+    
     logger.info(f"Updated subscription for user {user_id}")
 
 
 def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None) -> str:
     """
     Create a Stripe customer for the user
-
+    
     Args:
         user_id: User ID (used as metadata)
         email: User email
         name: User name (optional)
-
+        
     Returns:
         Stripe customer ID
     """
@@ -212,7 +212,7 @@ def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
         )
-
+    
     try:
         customer = stripe.Customer.create(email=email, name=name, metadata={"user_id": user_id})
         logger.info(f"Created Stripe customer {customer.id} for user {user_id}")
@@ -311,11 +311,31 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
         # Get or create Stripe customer
         stripe_customer_id = user.get("stripeCustomerId")
         if not stripe_customer_id:
+            # No customer ID in database - create new customer
             stripe_customer_id = create_stripe_customer(
                 user_id=user_id, email=user.get("email", ""), name=user.get("name")
             )
             # Update user with customer ID
             update_user_subscription(user_id=user_id, stripe_customer_id=stripe_customer_id)
+        else:
+            # Customer ID exists in database - verify it exists in Stripe
+            try:
+                stripe_to_use.Customer.retrieve(stripe_customer_id)
+                logger.debug(f"Verified existing Stripe customer {stripe_customer_id} for user {user_id}")
+            except stripe_to_use.error.InvalidRequestError as e:
+                # Customer doesn't exist in Stripe (maybe deleted or wrong account)
+                if "No such customer" in str(e) or e.code == "resource_missing":
+                    logger.warning(
+                        f"Customer {stripe_customer_id} not found in Stripe for user {user_id}, creating new customer"
+                    )
+                    stripe_customer_id = create_stripe_customer(
+                        user_id=user_id, email=user.get("email", ""), name=user.get("name")
+                    )
+                    # Update user with new customer ID
+                    update_user_subscription(user_id=user_id, stripe_customer_id=stripe_customer_id)
+                else:
+                    # Some other error - re-raise it
+                    raise
 
         # Get price details
         price = stripe_to_use.Price.retrieve(price_id)
@@ -379,7 +399,7 @@ def create_subscription(
 ) -> dict:
     """
     Create a new subscription in Stripe
-
+    
     Args:
         user_id: User ID
         price_id: Stripe Price ID
@@ -387,7 +407,7 @@ def create_subscription(
         payment_intent_id: PaymentIntent ID from PaymentSheet (preferred)
         payment_method_id: Payment method ID (legacy support)
         trial_days: Trial period in days (optional)
-
+        
     Returns:
         Stripe subscription object
     """
@@ -423,12 +443,38 @@ def create_subscription(
     if not customer_id:
         customer_id = user.get("stripeCustomerId")
         if not customer_id:
+            # No customer ID in database - create new customer
             customer_id = create_stripe_customer(
                 user_id=user_id, email=user.get("email", ""), name=user.get("name")
             )
             # Update user with customer ID
             update_user_subscription(user_id=user_id, stripe_customer_id=customer_id)
-
+        else:
+            # Customer ID exists in database - verify it exists in Stripe
+            stripe_to_use = _get_stripe_module()
+            if stripe_to_use is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Stripe module could not be loaded",
+                )
+            try:
+                stripe_to_use.Customer.retrieve(customer_id)
+                logger.debug(f"Verified existing Stripe customer {customer_id} for user {user_id}")
+            except stripe_to_use.error.InvalidRequestError as e:
+                # Customer doesn't exist in Stripe (maybe deleted or wrong account)
+                if "No such customer" in str(e) or e.code == "resource_missing":
+                    logger.warning(
+                        f"Customer {customer_id} not found in Stripe for user {user_id}, creating new customer"
+                    )
+                    customer_id = create_stripe_customer(
+                        user_id=user_id, email=user.get("email", ""), name=user.get("name")
+                    )
+                    # Update user with new customer ID
+                    update_user_subscription(user_id=user_id, stripe_customer_id=customer_id)
+                else:
+                    # Some other error - re-raise it
+                    raise
+    
     if not customer_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer ID required")
 
@@ -477,8 +523,8 @@ def create_subscription(
                         "message": str(e),
                     },
                 },
-            )
-
+        )
+    
     try:
         subscription_params = {
             "customer": customer_id,
@@ -491,18 +537,18 @@ def create_subscription(
             },
             "expand": ["latest_invoice.payment_intent"],
         }
-
+        
         if trial_days:
             subscription_params["trial_period_days"] = trial_days
-
+        
         if payment_method_id:
             subscription_params["default_payment_method"] = payment_method_id
-
+        
         subscription = stripe.Subscription.create(**subscription_params)
 
         # Note: PaymentIntent is already confirmed by PaymentSheet before this point
         # We just need to ensure the subscription uses the payment method from the PaymentIntent
-
+        
         # Update user subscription info
         current_period_end = datetime.fromtimestamp(subscription.current_period_end)
         update_user_subscription(
@@ -513,7 +559,7 @@ def create_subscription(
             stripe_customer_id=customer_id,
             current_period_end=current_period_end,
         )
-
+        
         logger.info(f"Created subscription {subscription.id} for user {user_id}")
         return subscription
     except stripe.error.StripeError as e:
@@ -527,11 +573,11 @@ def create_subscription(
 def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
     """
     Upgrade user's subscription to a new plan
-
+    
     Args:
         user_id: User ID
         new_price_id: New Stripe Price ID
-
+        
     Returns:
         Updated Stripe subscription object
     """
@@ -539,7 +585,7 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
         )
-
+    
     # Get current subscription
     subscription_info = get_user_subscription(user_id)
     if not subscription_info.subscriptionId:
@@ -547,24 +593,24 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User does not have an active subscription",
         )
-
+    
     try:
         # Retrieve current subscription
         subscription = stripe.Subscription.retrieve(subscription_info.subscriptionId)
-
+        
         # Update subscription with new price
         updated_subscription = stripe.Subscription.modify(
             subscription.id,
             items=[
                 {
-                    "id": subscription["items"]["data"][0].id,
-                    "price": new_price_id,
+                "id": subscription["items"]["data"][0].id,
+                "price": new_price_id,
                 }
             ],
             proration_behavior="always_invoice",  # Prorate and invoice immediately
             metadata={"user_id": user_id},
         )
-
+        
         # Update user subscription info
         current_period_end = datetime.fromtimestamp(updated_subscription.current_period_end)
         update_user_subscription(
@@ -574,7 +620,7 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             subscription_plan=new_price_id,
             current_period_end=current_period_end,
         )
-
+        
         logger.info(f"Upgraded subscription {updated_subscription.id} for user {user_id}")
         return updated_subscription
     except stripe.error.StripeError as e:
@@ -588,11 +634,11 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
 def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
     """
     Cancel user's subscription
-
+    
     Args:
         user_id: User ID
         cancel_immediately: If True, cancel immediately; if False, cancel at period end
-
+        
     Returns:
         Updated Stripe subscription object
     """
@@ -600,7 +646,7 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
         )
-
+    
     # Get current subscription
     subscription_info = get_user_subscription(user_id)
     if not subscription_info.subscriptionId:
@@ -608,7 +654,7 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User does not have an active subscription",
         )
-
+    
     try:
         if cancel_immediately:
             # Cancel immediately
@@ -620,7 +666,7 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
                 subscription_info.subscriptionId, cancel_at_period_end=True
             )
             subscription_status = canceled_subscription.status
-
+        
         # Update user subscription info
         update_user_subscription(
             user_id=user_id,
@@ -779,10 +825,39 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                         # Build description from product description or default
                         description = product.description or f"{plan_name} subscription plan"
 
-                        # Extract features from product metadata if available
+                        # Extract features from product
+                        # First, try the native Stripe "marketing_features" field (Marketing feature list from Dashboard)
+                        # This is an array of objects with a "name" property
                         features = []
-                        if product.metadata:
-                            # Look for features in metadata
+                        if hasattr(product, "marketing_features") and product.marketing_features:
+                            # Stripe's native marketing_features field (array of objects with "name" property)
+                            marketing_features = product.marketing_features
+                            if isinstance(marketing_features, (list, tuple)):
+                                # Extract the "name" from each feature object
+                                features = [
+                                    feat.get("name") if isinstance(feat, dict) else str(feat)
+                                    for feat in marketing_features
+                                    if feat and (isinstance(feat, dict) and feat.get("name") or not isinstance(feat, dict))
+                                ]
+                            else:
+                                # Handle single feature object
+                                if isinstance(marketing_features, dict):
+                                    features = [marketing_features.get("name", "")]
+                                else:
+                                    features = [str(marketing_features)]
+                            logger.debug(
+                                f"Using native Stripe marketing_features field for product {product.id}: {len(features)} features"
+                            )
+                        elif hasattr(product, "features") and product.features:
+                            # Fallback to "features" field (if it exists)
+                            features_list = product.features
+                            if isinstance(features_list, (list, tuple)):
+                                features = [str(f) for f in features_list]
+                            else:
+                                features = [str(features_list)]
+                            logger.debug(f"Using Stripe features field for product {product.id}: {len(features)} features")
+                        elif product.metadata:
+                            # Fallback to metadata if native fields are not available
                             feature_list = product.metadata.get("features")
                             if feature_list:
                                 # Features might be comma-separated or JSON
@@ -794,8 +869,12 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                                         if feature_list.startswith("[")
                                         else feature_list.split(",")
                                     )
+                                    logger.debug(f"Using metadata features for product {product.id}: {len(features)} features")
                                 except:
                                     features = [f.strip() for f in feature_list.split(",")]
+                                    logger.debug(
+                                        f"Using metadata features (comma-separated) for product {product.id}: {len(features)} features"
+                                    )
 
                         # Default features if none found
                         if not features:
@@ -835,8 +914,13 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                         )
 
                     if recurring_prices_found == 0:
+                        total_prices = len(prices.data)
+                        one_time_prices = sum(1 for p in prices.data if p.type == "one_time")
+                        inactive_prices = sum(1 for p in prices.data if not p.active)
                         logger.warning(
-                            f"Product {product.id} ({product.name}) has no active recurring prices"
+                            f"Product {product.id} ({product.name}) has no active recurring prices. "
+                            f"Total prices: {total_prices}, One-time: {one_time_prices}, Inactive: {inactive_prices}. "
+                            f"This product will NOT appear in subscription plans."
                         )
                         products_without_recurring_prices += 1
 
@@ -848,12 +932,19 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                     continue
 
             # Log summary
+            total_products = len(products.data)
             logger.info(
-                f"Product processing summary: {products_processed} processed, "
+                f"Product processing summary: {total_products} total products found, "
+                f"{products_processed} processed, "
                 f"{products_filtered} filtered by campaign, "
                 f"{products_without_recurring_prices} without recurring prices, "
-                f"{len(plans)} plans created"
+                f"{len(plans)} subscription plans created"
             )
+            if total_products > len(plans):
+                logger.warning(
+                    f"⚠️  Only {len(plans)} plan(s) created from {total_products} product(s). "
+                    f"Missing products likely have no active recurring prices (only one-time prices)."
+                )
 
         except Exception as e:
             logger.error(f"Error fetching products from Stripe: {e}", exc_info=True)
@@ -886,6 +977,80 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
         logger.error(f"Unexpected error fetching Stripe products: {e}", exc_info=True)
         logger.error(f"Error type: {type(e).__name__}, Error details: {str(e)}")
         return []
+
+
+def get_raw_stripe_products(force_refresh: bool = False) -> dict:
+    """
+    Get raw Stripe products with full structure including marketing_features.
+    Returns products exactly as Stripe returns them.
+
+    Args:
+        force_refresh: If True, bypass cache and fetch fresh data from Stripe
+
+    Returns:
+        Dictionary with Stripe product list structure
+    """
+    if not STRIPE_AVAILABLE:
+        logger.warning("Stripe library not available - cannot fetch products")
+        return {"object": "list", "data": [], "has_more": False, "url": "/v1/products"}
+
+    try:
+        stripe_module = _get_stripe_module()
+        if stripe_module is None:
+            logger.error("Failed to get Stripe module")
+            return {"object": "list", "data": [], "has_more": False, "url": "/v1/products"}
+
+        # Fetch active products
+        products = stripe_module.Product.list(active=True, limit=100)
+
+        # Convert Stripe objects to dictionaries
+        products_data = []
+        for product in products.data:
+            product_dict = {
+                "id": product.id,
+                "object": "product",
+                "active": product.active,
+                "attributes": getattr(product, "attributes", []),
+                "created": product.created,
+                "default_price": product.default_price if hasattr(product, "default_price") else None,
+                "description": product.description,
+                "images": product.images if hasattr(product, "images") else [],
+                "livemode": product.livemode,
+                "marketing_features": None,
+                "metadata": product.metadata or {},
+                "name": product.name,
+                "package_dimensions": getattr(product, "package_dimensions", None),
+                "shippable": getattr(product, "shippable", None),
+                "statement_descriptor": getattr(product, "statement_descriptor", None),
+                "tax_code": getattr(product, "tax_code", None),
+                "type": getattr(product, "type", "service"),
+                "unit_label": getattr(product, "unit_label", None),
+                "updated": getattr(product, "updated", product.created),
+                "url": getattr(product, "url", None),
+            }
+
+            # Preserve marketing_features as objects with name property
+            if hasattr(product, "marketing_features") and product.marketing_features:
+                product_dict["marketing_features"] = [
+                    {"name": feat.get("name") if isinstance(feat, dict) else str(feat)}
+                    for feat in product.marketing_features
+                    if feat
+                ]
+
+            products_data.append(product_dict)
+
+        logger.info(f"Fetched {len(products_data)} raw Stripe products")
+
+        return {
+            "object": "list",
+            "data": products_data,
+            "has_more": products.has_more if hasattr(products, "has_more") else False,
+            "url": "/v1/products",
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching raw Stripe products: {e}", exc_info=True)
+        return {"object": "list", "data": [], "has_more": False, "url": "/v1/products"}
 
 
 def get_subscription_plans(force_refresh: bool = False) -> dict:
@@ -940,52 +1105,53 @@ def get_subscription_plans(force_refresh: bool = False) -> dict:
             plans = []
             stripe_fetch_successful = False
 
-    # Fallback to environment variables ONLY if Stripe fetch failed or returned no plans
-    if not plans and not stripe_fetch_successful:
-        logger.warning(
-            "⚠️ No plans found from Stripe and fetch failed, falling back to environment variables (STRIPE_PRICE_ID_MONTHLY, STRIPE_PRICE_ID_ANNUAL)"
-        )
-        monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
-        annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
-
-        if monthly_price_id:
-            plans.append(
-                {
-                    "id": "monthly",
-                    "name": "Monthly",
-                    "interval": "month",
-                    "interval_count": 1,
-                    "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
-                    "priceId": monthly_price_id,
-                    "features": [
-                        "Unlimited cover letter generations",
-                        "All AI models available",
-                        "Priority support",
-                        "Cancel anytime",
-                    ],
-                    "popular": False,
-                }
-            )
-
-        if annual_price_id:
-            plans.append(
-                {
-                    "id": "annual",
-                    "name": "Annual",
-                    "interval": "year",
-                    "interval_count": 1,
-                    "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
-                    "priceId": annual_price_id,
-                    "features": [
-                        "Unlimited cover letter generations",
-                        "All AI models available",
-                        "Priority support",
-                        "Best value - save with annual billing",
-                        "Cancel anytime",
-                    ],
-                    "popular": True,
-                }
-            )
+    # FALLBACK COMMENTED OUT FOR DEBUGGING - Remove fallback to environment variables
+    # This makes it easier to see what Stripe is actually returning
+    # if not plans and not stripe_fetch_successful:
+    #     logger.warning(
+    #         "⚠️ No plans found from Stripe and fetch failed, falling back to environment variables (STRIPE_PRICE_ID_MONTHLY, STRIPE_PRICE_ID_ANNUAL)"
+    #     )
+    #     monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
+    #     annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
+    #
+    #     if monthly_price_id:
+    #         plans.append(
+    #             {
+    #                 "id": "monthly",
+    #                 "name": "Monthly",
+    #                 "interval": "month",
+    #                 "interval_count": 1,
+    #                 "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
+    #                 "priceId": monthly_price_id,
+    #                 "features": [
+    #                     "Unlimited cover letter generations",
+    #                     "All AI models available",
+    #                     "Priority support",
+    #                     "Cancel anytime",
+    #                 ],
+    #                 "popular": False,
+    #             }
+    #         )
+    #
+    #     if annual_price_id:
+    #         plans.append(
+    #             {
+    #                 "id": "annual",
+    #                 "name": "Annual",
+    #                 "interval": "year",
+    #                 "interval_count": 1,
+    #                 "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
+    #                 "priceId": annual_price_id,
+    #                 "features": [
+    #                     "Unlimited cover letter generations",
+    #                     "All AI models available",
+    #                     "Priority support",
+    #                     "Best value - save with annual billing",
+    #                     "Cancel anytime",
+    #                 ],
+    #                 "popular": True,
+    #             }
+    #         )
 
     # Update cache
     result = {"plans": plans}

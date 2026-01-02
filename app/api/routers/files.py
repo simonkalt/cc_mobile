@@ -108,6 +108,9 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
 
         files.sort(key=lambda x: x["lastModified"], reverse=True)
         logger.info(f"Listed {len(files)} files for user_id: {user_id}")
+        
+        # Always return files array, even if empty
+        # Frontend should always show the file selection UI (including add button) regardless of file count
         return {"files": files}
 
     except ClientError as e:

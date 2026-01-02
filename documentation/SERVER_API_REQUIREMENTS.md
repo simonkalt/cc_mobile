@@ -30,10 +30,19 @@ The client has been updated to use server-side S3 operations instead of direct c
 }
 ```
 
+**Empty Response (No Files):**
+When there are no files, the endpoint returns:
+```json
+{
+  "files": []
+}
+```
+
 **Notes:**
 - Filter files by user if needed (use user_id or user_email from auth token)
 - Sort by lastModified (newest first) is optional - client will sort if needed
 - Only return actual files (not folders/directories)
+- **IMPORTANT**: The `files` array will always be present, even if empty. The frontend should **always** display the file selection UI (including the "Add File" button) regardless of whether `files.length === 0`. The UI should never be hidden when there are zero files, as users need access to the add button to upload their first file.
 
 ---
 

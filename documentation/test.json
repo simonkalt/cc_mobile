@@ -1,81 +1,109 @@
 {
-    "id": "69542cc3cba6c3d6b28a2792",
-    "name": "Q Q",
-    "email": "simon@kaltgrad.com",
-    "isActive": true,
-    "isEmailVerified": true,
-    "roles": [
-        "user"
-    ],
-    "phone": "818-419-5986",
-    "address": {
-        "street": null,
-        "city": null,
-        "state": null,
-        "zip": null,
-        "country": null
-    },
-    "preferences": {
-        "newsletterOptIn": false,
-        "theme": "light",
-        "appSettings": {
-            "printProperties": {
-                "margins": {
-                    "top": 1,
-                    "right": 0.75,
-                    "bottom": 1,
-                    "left": 0.75
-                },
-                "fontFamily": "Georgia",
-                "fontSize": 11,
-                "lineHeight": 1.15,
-                "pageSize": {
-                    "width": 8.5,
-                    "height": 11
-                },
-                "useDefaultFonts": false
-            },
-            "personalityProfiles": [
+    "object": "list",
+    "data": [
+        {
+            "id": "prod_TidXk8okTNi03j",
+            "object": "product",
+            "active": true,
+            "attributes": [],
+            "created": 1767375351,
+            "default_price": "price_1SlCGSQvXIwo0A0oom46SqgO",
+            "description": "Get two years of unlimited cover letter generation at a HUGE discount.",
+            "images": [
+                "https://files.stripe.com/links/MDB8YWNjdF8xU2tBaG5RdlhJd28wQTBvfGZsX3Rlc3RfQkxFS2FndVhSd2pmM3VDWTdVRzk1SDlH00K7x7RL87"
+            ],
+            "livemode": false,
+            "marketing_features": [
                 {
-                    "id": "1767124163778",
-                    "name": "Professional",
-                    "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
+                    "name": "Unlimited cover letter generations"
                 },
                 {
-                    "id": "1767199004460",
-                    "name": "Ebonics",
-                    "description": "The tone should match the dialect of urban folk: Ebonics.  Think gangster rap."
+                    "name": "Access to ALL available AI Models"
+                },
+                {
+                    "name": "HUGE discount for this two year service subscription"
                 }
             ],
-            "selectedModel": "gemini-2.5-flash",
-            "lastResumeUsed": "69542cc3cba6c3d6b28a2792/Simon Kaltgrad_AVP TECH, Software development_LPL.pdf",
-            "last_personality_profile_used": "1767199004460"
+            "metadata": {},
+            "name": "2 Year Subscription",
+            "package_dimensions": null,
+            "shippable": null,
+            "statement_descriptor": null,
+            "tax_code": "txcd_10203000",
+            "type": "service",
+            "unit_label": null,
+            "updated": 1767375352,
+            "url": null
         },
-        "formDefaults": {
-            "companyName": "",
-            "hiringManager": "",
-            "adSource": "",
-            "jobDescription": "",
-            "additionalInstructions": "",
-            "tone": "Professional",
-            "address": "",
-            "phoneNumber": "",
-            "resume": ""
+        {
+            "id": "prod_Tha6p4iaSmlbSt",
+            "object": "product",
+            "active": true,
+            "attributes": [],
+            "created": 1767131940,
+            "default_price": "price_1SkAwSQvXIwo0A0o52l0K5KS",
+            "description": "Get one month free with the Annual payment option!",
+            "images": [
+                "https://files.stripe.com/links/MDB8YWNjdF8xU2tBaG5RdlhJd28wQTBvfGZsX3Rlc3RfR2Y0REhVemZ5M2ptazA5b2Z1ZDN4Q1JD007DqVm6MA"
+            ],
+            "livemode": false,
+            "marketing_features": [
+                {
+                    "name": "Unlimited cover letter generations"
+                },
+                {
+                    "name": "Access to ALL available AI models"
+                },
+                {
+                    "name": "One month FREE"
+                }
+            ],
+            "metadata": {},
+            "name": "Annual",
+            "package_dimensions": null,
+            "shippable": null,
+            "statement_descriptor": null,
+            "tax_code": "txcd_10203000",
+            "type": "service",
+            "unit_label": null,
+            "updated": 1767374990,
+            "url": null
+        },
+        {
+            "id": "prod_Tha3qOMYK2CXuD",
+            "object": "product",
+            "active": true,
+            "attributes": [],
+            "created": 1767131755,
+            "default_price": "price_1SkAtTQvXIwo0A0ojXgSly5n",
+            "description": "Monthly payment allows you to cancel any time resume any time you want.",
+            "images": [
+                "https://files.stripe.com/links/MDB8YWNjdF8xU2tBaG5RdlhJd28wQTBvfGZsX3Rlc3RfUmhiZWNkZmNpNU5oa0I0MGFZVTNKMHlt00iWV1U8uG"
+            ],
+            "livemode": false,
+            "marketing_features": [
+                {
+                    "name": "Unlimited cover letter generations"
+                },
+                {
+                    "name": "Access to ALL available AI models"
+                },
+                {
+                    "name": "Cancel anytime"
+                }
+            ],
+            "metadata": {},
+            "name": "Monthly Tier",
+            "package_dimensions": null,
+            "shippable": null,
+            "statement_descriptor": null,
+            "tax_code": "txcd_10203000",
+            "type": "service",
+            "unit_label": null,
+            "updated": 1767375115,
+            "url": null
         }
-    },
-    "avatarUrl": null,
-    "dateCreated": "2025-12-30T19:49:23.778000",
-    "dateUpdated": "2025-12-31T21:35:05.648000",
-    "lastLogin": "2025-12-31T21:32:38.090000",
-    "llm_counts": {
-        "gpt-4": {
-            "1": 8
-        },
-        "gemini-2": {
-            "5-flash": 4
-        },
-        "grok-4-fast-reasoning": 10
-    },
-    "last_llm_used": "gemini-2.5-flash",
-    "generation_credits": null
+    ],
+    "has_more": false,
+    "url": "/v1/products"
 }

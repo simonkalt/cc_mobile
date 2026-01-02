@@ -13,6 +13,9 @@ from app.models.subscription import (
     CreatePaymentIntentRequest,
     CreatePaymentIntentResponse,
     SubscriptionPlansResponse,
+    StripeProductsResponse,
+    StripeProductResponse,
+    MarketingFeature,
 )
 from app.services.subscription_service import (
     get_user_subscription,
@@ -21,6 +24,7 @@ from app.services.subscription_service import (
     cancel_subscription,
     create_payment_intent,
     get_subscription_plans,
+    get_raw_stripe_products,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,13 +93,48 @@ def get_plans(force_refresh: bool = False):
     """
     try:
         plans_data = get_subscription_plans(force_refresh=force_refresh)
-        logger.info(f"Returning {len(plans_data.get('plans', []))} subscription plans")
-        return SubscriptionPlansResponse(**plans_data)
+        plans_count = len(plans_data.get('plans', []))
+        logger.info(f"Returning {plans_count} subscription plan(s) to client")
+        
+        # Log the full JSON response
+        import json
+        response_obj = SubscriptionPlansResponse(**plans_data)
+        response_json = json.dumps(response_obj.dict(), indent=2)
+        logger.info(f"Plans endpoint JSON response ({plans_count} plan(s)):\n{response_json}")
+        
+        return response_obj
     except Exception as e:
         logger.error(f"Error fetching subscription plans: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch subscription plans: {str(e)}",
+        )
+
+
+@router.get("/subscriptions/products", response_model=StripeProductsResponse)
+def get_raw_products(force_refresh: bool = False):
+    """
+    Get raw Stripe products with full structure including marketing_features.
+    Returns products exactly as Stripe returns them, with marketing_features as objects.
+    This endpoint is public (no auth required).
+    
+    Args:
+        force_refresh: If True, bypass cache and fetch fresh data from Stripe (default: False)
+    
+    Returns:
+        StripeProductsResponse with raw Stripe product data
+    """
+    try:
+        products_data = get_raw_stripe_products(force_refresh=force_refresh)
+        products_count = len(products_data.get("data", []))
+        logger.info(f"Returning {products_count} raw Stripe product(s) to client")
+        
+        return StripeProductsResponse(**products_data)
+    except Exception as e:
+        logger.error(f"Error fetching raw Stripe products: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch Stripe products: {str(e)}",
         )
 
 

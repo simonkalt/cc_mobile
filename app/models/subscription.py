@@ -74,3 +74,40 @@ class SubscriptionPlansResponse(BaseModel):
     """Response containing available subscription plans"""
     plans: list[SubscriptionPlan]
 
+
+class MarketingFeature(BaseModel):
+    """Marketing feature object from Stripe"""
+    name: str
+
+
+class StripeProductResponse(BaseModel):
+    """Raw Stripe product structure"""
+    id: str
+    object: str = "product"
+    active: bool
+    attributes: list = []
+    created: int
+    default_price: Optional[str] = None
+    description: Optional[str] = None
+    images: list[str] = []
+    livemode: bool = False
+    marketing_features: Optional[list[MarketingFeature]] = None
+    metadata: dict = {}
+    name: str
+    package_dimensions: Optional[dict] = None
+    shippable: Optional[bool] = None
+    statement_descriptor: Optional[str] = None
+    tax_code: Optional[str] = None
+    type: str = "service"
+    unit_label: Optional[str] = None
+    updated: int
+    url: Optional[str] = None
+
+
+class StripeProductsResponse(BaseModel):
+    """Response containing raw Stripe products"""
+    object: str = "list"
+    data: list[StripeProductResponse]
+    has_more: bool = False
+    url: str = "/v1/products"
+

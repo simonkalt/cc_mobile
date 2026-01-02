@@ -14,18 +14,20 @@ Retrieves all available subscription plans dynamically from your Stripe account.
 
 ### Query Parameters
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `force_refresh` | boolean | No | `false` | If `true`, bypasses the 5-minute cache and fetches fresh data from Stripe |
+| Parameter       | Type    | Required | Default | Description                                                               |
+| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------- |
+| `force_refresh` | boolean | No       | `false` | If `true`, bypasses the 5-minute cache and fetches fresh data from Stripe |
 
 ### Request Example
 
 ```javascript
 // Basic request
-const response = await fetch('http://localhost:8000/api/subscriptions/plans');
+const response = await fetch("http://localhost:8000/api/subscriptions/plans");
 
 // Force refresh (bypass cache)
-const response = await fetch('http://localhost:8000/api/subscriptions/plans?force_refresh=true');
+const response = await fetch(
+  "http://localhost:8000/api/subscriptions/plans?force_refresh=true"
+);
 ```
 
 ### Response Format
@@ -38,17 +40,17 @@ interface SubscriptionPlansResponse {
 }
 
 interface SubscriptionPlan {
-  id: string;                    // Unique plan identifier (e.g., "prod_xxx_month_1")
-  name: string;                   // Display name (e.g., "Premium Plan (Monthly)")
-  interval: string;               // Billing interval: "month" or "year"
-  interval_count: number;         // Number of intervals (default: 1)
-  description: string;            // Plan description
-  priceId: string;                // Stripe Price ID (required for payment)
-  amount: number | null;          // Price amount in currency units (e.g., 9.99)
-  currency: string | null;        // Currency code (e.g., "USD")
-  productId: string | null;       // Stripe Product ID
-  features: string[];             // Array of feature descriptions
-  popular: boolean;               // Whether this plan is marked as recommended
+  id: string; // Unique plan identifier (e.g., "prod_xxx_month_1")
+  name: string; // Display name (e.g., "Premium Plan (Monthly)")
+  interval: string; // Billing interval: "month" or "year"
+  interval_count: number; // Number of intervals (default: 1)
+  description: string; // Plan description
+  priceId: string; // Stripe Price ID (required for payment)
+  amount: number | null; // Price amount in currency units (e.g., 9.99)
+  currency: string | null; // Currency code (e.g., "USD")
+  productId: string | null; // Stripe Product ID
+  features: string[]; // Array of feature descriptions
+  popular: boolean; // Whether this plan is marked as recommended
 }
 ```
 
@@ -58,15 +60,33 @@ interface SubscriptionPlan {
 {
   "plans": [
     {
-      "id": "prod_abc123_month_1",
-      "name": "Premium Plan (Monthly)",
+      "id": "prod-tha6p4iasmlbst-year-1",
+      "name": "Annual (Annual)",
+      "interval": "year",
+      "interval_count": 1,
+      "description": "Get one month free with the Annual payment option!",
+      "priceId": "price_1SkAwSQvXIwo0A0o52l0K5KS",
+      "amount": 149.0,
+      "currency": "USD",
+      "productId": "prod_Tha6p4iaSmlbSt",
+      "features": [
+        "Unlimited cover letter generations",
+        "All AI models available",
+        "Priority support",
+        "Cancel anytime"
+      ],
+      "popular": true
+    },
+    {
+      "id": "prod-tha3qomyk2cxud-month-1",
+      "name": "Monthly Tier (Monthly)",
       "interval": "month",
       "interval_count": 1,
-      "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
-      "priceId": "price_1ABC123xyz...",
-      "amount": 9.99,
+      "description": "Monthly payment allows you to cancel any time resume any time you want.",
+      "priceId": "price_1SkAtTQvXIwo0A0ojXgSly5n",
+      "amount": 13.99,
       "currency": "USD",
-      "productId": "prod_abc123",
+      "productId": "prod_Tha3qOMYK2CXuD",
       "features": [
         "Unlimited cover letter generations",
         "All AI models available",
@@ -74,25 +94,6 @@ interface SubscriptionPlan {
         "Cancel anytime"
       ],
       "popular": false
-    },
-    {
-      "id": "prod_abc123_year_1",
-      "name": "Premium Plan (Annual)",
-      "interval": "year",
-      "interval_count": 1,
-      "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
-      "priceId": "price_1XYZ789abc...",
-      "amount": 99.99,
-      "currency": "USD",
-      "productId": "prod_abc123",
-      "features": [
-        "Unlimited cover letter generations",
-        "All AI models available",
-        "Priority support",
-        "Best value - save with annual billing",
-        "Cancel anytime"
-      ],
-      "popular": true
     }
   ]
 }
@@ -123,28 +124,30 @@ export interface SubscriptionPlansResponse {
 }
 
 // api.ts
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 export async function fetchSubscriptionPlans(
   forceRefresh: boolean = false
 ): Promise<SubscriptionPlansResponse> {
   const url = new URL(`${API_BASE_URL}/api/subscriptions/plans`);
   if (forceRefresh) {
-    url.searchParams.set('force_refresh', 'true');
+    url.searchParams.set("force_refresh", "true");
   }
 
   const response = await fetch(url.toString());
-  
+
   if (!response.ok) {
-    throw new Error(`Failed to fetch subscription plans: ${response.statusText}`);
+    throw new Error(
+      `Failed to fetch subscription plans: ${response.statusText}`
+    );
   }
 
   return response.json();
 }
 
 // Component example
-import React, { useEffect, useState } from 'react';
-import { fetchSubscriptionPlans, SubscriptionPlan } from './api';
+import React, { useEffect, useState } from "react";
+import { fetchSubscriptionPlans, SubscriptionPlan } from "./api";
 
 export function SubscriptionPlans() {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
@@ -158,7 +161,7 @@ export function SubscriptionPlans() {
         const data = await fetchSubscriptionPlans();
         setPlans(data.plans);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load plans');
+        setError(err instanceof Error ? err.message : "Failed to load plans");
       } finally {
         setLoading(false);
       }
@@ -174,23 +177,26 @@ export function SubscriptionPlans() {
   return (
     <div className="subscription-plans">
       {plans.map((plan) => (
-        <div key={plan.id} className={`plan-card ${plan.popular ? 'popular' : ''}`}>
+        <div
+          key={plan.id}
+          className={`plan-card ${plan.popular ? "popular" : ""}`}
+        >
           {plan.popular && <div className="badge">Recommended</div>}
           <h3>{plan.name}</h3>
           <p>{plan.description}</p>
-          
+
           {plan.amount !== null && plan.currency && (
             <div className="price">
               ${plan.amount.toFixed(2)} / {plan.interval}
             </div>
           )}
-          
+
           <ul className="features">
             {plan.features.map((feature, index) => (
               <li key={index}>{feature}</li>
             ))}
           </ul>
-          
+
           <button onClick={() => handleSubscribe(plan.priceId)}>
             Subscribe
           </button>
@@ -202,7 +208,7 @@ export function SubscriptionPlans() {
 
 function handleSubscribe(priceId: string) {
   // Use priceId with your payment flow
-  console.log('Subscribing to plan with price ID:', priceId);
+  console.log("Subscribing to plan with price ID:", priceId);
   // ... implement your payment flow here
 }
 ```
@@ -212,9 +218,9 @@ function handleSubscribe(priceId: string) {
 ```javascript
 // Fetch subscription plans
 async function getSubscriptionPlans(forceRefresh = false) {
-  const url = new URL('http://localhost:8000/api/subscriptions/plans');
+  const url = new URL("http://localhost:8000/api/subscriptions/plans");
   if (forceRefresh) {
-    url.searchParams.set('force_refresh', 'true');
+    url.searchParams.set("force_refresh", "true");
   }
 
   try {
@@ -225,21 +231,21 @@ async function getSubscriptionPlans(forceRefresh = false) {
     const data = await response.json();
     return data.plans;
   } catch (error) {
-    console.error('Error fetching subscription plans:', error);
+    console.error("Error fetching subscription plans:", error);
     throw error;
   }
 }
 
 // Usage
 getSubscriptionPlans()
-  .then(plans => {
-    console.log('Available plans:', plans);
-    plans.forEach(plan => {
+  .then((plans) => {
+    console.log("Available plans:", plans);
+    plans.forEach((plan) => {
       console.log(`${plan.name}: $${plan.amount}/${plan.interval}`);
     });
   })
-  .catch(error => {
-    console.error('Failed to load plans:', error);
+  .catch((error) => {
+    console.error("Failed to load plans:", error);
   });
 ```
 
@@ -248,6 +254,7 @@ getSubscriptionPlans()
 ### Displaying Plans
 
 The plans array is automatically sorted by:
+
 1. Popular plans first
 2. Annual plans before monthly
 3. Lower interval counts first
@@ -256,7 +263,7 @@ You can display plans directly without additional sorting:
 
 ```typescript
 // Plans are already sorted optimally
-plans.forEach(plan => {
+plans.forEach((plan) => {
   // Display plan
 });
 ```
@@ -266,17 +273,18 @@ plans.forEach(plan => {
 ```typescript
 function formatPrice(plan: SubscriptionPlan): string {
   if (plan.amount === null || !plan.currency) {
-    return 'Price not available';
+    return "Price not available";
   }
 
-  const formatter = new Intl.NumberFormat('en-US', {
-    style: 'currency',
+  const formatter = new Intl.NumberFormat("en-US", {
+    style: "currency",
     currency: plan.currency,
   });
 
-  const intervalText = plan.interval_count === 1 
-    ? plan.interval 
-    : `every ${plan.interval_count} ${plan.interval}s`;
+  const intervalText =
+    plan.interval_count === 1
+      ? plan.interval
+      : `every ${plan.interval_count} ${plan.interval}s`;
 
   return `${formatter.format(plan.amount)} / ${intervalText}`;
 }
@@ -289,14 +297,14 @@ const priceText = formatPrice(plan);
 ### Highlighting Popular Plans
 
 ```typescript
-{plans.map(plan => (
-  <div className={plan.popular ? 'plan-card popular' : 'plan-card'}>
-    {plan.popular && (
-      <div className="popular-badge">Most Popular</div>
-    )}
-    {/* Plan content */}
-  </div>
-))}
+{
+  plans.map((plan) => (
+    <div className={plan.popular ? "plan-card popular" : "plan-card"}>
+      {plan.popular && <div className="popular-badge">Most Popular</div>}
+      {/* Plan content */}
+    </div>
+  ));
+}
 ```
 
 ### Using Price ID for Payment
@@ -305,12 +313,12 @@ The `priceId` field is required when creating a payment intent or subscription:
 
 ```typescript
 // When user selects a plan
-const selectedPlan = plans.find(p => p.id === selectedPlanId);
+const selectedPlan = plans.find((p) => p.id === selectedPlanId);
 
 // Use priceId for payment
 const paymentIntent = await createPaymentIntent({
   user_id: currentUserId,
-  price_id: selectedPlan.priceId,  // Use this
+  price_id: selectedPlan.priceId, // Use this
 });
 ```
 
@@ -318,9 +326,9 @@ const paymentIntent = await createPaymentIntent({
 
 ### HTTP Status Codes
 
-| Status Code | Description | Action |
-|-------------|-------------|--------|
-| `200 OK` | Success | Use the returned plans |
+| Status Code                 | Description  | Action                                |
+| --------------------------- | ------------ | ------------------------------------- |
+| `200 OK`                    | Success      | Use the returned plans                |
 | `500 Internal Server Error` | Server error | Show error message, retry after delay |
 
 ### Error Response Format
@@ -339,9 +347,9 @@ try {
   setPlans(data.plans);
 } catch (error) {
   if (error instanceof Error) {
-    console.error('Error:', error.message);
+    console.error("Error:", error.message);
     // Show user-friendly error message
-    setError('Unable to load subscription plans. Please try again later.');
+    setError("Unable to load subscription plans. Please try again later.");
   }
 }
 ```
@@ -378,7 +386,7 @@ function isValidPlan(plan: SubscriptionPlan): boolean {
   return !!(
     plan.id &&
     plan.name &&
-    plan.priceId &&  // Required for payment
+    plan.priceId && // Required for payment
     plan.interval
   );
 }
@@ -389,11 +397,15 @@ const validPlans = plans.filter(isValidPlan);
 ### 3. Display Fallback for Missing Price
 
 ```typescript
-{plan.amount !== null ? (
-  <div>${plan.amount.toFixed(2)} / {plan.interval}</div>
-) : (
-  <div>Contact us for pricing</div>
-)}
+{
+  plan.amount !== null ? (
+    <div>
+      ${plan.amount.toFixed(2)} / {plan.interval}
+    </div>
+  ) : (
+    <div>Contact us for pricing</div>
+  );
+}
 ```
 
 ### 4. Group Plans by Product
@@ -401,7 +413,7 @@ const validPlans = plans.filter(isValidPlan);
 ```typescript
 // Group plans by productId if you have multiple products
 const plansByProduct = plans.reduce((acc, plan) => {
-  const productId = plan.productId || 'unknown';
+  const productId = plan.productId || "unknown";
   if (!acc[productId]) {
     acc[productId] = [];
   }
@@ -414,10 +426,10 @@ const plansByProduct = plans.reduce((acc, plan) => {
 
 ```typescript
 // Get only monthly plans
-const monthlyPlans = plans.filter(p => p.interval === 'month');
+const monthlyPlans = plans.filter((p) => p.interval === "month");
 
 // Get only annual plans
-const annualPlans = plans.filter(p => p.interval === 'year');
+const annualPlans = plans.filter((p) => p.interval === "year");
 ```
 
 ## Integration with Payment Flow
@@ -432,22 +444,88 @@ const plans = await fetchSubscriptionPlans();
 const selectedPlan = plans[0]; // User's selection
 
 // 3. Create payment intent with priceId
-const paymentIntent = await fetch('/api/subscriptions/create-payment-intent', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+const paymentIntent = await fetch("/api/subscriptions/create-payment-intent", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
     user_id: currentUserId,
-    price_id: selectedPlan.priceId,  // From the plan
+    price_id: selectedPlan.priceId, // From the plan
   }),
 });
 
 // 4. Continue with PaymentSheet flow
 ```
 
+## Features Configuration
+
+### How Features Work
+
+The `features` array in each plan contains marketing features that are displayed to customers. Features are automatically retrieved from Stripe using the following priority:
+
+1. **Native Stripe `marketing_features` field** (Recommended)
+
+   - This is the "Marketing feature list" field in the Stripe Dashboard
+   - Located in: Stripe Dashboard → Products → Select Product → "Marketing feature list" section
+   - Each feature is an object with a `name` property
+   - The API automatically extracts the `name` from each feature object
+   - Supports up to 15 features per product
+
+2. **Native `features` field** (Fallback)
+
+   - If `marketing_features` is not available, checks for a `features` field
+
+3. **Product Metadata** (Last Resort)
+   - If native fields are not available, checks product metadata for a `features` key
+   - Supports comma-separated: `"Feature 1, Feature 2, Feature 3"`
+   - Or JSON array: `"[\"Feature 1\", \"Feature 2\", \"Feature 3\"]"`
+
+### Configuring Features in Stripe Dashboard
+
+**Recommended Method (Marketing feature list):**
+
+1. Go to **Stripe Dashboard** → **Products**
+2. Click on the product you want to edit
+3. Scroll to the **"Marketing feature list"** section
+4. Click **"+ Add line"** to add features
+5. Enter each feature name (e.g., "Unlimited cover letter generations")
+6. Click **"Update product"** to save
+
+**Alternative Method (Metadata):**
+
+1. Go to **Stripe Dashboard** → **Products**
+2. Click on the product you want to edit
+3. Scroll to the **"Metadata"** section
+4. Click **"+ Add more"**
+5. Add key: `features`
+6. Add value: `"Feature 1, Feature 2, Feature 3"` (comma-separated)
+   - Or: `"[\"Feature 1\", \"Feature 2\", \"Feature 3\"]"` (JSON array)
+7. Click **"Update product"** to save
+
+### Displaying Features in Frontend
+
+Features are returned as a simple array of strings, ready to display:
+
+```typescript
+// Features are already extracted and formatted
+plan.features.forEach((feature) => {
+  console.log(feature); // "Unlimited cover letter generations"
+});
+
+// In React component
+<ul>
+  {plan.features.map((feature, index) => (
+    <li key={index}>{feature}</li>
+  ))}
+</ul>;
+```
+
 ## Notes
 
 - **Dynamic Discovery**: Plans are automatically discovered from Stripe, so you don't need to update code when adding/removing plans
-- **Product Metadata**: Features can be configured in Stripe product metadata (comma-separated or JSON array)
+- **Marketing Features**: Features are automatically retrieved from Stripe's native `marketing_features` field (Marketing feature list in Stripe Dashboard). Each feature is an object with a `name` property. The API extracts and returns these as a simple array of strings.
+- **Feature Fallback**: If `marketing_features` is not available, the API checks:
+  1. Native `features` field (if available)
+  2. Product metadata with key `features` (comma-separated or JSON array)
 - **Popular Flag**: Set `popular: true` in product metadata to mark a plan as recommended
 - **Campaign Filtering**: Backend can filter products by metadata if `STRIPE_PRODUCT_CAMPAIGN` is configured
 - **Fallback**: If Stripe is unavailable, the endpoint falls back to environment variables (`STRIPE_PRICE_ID_MONTHLY`, `STRIPE_PRICE_ID_ANNUAL`)
@@ -467,6 +545,33 @@ const paymentIntent = await fetch('/api/subscriptions/create-payment-intent', {
 - Always check for `null` before displaying prices
 - Use `priceId` for payment operations regardless of `amount` value
 
+### Missing or Empty Features
+
+If `features` array is empty or missing:
+
+1. **Check Stripe Dashboard**:
+
+   - Go to Products → Select Product
+   - Verify "Marketing feature list" section has features added
+   - Or check Metadata section for `features` key
+
+2. **Verify Feature Format**:
+
+   - Marketing feature list: Each feature should have a name
+   - Metadata: Should be comma-separated or JSON array format
+
+3. **Check Backend Logs**:
+
+   - Look for messages about which feature source was used
+   - Check if features were found in `marketing_features`, `features`, or metadata
+
+4. **Default Features**:
+   - If no features are found, the API returns default features:
+     - "Unlimited cover letter generations"
+     - "All AI models available"
+     - "Priority support"
+     - "Cancel anytime"
+
 ### Cache Issues
 
 - Plans are cached for 5 minutes
@@ -476,20 +581,22 @@ const paymentIntent = await fetch('/api/subscriptions/create-payment-intent', {
 ## Example: Complete Subscription Selection Flow
 
 ```typescript
-import React, { useState, useEffect } from 'react';
-import { fetchSubscriptionPlans, SubscriptionPlan } from './api';
+import React, { useState, useEffect } from "react";
+import { fetchSubscriptionPlans, SubscriptionPlan } from "./api";
 
 export function SubscriptionSelector() {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchSubscriptionPlans()
-      .then(data => {
+      .then((data) => {
         setPlans(data.plans);
         // Auto-select popular plan if available
-        const popularPlan = data.plans.find(p => p.popular);
+        const popularPlan = data.plans.find((p) => p.popular);
         if (popularPlan) {
           setSelectedPlan(popularPlan);
         }
@@ -503,22 +610,22 @@ export function SubscriptionSelector() {
 
     try {
       // Create payment intent with selected plan's priceId
-      const response = await fetch('/api/subscriptions/create-payment-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/subscriptions/create-payment-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: getCurrentUserId(),
           price_id: selectedPlan.priceId,
         }),
       });
 
-      const { client_secret, customer_id, customer_ephemeral_key_secret } = 
+      const { client_secret, customer_id, customer_ephemeral_key_secret } =
         await response.json();
 
       // Initialize Stripe PaymentSheet with client_secret
       // ... your PaymentSheet implementation
     } catch (error) {
-      console.error('Subscription error:', error);
+      console.error("Subscription error:", error);
     }
   };
 
@@ -528,12 +635,12 @@ export function SubscriptionSelector() {
     <div>
       <h2>Choose Your Plan</h2>
       <div className="plans-grid">
-        {plans.map(plan => (
+        {plans.map((plan) => (
           <div
             key={plan.id}
-            className={`plan ${selectedPlan?.id === plan.id ? 'selected' : ''} ${
-              plan.popular ? 'popular' : ''
-            }`}
+            className={`plan ${
+              selectedPlan?.id === plan.id ? "selected" : ""
+            } ${plan.popular ? "popular" : ""}`}
             onClick={() => setSelectedPlan(plan)}
           >
             {plan.popular && <span className="badge">Recommended</span>}
@@ -552,14 +659,10 @@ export function SubscriptionSelector() {
           </div>
         ))}
       </div>
-      <button 
-        onClick={handleSubscribe} 
-        disabled={!selectedPlan}
-      >
-        Subscribe to {selectedPlan?.name || 'Selected Plan'}
+      <button onClick={handleSubscribe} disabled={!selectedPlan}>
+        Subscribe to {selectedPlan?.name || "Selected Plan"}
       </button>
     </div>
   );
 }
 ```
-
