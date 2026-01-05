@@ -1,23 +1,29 @@
-from fastapi import APIRouter
 import stripe
 import os
+import logging
 
-router = APIRouter()
+logger = logging.getLogger("stripe-check")
+logging.basicConfig(level=logging.INFO)
 
-stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY")
 
 
-@router.get("/debug/stripe")
-def stripe_debug():
+def stripe_connectivity_check():
+    if not stripe.api_key:
+        logger.error("❌ STRIPE_SECRET_KEY is NOT set")
+        return
+
     try:
         acct = stripe.Account.retrieve()
-        return {
-            "ok": True,
-            "stripe_account_id": acct.id,
-        }
+        logger.info("✅ Stripe connectivity OK")
+        logger.info(f"Stripe account ID: {acct.id}")
+        logger.info(f"Stripe key prefix: {stripe.api_key[:8]}***")
+    except stripe.error.AuthenticationError as e:
+        logger.error("❌ Stripe AUTHENTICATION ERROR")
+        logger.error(str(e))
+    except stripe.error.APIConnectionError as e:
+        logger.error("❌ Stripe NETWORK / CONNECTION ERROR")
+        logger.error(str(e))
     except Exception as e:
-        return {
-            "ok": False,
-            "error": str(e),
-            "type": e.__class__.__name__,
-        }
+        logger.error("❌ Stripe UNKNOWN ERROR")
+        logger.error(f"{type(e).__name__}: {e}")
