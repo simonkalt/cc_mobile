@@ -2,8 +2,9 @@
 Job URL analysis API routes
 """
 import logging
-from fastapi import APIRouter, HTTPException
-
+from fastapi import APIRouter, HTTPException, Depends
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 from app.models.job import JobURLAnalysisRequest
 
 # Import the analyzer function
@@ -16,7 +17,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/job-url", tags=["job-url"])
+router = APIRouter(
+    prefix="/api/job-url",
+    tags=["job-url"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @router.post("/analyze")

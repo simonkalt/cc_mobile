@@ -4,7 +4,9 @@ Subscription management API routes
 
 import logging
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 
 from app.models.subscription import (
     SubscriptionResponse,
@@ -32,7 +34,11 @@ from app.services.subscription_service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["subscriptions"])
+router = APIRouter(
+    prefix="/api",
+    tags=["subscriptions"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @router.get("/subscriptions/test-connectivity")

@@ -3,15 +3,20 @@ Cover letter management API routes
 """
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import Response
 from botocore.exceptions import ClientError
-
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 from app.models.cover_letter import CoverLetterRequest
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/cover-letters", tags=["cover-letters"])
+router = APIRouter(
+    prefix="/api/cover-letters",
+    tags=["cover-letters"],
+    dependencies=[Depends(get_current_user)]
+)
 
 # Import utilities and services
 from app.utils.s3_utils import (

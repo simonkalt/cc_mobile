@@ -2,13 +2,18 @@
 PDF generation API routes
 """
 import logging
-from fastapi import APIRouter, HTTPException, status
-
+from fastapi import APIRouter, HTTPException, status, Depends
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 from app.models.pdf import GeneratePDFRequest
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/files", tags=["pdf"])
+router = APIRouter(
+    prefix="/api/files",
+    tags=["pdf"],
+    dependencies=[Depends(get_current_user)]
+)
 
 # Import PDF generation service
 from app.services.pdf_service import generate_pdf_from_markdown

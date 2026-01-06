@@ -3,13 +3,18 @@ Personality profiles API routes
 """
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, status
-
+from fastapi import APIRouter, HTTPException, status, Depends
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 from app.services.user_service import get_user_by_id, get_user_by_email
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["personality"])
+router = APIRouter(
+    prefix="/api",
+    tags=["personality"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @router.get("/personality-profiles")

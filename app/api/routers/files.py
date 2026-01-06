@@ -5,9 +5,11 @@ import logging
 import base64
 import re
 from typing import Optional
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse, Response
 from botocore.exceptions import ClientError
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 
 from app.models.file import (
     FileUploadRequest,
@@ -18,7 +20,11 @@ from app.models.cover_letter import SaveCoverLetterRequest
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/files", tags=["files"])
+router = APIRouter(
+    prefix="/api/files",
+    tags=["files"],
+    dependencies=[Depends(get_current_user)]
+)
 
 # Import utilities and services
 from app.utils.s3_utils import (
@@ -511,7 +517,7 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
-@router.get("/terms-of-service")
+@router.get("/terms-of-service", dependencies=[])
 async def get_terms_of_service():
     """
     Get the Terms of Service as markdown from S3.

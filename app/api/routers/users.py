@@ -27,13 +27,18 @@ from app.services.user_service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/users", tags=["users"])
+router = APIRouter(
+    prefix="/api/users",
+    tags=["users"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @router.post(
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[],  # Public endpoint - no auth required
 )
 async def register_user_endpoint(user_data: UserRegisterRequest):
     """Register a new user"""
@@ -46,7 +51,11 @@ async def register_user_endpoint(user_data: UserRegisterRequest):
     return user_response
 
 
-@router.post("/login", response_model=UserLoginResponse)
+@router.post(
+    "/login",
+    response_model=UserLoginResponse,
+    dependencies=[],  # Public endpoint - no auth required
+)
 async def login_user_endpoint(login_data: UserLoginRequest):
     """Authenticate user login"""
     logger.info(f"Login attempt: {login_data.email}")
@@ -67,7 +76,11 @@ async def login_user_endpoint(login_data: UserLoginRequest):
         raise
 
 
-@router.post("/refresh-token", response_model=RefreshTokenResponse)
+@router.post(
+    "/refresh-token",
+    response_model=RefreshTokenResponse,
+    dependencies=[],  # Public endpoint - no auth required
+)
 async def refresh_token_endpoint(request: RefreshTokenRequest):
     """
     Refresh access token using refresh token.

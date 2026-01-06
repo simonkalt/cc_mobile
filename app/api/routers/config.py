@@ -4,14 +4,19 @@ Configuration API routes
 import logging
 import json
 from pathlib import Path
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/config", tags=["config"])
+router = APIRouter(
+    prefix="/api/config",
+    tags=["config"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 @router.get("/google-places-key")

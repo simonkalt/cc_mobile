@@ -37,22 +37,22 @@ Create an authentication service to handle login, token management, and API call
 ### `src/services/authService.js`
 
 ```javascript
-import axios from 'axios';
+import axios from "axios";
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 // Create axios instance
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
 // Token storage keys
-const ACCESS_TOKEN_KEY = 'access_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
-const USER_KEY = 'user';
+const ACCESS_TOKEN_KEY = "access_token";
+const REFRESH_TOKEN_KEY = "refresh_token";
+const USER_KEY = "user";
 
 /**
  * Store tokens and user data
@@ -122,20 +122,20 @@ export const login = async (email, password) => {
         user: response.data.user,
       };
     } else {
-      throw new Error('Login failed');
+      throw new Error("Login failed");
     }
   } catch (error) {
     if (error.response) {
       const status = error.response.status;
       if (status === 401) {
-        throw new Error('Invalid email or password');
+        throw new Error("Invalid email or password");
       } else if (status === 403) {
-        throw new Error('Account is inactive. Please contact support.');
+        throw new Error("Account is inactive. Please contact support.");
       } else {
-        throw new Error(error.response.data.detail || 'Login failed');
+        throw new Error(error.response.data.detail || "Login failed");
       }
     }
-    throw new Error('Network error: Could not connect to server');
+    throw new Error("Network error: Could not connect to server");
   }
 };
 
@@ -144,26 +144,29 @@ export const login = async (email, password) => {
  */
 export const refreshAccessToken = async () => {
   const refreshToken = getRefreshToken();
-  
+
   if (!refreshToken) {
-    throw new Error('No refresh token available');
+    throw new Error("No refresh token available");
   }
 
   try {
-    const response = await axios.post(`${API_BASE_URL}/api/users/refresh-token`, {
-      refresh_token: refreshToken,
-    });
+    const response = await axios.post(
+      `${API_BASE_URL}/api/users/refresh-token`,
+      {
+        refresh_token: refreshToken,
+      }
+    );
 
     if (response.data.access_token) {
       localStorage.setItem(ACCESS_TOKEN_KEY, response.data.access_token);
       return response.data.access_token;
     } else {
-      throw new Error('Failed to refresh token');
+      throw new Error("Failed to refresh token");
     }
   } catch (error) {
     // Refresh token expired or invalid - clear auth and redirect to login
     clearAuth();
-    throw new Error('Session expired. Please login again.');
+    throw new Error("Session expired. Please login again.");
   }
 };
 
@@ -173,7 +176,7 @@ export const refreshAccessToken = async () => {
 export const logout = () => {
   clearAuth();
   // Redirect to login page
-  window.location.href = '/login';
+  window.location.href = "/login";
 };
 ```
 
@@ -186,17 +189,17 @@ Configure your API client to automatically include the access token in requests 
 ### `src/services/apiClient.js`
 
 ```javascript
-import axios from 'axios';
-import { getAccessToken, refreshAccessToken, clearAuth } from './authService';
+import axios from "axios";
+import { getAccessToken, refreshAccessToken, clearAuth } from "./authService";
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 // Create axios instance
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
@@ -229,16 +232,16 @@ apiClient.interceptors.response.use(
       try {
         // Try to refresh the token
         const newAccessToken = await refreshAccessToken();
-        
+
         // Update the authorization header with new token
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-        
+
         // Retry the original request
         return apiClient(originalRequest);
       } catch (refreshError) {
         // Refresh failed - clear auth and redirect to login
         clearAuth();
-        window.location.href = '/login';
+        window.location.href = "/login";
         return Promise.reject(refreshError);
       }
     }
@@ -259,9 +262,9 @@ Create a component to protect routes that require authentication.
 ### `src/components/ProtectedRoute.jsx`
 
 ```javascript
-import React from 'react';
-import { Navigate } from 'react-router-dom';
-import { isAuthenticated } from '../services/authService';
+import React from "react";
+import { Navigate } from "react-router-dom";
+import { isAuthenticated } from "../services/authService";
 
 const ProtectedRoute = ({ children }) => {
   if (!isAuthenticated()) {
@@ -278,10 +281,10 @@ export default ProtectedRoute;
 ### Usage in Router
 
 ```javascript
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import ProtectedRoute from './components/ProtectedRoute';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import ProtectedRoute from "./components/ProtectedRoute";
+import Login from "./pages/Login";
+import Dashboard from "./pages/Dashboard";
 
 function App() {
   return (
@@ -311,27 +314,27 @@ Example login component using the authentication service.
 ### `src/pages/Login.jsx`
 
 ```javascript
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { login } from '../services/authService';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { login } from "../services/authService";
 
 const Login = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setLoading(true);
 
     try {
       const result = await login(email, password);
       if (result.success) {
         // Redirect to dashboard or home page
-        navigate('/dashboard');
+        navigate("/dashboard");
       }
     } catch (err) {
       setError(err.message);
@@ -344,9 +347,9 @@ const Login = () => {
     <div className="login-container">
       <form onSubmit={handleSubmit}>
         <h2>Login</h2>
-        
+
         {error && <div className="error-message">{error}</div>}
-        
+
         <div>
           <label>Email:</label>
           <input
@@ -356,7 +359,7 @@ const Login = () => {
             required
           />
         </div>
-        
+
         <div>
           <label>Password:</label>
           <input
@@ -366,9 +369,9 @@ const Login = () => {
             required
           />
         </div>
-        
+
         <button type="submit" disabled={loading}>
-          {loading ? 'Logging in...' : 'Login'}
+          {loading ? "Logging in..." : "Login"}
         </button>
       </form>
     </div>
@@ -387,15 +390,15 @@ The API client automatically handles token refresh when a 401 error occurs. Howe
 ### Proactive Token Refresh
 
 ```javascript
-import { getAccessToken, refreshAccessToken } from './services/authService';
-import jwt_decode from 'jwt-decode'; // npm install jwt-decode
+import { getAccessToken, refreshAccessToken } from "./services/authService";
+import jwt_decode from "jwt-decode"; // npm install jwt-decode
 
 /**
  * Check if token is about to expire and refresh if needed
  */
 export const checkAndRefreshToken = async () => {
   const token = getAccessToken();
-  
+
   if (!token) {
     return null;
   }
@@ -404,16 +407,16 @@ export const checkAndRefreshToken = async () => {
     // Decode token to check expiration
     const decoded = jwt_decode(token);
     const currentTime = Date.now() / 1000;
-    
+
     // If token expires in less than 5 minutes, refresh it
     if (decoded.exp - currentTime < 300) {
-      console.log('Token expiring soon, refreshing...');
+      console.log("Token expiring soon, refreshing...");
       return await refreshAccessToken();
     }
-    
+
     return token;
   } catch (error) {
-    console.error('Error checking token:', error);
+    console.error("Error checking token:", error);
     return null;
   }
 };
@@ -426,23 +429,19 @@ export const checkAndRefreshToken = async () => {
 ### Logout Component
 
 ```javascript
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { logout } from '../services/authService';
+import React from "react";
+import { useNavigate } from "react-router-dom";
+import { logout } from "../services/authService";
 
 const LogoutButton = () => {
   const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate("/login");
   };
 
-  return (
-    <button onClick={handleLogout}>
-      Logout
-    </button>
-  );
+  return <button onClick={handleLogout}>Logout</button>;
 };
 
 export default LogoutButton;
@@ -455,9 +454,9 @@ export default LogoutButton;
 ### Making Authenticated API Calls
 
 ```javascript
-import React, { useEffect, useState } from 'react';
-import apiClient from '../services/apiClient';
-import { getUser } from '../services/authService';
+import React, { useEffect, useState } from "react";
+import apiClient from "../services/apiClient";
+import { getUser } from "../services/authService";
 
 const Dashboard = () => {
   const [user, setUser] = useState(null);
@@ -467,14 +466,14 @@ const Dashboard = () => {
     const fetchUserData = async () => {
       try {
         // Option 1: Use the /me endpoint
-        const response = await apiClient.get('/api/users/me');
+        const response = await apiClient.get("/api/users/me");
         setUser(response.data);
-        
+
         // Option 2: Use stored user data
         // const storedUser = getUser();
         // setUser(storedUser);
       } catch (error) {
-        console.error('Error fetching user data:', error);
+        console.error("Error fetching user data:", error);
       } finally {
         setLoading(false);
       }
@@ -536,4 +535,3 @@ REACT_APP_API_URL=https://your-api-domain.com
 - [Axios Documentation](https://axios-http.com/docs/intro)
 - [React Router Documentation](https://reactrouter.com/)
 - [JWT.io](https://jwt.io/) - JWT token decoder and debugger
-
