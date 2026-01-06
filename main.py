@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, status, HTTPException
+from fastapi import FastAPI, Request, status, HTTPException, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,6 +62,15 @@ try:
 except ImportError:
     MONGODB_AVAILABLE = False
     logger.warning("MongoDB module not available. Some features will be disabled.")
+
+# Import authentication dependencies
+try:
+    from app.core.auth import get_current_user
+
+    AUTH_AVAILABLE = True
+except ImportError:
+    AUTH_AVAILABLE = False
+    logger.warning("Authentication module not available. Some endpoints may not be protected.")
 
 # Try to import ollama, make it optional
 try:
@@ -1200,7 +1209,7 @@ def get_google_places_key():
     return {"apiKey": google_places_api_key}
 
 
-@app.get("/llm-selector", response_class=HTMLResponse)
+@app.get("/llm-selector", response_class=HTMLResponse, dependencies=[Depends(get_current_user)])
 def llm_selector():
     llm_options = get_available_llms()
     # Use INFO level and also print for maximum visibility on Render
