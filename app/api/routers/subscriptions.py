@@ -17,6 +17,7 @@ from app.models.subscription import (
     StripeProductsResponse,
     StripeProductResponse,
     MarketingFeature,
+    PaymentIntentStatusResponse,
 )
 from app.services.subscription_service import (
     get_user_subscription,
@@ -24,6 +25,7 @@ from app.services.subscription_service import (
     upgrade_subscription,
     cancel_subscription,
     create_payment_intent,
+    get_payment_intent_status,
     get_subscription_plans,
     get_raw_stripe_products,
 )
@@ -405,6 +407,39 @@ def create_payment_intent_endpoint(request: CreatePaymentIntentRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating payment intent: {str(e)}",
+        )
+
+
+@router.get("/subscriptions/payment-intent/{payment_intent_id}", response_model=PaymentIntentStatusResponse)
+def get_payment_intent_status_endpoint(payment_intent_id: str):
+    """
+    Get the status of a PaymentIntent.
+    Used by frontend to check payment status after confirmation.
+    
+    This endpoint allows the frontend to:
+    1. Check if payment was successful (status: "succeeded")
+    2. Handle 3D Secure authentication (status: "requires_action")
+    3. Handle async payment processing (status: "processing")
+    4. Handle payment failures (status: "requires_payment_method")
+    
+    Args:
+        payment_intent_id: Stripe PaymentIntent ID (e.g., "pi_xxx")
+    
+    Returns:
+        PaymentIntentStatusResponse with status, message, and next_action if applicable
+    """
+    logger.info(f"Checking payment intent status for {payment_intent_id}")
+    try:
+        result = get_payment_intent_status(payment_intent_id)
+        logger.info(f"Payment intent {payment_intent_id} status: {result['status']}")
+        return PaymentIntentStatusResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error checking payment intent status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error checking payment intent status: {str(e)}",
         )
 
 

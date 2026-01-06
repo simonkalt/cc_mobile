@@ -112,3 +112,11 @@ class StripeProductsResponse(BaseModel):
     has_more: bool = False
     url: str = "/v1/products"
 
+
+class PaymentIntentStatusResponse(BaseModel):
+    """Response containing PaymentIntent status information"""
+    payment_intent_id: str
+    status: str  # succeeded, requires_action, processing, requires_payment_method
+    client_secret: Optional[str] = None
+    next_action: Optional[dict] = None  # For 3DS authentication
+    message: str  # Human-readable status message

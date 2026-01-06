@@ -309,6 +309,80 @@ def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None)
         )
 
 
+def get_payment_intent_status(payment_intent_id: str) -> dict:
+    """
+    Get the status of a PaymentIntent.
+    Used by frontend to check payment status after confirmation.
+    
+    Args:
+        payment_intent_id: Stripe PaymentIntent ID
+        
+    Returns:
+        Dictionary with payment intent status and details
+    """
+    stripe_to_use = _get_stripe_module()
+    
+    if stripe_to_use is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
+        )
+    
+    if not stripe_to_use.api_key:
+        stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
+        if not stripe_api_key:
+            logger.error("Stripe API key not configured (STRIPE_API_KEY or STRIPE_TEST_API_KEY)")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
+            )
+        stripe_to_use.api_key = stripe_api_key
+    
+    try:
+        payment_intent = stripe_to_use.PaymentIntent.retrieve(payment_intent_id)
+        
+        status_messages = {
+            "succeeded": "Payment completed successfully",
+            "requires_action": "Payment requires additional authentication (3D Secure)",
+            "processing": "Payment is being processed",
+            "requires_payment_method": "Payment failed. Please try a different payment method",
+            "canceled": "Payment was canceled",
+        }
+        
+        result = {
+            "payment_intent_id": payment_intent.id,
+            "status": payment_intent.status,
+            "client_secret": payment_intent.client_secret,
+            "message": status_messages.get(payment_intent.status, f"Payment status: {payment_intent.status}"),
+        }
+        
+        # Add next_action if present (for 3DS)
+        if hasattr(payment_intent, "next_action") and payment_intent.next_action:
+            result["next_action"] = {
+                "type": payment_intent.next_action.type,
+                "redirect_to_url": getattr(payment_intent.next_action, "redirect_to_url", None),
+            }
+        
+        # Add payment method info if available
+        if payment_intent.payment_method:
+            result["payment_method_id"] = payment_intent.payment_method if isinstance(payment_intent.payment_method, str) else payment_intent.payment_method.id
+        
+        return result
+        
+    except stripe_to_use.error.InvalidRequestError as e:
+        logger.error(f"Invalid PaymentIntent ID: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"PaymentIntent not found: {str(e)}",
+        )
+    except stripe_to_use.error.StripeError as e:
+        logger.error(f"Stripe error retrieving PaymentIntent: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve PaymentIntent: {str(e)}",
+        )
+
+
 def create_payment_intent(user_id: str, price_id: str) -> dict:
     """
     Create a PaymentIntent for PaymentSheet subscription payment.
@@ -569,10 +643,64 @@ def create_subscription(
             payment_intent = stripe_to_use.PaymentIntent.retrieve(payment_intent_id)
             logger.debug(f"Retrieved PaymentIntent {payment_intent_id}, status: {payment_intent.status}")
 
-            if payment_intent.status != "succeeded":
+            # Handle different payment intent statuses
+            if payment_intent.status == "succeeded":
+                # Payment completed successfully - proceed
+                logger.info(f"PaymentIntent {payment_intent_id} succeeded")
+            elif payment_intent.status == "requires_action":
+                # Payment requires 3DS authentication
                 raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED, 
-                    detail=f"Payment not completed. PaymentIntent status: {payment_intent.status}"
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail={
+                        "status": "requires_action",
+                        "message": "Payment requires additional authentication (3D Secure). Please complete authentication in the frontend.",
+                        "payment_intent_id": payment_intent_id,
+                        "client_secret": payment_intent.client_secret,
+                        "next_action": {
+                            "type": payment_intent.next_action.type,
+                            "redirect_to_url": getattr(payment_intent.next_action, "redirect_to_url", None),
+                        } if hasattr(payment_intent, "next_action") and payment_intent.next_action else None,
+                    }
+                )
+            elif payment_intent.status == "processing":
+                # Payment is being processed (async payment methods like ACH)
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail={
+                        "status": "processing",
+                        "message": "Payment is being processed. Please wait for confirmation.",
+                        "payment_intent_id": payment_intent_id,
+                    }
+                )
+            elif payment_intent.status == "requires_payment_method":
+                # Payment failed - need new payment method
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail={
+                        "status": "requires_payment_method",
+                        "message": "Payment failed. Please try a different payment method.",
+                        "payment_intent_id": payment_intent_id,
+                    }
+                )
+            elif payment_intent.status == "canceled":
+                # Payment was canceled
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "canceled",
+                        "message": "Payment was canceled. Please create a new payment intent.",
+                        "payment_intent_id": payment_intent_id,
+                    }
+                )
+            else:
+                # Unknown status
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail={
+                        "status": payment_intent.status,
+                        "message": f"Payment not completed. PaymentIntent status: {payment_intent.status}",
+                        "payment_intent_id": payment_intent_id,
+                    }
                 )
 
             # Step 2: Get payment method from PaymentIntent
