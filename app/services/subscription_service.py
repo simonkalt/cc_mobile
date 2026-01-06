@@ -830,6 +830,8 @@ def create_subscription(
             )
         
         # Payment is already completed via PaymentIntent, so subscription should be active
+        # Use "default_incomplete" - we'll pay the invoice immediately after creation
+        # This prevents Stripe from trying to charge immediately (which could fail)
         subscription_params["payment_behavior"] = "default_incomplete"
         
         subscription_params["payment_settings"] = {
@@ -854,7 +856,50 @@ def create_subscription(
         subscription = stripe_to_use.Subscription.create(**subscription_params)
         
         # Note: PaymentIntent is already confirmed by PaymentSheet before this point
-        # We just need to ensure the subscription uses the payment method from the PaymentIntent
+        # The subscription creates an invoice with its own PaymentIntent (status: "incomplete")
+        # We need to pay this invoice using the already-confirmed payment method
+        
+        # Retrieve the subscription with expanded invoice to get the PaymentIntent
+        subscription = stripe_to_use.Subscription.retrieve(
+            subscription.id,
+            expand=["latest_invoice.payment_intent"]
+        )
+        
+        # Pay the subscription's invoice using the confirmed payment method
+        if hasattr(subscription, "latest_invoice") and subscription.latest_invoice:
+            invoice = subscription.latest_invoice
+            invoice_id = invoice.id if hasattr(invoice, "id") else invoice
+            
+            # Retrieve invoice with payment intent
+            if isinstance(invoice, str):
+                invoice = stripe_to_use.Invoice.retrieve(invoice_id, expand=["payment_intent"])
+            
+            # Check if invoice has a PaymentIntent that needs to be paid
+            if hasattr(invoice, "payment_intent") and invoice.payment_intent:
+                invoice_payment_intent = invoice.payment_intent
+                invoice_pi_id = invoice_payment_intent.id if hasattr(invoice_payment_intent, "id") else invoice_payment_intent
+                
+                # Retrieve the PaymentIntent
+                if isinstance(invoice_payment_intent, str):
+                    invoice_payment_intent = stripe_to_use.PaymentIntent.retrieve(invoice_pi_id)
+                
+                # If the invoice PaymentIntent is incomplete, pay it using the confirmed payment method
+                if invoice_payment_intent.status in ["requires_payment_method", "incomplete"] and payment_method_id:
+                    try:
+                        # Update and confirm the invoice PaymentIntent using the confirmed payment method
+                        confirmed_pi = stripe_to_use.PaymentIntent.confirm(
+                            invoice_pi_id,
+                            payment_method=payment_method_id
+                        )
+                        logger.info(f"✅ Confirmed subscription invoice PaymentIntent {invoice_pi_id} using payment method from confirmed PaymentIntent")
+                        logger.info(f"   Invoice PaymentIntent status: {confirmed_pi.status}")
+                    except stripe_to_use.error.StripeError as e:
+                        logger.warning(f"⚠️ Could not confirm invoice PaymentIntent {invoice_pi_id}: {e}")
+                        logger.warning(f"   This may result in an incomplete PaymentIntent in Stripe. Error: {str(e)}")
+                elif invoice_payment_intent.status == "succeeded":
+                    logger.info(f"✅ Invoice PaymentIntent {invoice_pi_id} already succeeded")
+                else:
+                    logger.info(f"ℹ️ Invoice PaymentIntent {invoice_pi_id} status: {invoice_payment_intent.status}")
         
         # Update user subscription info
         current_period_end = datetime.fromtimestamp(subscription.current_period_end)
