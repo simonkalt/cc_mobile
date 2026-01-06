@@ -1,4 +1,13 @@
 from fastapi import FastAPI, Request, status, HTTPException, Depends
+
+# Import authentication early (before endpoints that use it)
+try:
+    from app.core.auth import get_current_user
+
+    AUTH_AVAILABLE = True
+except ImportError:
+    AUTH_AVAILABLE = False
+    get_current_user = None  # Will be set later if available
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,16 +70,10 @@ try:
     MONGODB_AVAILABLE = True
 except ImportError:
     MONGODB_AVAILABLE = False
-    logger.warning("MongoDB module not available. Some features will be disabled.")
+    # Logger not yet defined, will log later if needed
 
-# Import authentication dependencies
-try:
-    from app.core.auth import get_current_user
-
-    AUTH_AVAILABLE = True
-except ImportError:
-    AUTH_AVAILABLE = False
-    logger.warning("Authentication module not available. Some endpoints may not be protected.")
+# Import authentication dependencies (after logger is defined, see below)
+# This will be imported after logger setup
 
 # Try to import ollama, make it optional
 try:
@@ -97,6 +100,10 @@ logger.setLevel(logging.INFO)
 # Configure uvicorn loggers
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
+# Verify authentication is available (already imported above)
+if not AUTH_AVAILABLE and "logger" in globals():
+    logger.warning("Authentication module not available. Some endpoints may not be protected.")
 
 # Import job URL analyzer (after logger is defined)
 try:
@@ -1209,7 +1216,11 @@ def get_google_places_key():
     return {"apiKey": google_places_api_key}
 
 
-@app.get("/llm-selector", response_class=HTMLResponse, dependencies=[Depends(get_current_user)])
+@app.get(
+    "/llm-selector",
+    response_class=HTMLResponse,
+    dependencies=[Depends(get_current_user)] if AUTH_AVAILABLE and get_current_user else [],
+)
 def llm_selector():
     llm_options = get_available_llms()
     # Use INFO level and also print for maximum visibility on Render

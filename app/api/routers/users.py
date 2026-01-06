@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/users",
     tags=["users"],
-    dependencies=[Depends(get_current_user)]
+    # No router-level dependencies - protect endpoints individually
 )
 
 
@@ -38,7 +38,7 @@ router = APIRouter(
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[],  # Public endpoint - no auth required
+    dependencies=[],  # Explicitly mark as public - no authentication required
 )
 async def register_user_endpoint(user_data: UserRegisterRequest):
     """Register a new user"""
@@ -54,10 +54,10 @@ async def register_user_endpoint(user_data: UserRegisterRequest):
 @router.post(
     "/login",
     response_model=UserLoginResponse,
-    dependencies=[],  # Public endpoint - no auth required
+    dependencies=[],  # Explicitly mark as public - no authentication required
 )
 async def login_user_endpoint(login_data: UserLoginRequest):
-    """Authenticate user login"""
+    """Authenticate user login - PUBLIC ENDPOINT (no auth required)"""
     logger.info(f"Login attempt: {login_data.email}")
     try:
         login_response = login_user(login_data)
@@ -79,7 +79,7 @@ async def login_user_endpoint(login_data: UserLoginRequest):
 @router.post(
     "/refresh-token",
     response_model=RefreshTokenResponse,
-    dependencies=[],  # Public endpoint - no auth required
+    dependencies=[],  # Explicitly mark as public - no authentication required
 )
 async def refresh_token_endpoint(request: RefreshTokenRequest):
     """
@@ -126,7 +126,7 @@ async def get_current_user_endpoint(current_user: UserResponse = Depends(get_cur
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-async def get_user_by_id_endpoint(user_id: str):
+async def get_user_by_id_endpoint(user_id: str, current_user: UserResponse = Depends(get_current_user)):
     """Get user by ID"""
     logger.info(f"Get user request: {user_id}")
     try:
@@ -139,13 +139,13 @@ async def get_user_by_id_endpoint(user_id: str):
 
 
 @router.get("/email/{email}", response_model=UserResponse)
-async def get_user_by_email_endpoint(email: str):
+async def get_user_by_email_endpoint(email: str, current_user: UserResponse = Depends(get_current_user)):
     """Get user by email"""
     return get_user_by_email(email)
 
 
 @router.put("/{user_id}", response_model=UserResponse)
-async def update_user_endpoint(user_id: str, updates: UserUpdateRequest):
+async def update_user_endpoint(user_id: str, updates: UserUpdateRequest, current_user: UserResponse = Depends(get_current_user)):
     """Update user"""
     # Log what's being updated, especially personalityProfiles
     if updates.preferences and isinstance(updates.preferences, dict):
@@ -167,7 +167,7 @@ async def update_user_endpoint(user_id: str, updates: UserUpdateRequest):
 
 
 @router.delete("/{user_id}")
-async def delete_user_endpoint(user_id: str):
+async def delete_user_endpoint(user_id: str, current_user: UserResponse = Depends(get_current_user)):
     """Delete user"""
     result = delete_user(user_id)
     return JSONResponse(content=result)
