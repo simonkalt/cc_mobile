@@ -2,7 +2,7 @@
 User API routes
 """
 import logging
-from fastapi import APIRouter, status
+from fastapi import APIRouter, status, Depends
 from fastapi.responses import JSONResponse
 
 from app.models.user import (
@@ -11,7 +11,11 @@ from app.models.user import (
     UserResponse,
     UserLoginRequest,
     UserLoginResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
 )
+from app.core.auth import get_current_user
+from app.utils.jwt import create_access_token, verify_token
 from app.services.user_service import (
     register_user,
     get_user_by_id,
@@ -61,6 +65,51 @@ async def login_user_endpoint(login_data: UserLoginRequest):
     except Exception as e:
         logger.error(f"Error during login for {login_data.email}: {e}", exc_info=True)
         raise
+
+
+@router.post("/refresh-token", response_model=RefreshTokenResponse)
+async def refresh_token_endpoint(request: RefreshTokenRequest):
+    """
+    Refresh access token using refresh token.
+    
+    Request Body:
+    {
+        "refresh_token": "your_refresh_token_here"
+    }
+    """
+    try:
+        # Verify refresh token
+        payload = verify_token(request.refresh_token, token_type="refresh")
+        user_id = payload.get("sub")
+        
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token"
+            )
+        
+        # Generate new access token
+        token_data = {"sub": user_id, "email": payload.get("email", "")}
+        new_access_token = create_access_token(data=token_data)
+        
+        return RefreshTokenResponse(
+            access_token=new_access_token,
+            token_type="bearer"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error refreshing token: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_endpoint(current_user: UserResponse = Depends(get_current_user)):
+    """Get current authenticated user"""
+    return current_user
 
 
 @router.get("/{user_id}", response_model=UserResponse)

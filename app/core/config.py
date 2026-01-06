@@ -96,6 +96,16 @@ class Settings:
         "STRIPE_PRODUCT_CAMPAIGN"
     )  # Optional filter for products by metadata
 
+    # JWT Configuration
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
+        os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")
+    )  # 24 hours default
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = int(
+        os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")
+    )  # 30 days default
+
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     PERSONALITY_PROFILES_PATH: Path = (

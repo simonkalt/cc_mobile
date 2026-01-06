@@ -17,6 +17,7 @@ from app.models.user import (
 )
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password, verify_password
+from app.utils.jwt import create_access_token, create_refresh_token
 from app.utils.user_helpers import (
     user_doc_to_response,
     normalize_personality_profiles,
@@ -683,9 +684,19 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     )
     
     logger.info(f"User logged in: {login_data.email}")
+    
+    # Generate JWT tokens
+    user_id = str(user["_id"])
+    token_data = {"sub": user_id, "email": user.get("email", "")}
+    access_token = create_access_token(data=token_data)
+    refresh_token = create_refresh_token(data=token_data)
+    
     return UserLoginResponse(
         success=True,
         user=user_doc_to_response(user),
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
         message="Login successful"
     )
 

@@ -32,3 +32,5 @@ selenium>=4.15.0
 twilio
 redis
 stripe>=7.0.0
+python-jose[cryptography]
+passlib[bcrypt]

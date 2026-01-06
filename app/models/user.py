@@ -111,4 +111,16 @@ class UserLoginResponse(BaseModel):
     success: bool
     user: Optional[UserResponse] = None
     message: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    token_type: str = "bearer"
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
