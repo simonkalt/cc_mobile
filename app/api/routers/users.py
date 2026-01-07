@@ -138,8 +138,8 @@ async def get_user_by_id_endpoint(user_id: str, current_user: UserResponse = Dep
         raise
 
 
-@router.get("/email/{email}", response_model=UserResponse)
-async def get_user_by_email_endpoint(email: str, current_user: UserResponse = Depends(get_current_user)):
+@router.get("/email/{email}", response_model=UserResponse, dependencies=[])  # Public endpoint - no authentication required
+async def get_user_by_email_endpoint(email: str):
     """Get user by email"""
     return get_user_by_email(email)
 
