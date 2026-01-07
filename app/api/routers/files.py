@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/files",
     tags=["files"],
-    dependencies=[Depends(get_current_user)]
+    # No router-level dependencies - protect endpoints individually
 )
 
 # Import utilities and services
@@ -50,7 +50,7 @@ def get_s3_bucket_name():
 
 
 @router.get("/list")
-async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = None):
+async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = None, current_user: UserResponse = Depends(get_current_user)):
     """List files from S3 bucket for the authenticated user"""
     if not S3_AVAILABLE:
         raise HTTPException(
@@ -131,7 +131,7 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
 
 
 @router.post("/upload")
-async def upload_file(request: FileUploadRequest):
+async def upload_file(request: FileUploadRequest, current_user: UserResponse = Depends(get_current_user)):
     """Upload a file to S3 bucket on behalf of the user"""
     if not S3_AVAILABLE:
         raise HTTPException(
@@ -224,7 +224,7 @@ async def upload_file(request: FileUploadRequest):
 
 
 @router.put("/rename")
-async def rename_file(request: FileRenameRequest):
+async def rename_file(request: FileRenameRequest, current_user: UserResponse = Depends(get_current_user)):
     """Rename a file in S3 bucket"""
     if not S3_AVAILABLE:
         raise HTTPException(
@@ -324,7 +324,7 @@ async def rename_file(request: FileRenameRequest):
 
 
 @router.delete("/delete")
-async def delete_file_endpoint(request: FileDeleteRequest):
+async def delete_file_endpoint(request: FileDeleteRequest, current_user: UserResponse = Depends(get_current_user)):
     """Delete a file from S3 bucket"""
     if not S3_AVAILABLE:
         raise HTTPException(
@@ -387,7 +387,7 @@ async def delete_file_endpoint(request: FileDeleteRequest):
 
 
 @router.post("/save-cover-letter")
-async def save_cover_letter(request: SaveCoverLetterRequest):
+async def save_cover_letter(request: SaveCoverLetterRequest, current_user: UserResponse = Depends(get_current_user)):
     """Save a generated cover letter to S3 bucket"""
     if not S3_AVAILABLE:
         raise HTTPException(
