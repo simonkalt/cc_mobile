@@ -241,8 +241,44 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# make static files available
-app.mount("/website", StaticFiles(directory="website"), html=True, name="website")
+# Mount static files for website and documents
+# Get the project root directory - try multiple methods for compatibility
+try:
+    # Method 1: Current working directory (most common on Render)
+    cwd = os.getcwd()
+
+    # Method 2: Relative to this file
+    file_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Try to find website directory
+    website_path = None
+    documents_path = None
+
+    # Check current working directory first (Render uses this)
+    if os.path.exists(os.path.join(cwd, "website")):
+        website_path = os.path.join(cwd, "website")
+        documents_path = os.path.join(cwd, "documents")
+    elif os.path.exists(os.path.join(file_dir, "website")):
+        website_path = os.path.join(file_dir, "website")
+        documents_path = os.path.join(file_dir, "documents")
+
+    if website_path and os.path.exists(website_path):
+        app.mount("/website", StaticFiles(directory=website_path, html=True), name="website")
+        print(f"✓ Successfully mounted website static files from: {website_path}")
+    else:
+        print(f"✗ Website directory not found. Checked: {cwd}/website, {file_dir}/website")
+
+    if documents_path and os.path.exists(documents_path):
+        app.mount("/documents", StaticFiles(directory=documents_path), name="documents")
+        print(f"✓ Successfully mounted documents static files from: {documents_path}")
+    else:
+        print(f"✗ Documents directory not found. Checked: {cwd}/documents, {file_dir}/documents")
+
+except Exception as e:
+    print(f"Error mounting static files: {e}")
+    import traceback
+
+    traceback.print_exc()
 
 # Configure CORS for React app
 # Get allowed origins from environment variable or use defaults
