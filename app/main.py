@@ -40,8 +40,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi import Request, status
+from fastapi.staticfiles import StaticFiles
 import logging
 import sys
+import os
 
 from app.core.config import settings, get_cors_origins
 from app.core.logging_config import setup_logging
@@ -95,6 +97,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files for website and documents
+# Get the project root directory (one level up from app/)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+website_path = os.path.join(project_root, "website")
+documents_path = os.path.join(project_root, "documents")
+
+if os.path.exists(website_path):
+    app.mount("/website", StaticFiles(directory=website_path, html=True), name="website")
+    logger.info(f"Mounted website static files from: {website_path}")
+else:
+    logger.warning(f"Website directory not found at: {website_path}")
+
+if os.path.exists(documents_path):
+    app.mount("/documents", StaticFiles(directory=documents_path), name="documents")
+    logger.info(f"Mounted documents static files from: {documents_path}")
+else:
+    logger.warning(f"Documents directory not found at: {documents_path}")
 
 # Add exception handler for validation errors
 @app.exception_handler(RequestValidationError)
