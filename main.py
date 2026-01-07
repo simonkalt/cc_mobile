@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, status, HTTPException, Depends
+from fastapi.staticfiles import StaticFiles
 
 # Import authentication early (before endpoints that use it)
 try:
@@ -240,6 +241,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# make static files available
+app.mount("/website", StaticFiles(directory="/website"), html=True, name="website")
 
 # Configure CORS for React app
 # Get allowed origins from environment variable or use defaults
