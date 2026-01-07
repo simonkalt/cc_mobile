@@ -125,6 +125,19 @@ async def get_current_user_endpoint(current_user: UserResponse = Depends(get_cur
     return current_user
 
 
+@router.get("/email/{email}", response_model=UserResponse, dependencies=[])  # Public endpoint - no authentication required
+async def get_user_by_email_endpoint(email: str):
+    """Get user by email - PUBLIC ENDPOINT (no authentication required)"""
+    logger.info(f"Get user by email request: {email}")
+    try:
+        result = get_user_by_email(email)
+        logger.info(f"Successfully retrieved user by email: {email}")
+        return result
+    except Exception as e:
+        logger.error(f"Error getting user by email {email}: {e}", exc_info=True)
+        raise
+
+
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user_by_id_endpoint(user_id: str, current_user: UserResponse = Depends(get_current_user)):
     """Get user by ID"""
@@ -136,12 +149,6 @@ async def get_user_by_id_endpoint(user_id: str, current_user: UserResponse = Dep
     except Exception as e:
         logger.error(f"Error getting user {user_id}: {e}", exc_info=True)
         raise
-
-
-@router.get("/email/{email}", response_model=UserResponse, dependencies=[])  # Public endpoint - no authentication required
-async def get_user_by_email_endpoint(email: str):
-    """Get user by email"""
-    return get_user_by_email(email)
 
 
 @router.put("/{user_id}", response_model=UserResponse)
