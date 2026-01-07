@@ -38,7 +38,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi import Request, status
 from fastapi.staticfiles import StaticFiles
 import logging
@@ -98,23 +98,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files for website and documents
-# Get the project root directory (one level up from app/)
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-website_path = os.path.join(project_root, "website")
-documents_path = os.path.join(project_root, "documents")
-
-if os.path.exists(website_path):
-    app.mount("/website", StaticFiles(directory=website_path, html=True), name="website")
-    logger.info(f"Mounted website static files from: {website_path}")
-else:
-    logger.warning(f"Website directory not found at: {website_path}")
-
-if os.path.exists(documents_path):
-    app.mount("/documents", StaticFiles(directory=documents_path), name="documents")
-    logger.info(f"Mounted documents static files from: {documents_path}")
-else:
-    logger.warning(f"Documents directory not found at: {documents_path}")
+# Mount static files for website and documents BEFORE routers
+# Get the project root directory - try multiple methods for compatibility
+try:
+    # Method 1: Relative to app/ directory (most common)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Method 2: If that doesn't work, try current working directory
+    if not os.path.exists(os.path.join(project_root, "website")):
+        cwd = os.getcwd()
+        if os.path.exists(os.path.join(cwd, "website")):
+            project_root = cwd
+            logger.info(f"Using current working directory for static files: {cwd}")
+    
+    website_path = os.path.join(project_root, "website")
+    documents_path = os.path.join(project_root, "documents")
+    
+    logger.info(f"Project root: {project_root}")
+    logger.info(f"Website path: {website_path}")
+    logger.info(f"Documents path: {documents_path}")
+    logger.info(f"Website exists: {os.path.exists(website_path)}")
+    logger.info(f"Documents exists: {os.path.exists(documents_path)}")
+    
+    if os.path.exists(website_path):
+        app.mount("/website", StaticFiles(directory=website_path, html=True), name="website")
+        logger.info(f"✓ Successfully mounted website static files from: {website_path}")
+    else:
+        logger.warning(f"✗ Website directory not found at: {website_path}")
+        # List directory contents for debugging
+        try:
+            logger.warning(f"Contents of project root: {os.listdir(project_root)}")
+        except Exception as e:
+            logger.warning(f"Could not list project root: {e}")
+    
+    if os.path.exists(documents_path):
+        app.mount("/documents", StaticFiles(directory=documents_path), name="documents")
+        logger.info(f"✓ Successfully mounted documents static files from: {documents_path}")
+    else:
+        logger.warning(f"✗ Documents directory not found at: {documents_path}")
+        
+except Exception as e:
+    logger.error(f"Error mounting static files: {e}", exc_info=True)
 
 # Add exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -178,6 +202,65 @@ async def root():
         "version": settings.APP_VERSION,
         "status": "running"
     }
+
+
+# Debug endpoint to check static file paths
+@app.get("/debug/static-paths")
+async def debug_static_paths():
+    """Debug endpoint to check static file paths"""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cwd = os.getcwd()
+    website_path1 = os.path.join(project_root, "website")
+    website_path2 = os.path.join(cwd, "website")
+    
+    return {
+        "project_root": project_root,
+        "current_working_directory": cwd,
+        "website_path_1": website_path1,
+        "website_path_1_exists": os.path.exists(website_path1),
+        "website_path_2": website_path2,
+        "website_path_2_exists": os.path.exists(website_path2),
+        "project_root_contents": os.listdir(project_root) if os.path.exists(project_root) else "N/A",
+        "cwd_contents": os.listdir(cwd) if os.path.exists(cwd) else "N/A",
+    }
+
+
+# Fallback route handler for website (if mount doesn't work)
+@app.get("/website", response_class=HTMLResponse)
+@app.get("/website/", response_class=HTMLResponse)
+@app.get("/website/index.html", response_class=HTMLResponse)
+async def serve_website():
+    """Fallback route to serve website index.html"""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cwd = os.getcwd()
+    
+    # Try multiple possible paths
+    possible_paths = [
+        os.path.join(project_root, "website", "index.html"),
+        os.path.join(cwd, "website", "index.html"),
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return FileResponse(path)
+    
+    # If file not found, return error message
+    return HTMLResponse(
+        content=f"""
+        <html>
+            <body>
+                <h1>Website Not Found</h1>
+                <p>Could not find index.html. Checked paths:</p>
+                <ul>
+                    {''.join([f'<li>{path} - {"✓" if os.path.exists(path) else "✗"}</li>' for path in possible_paths])}
+                </ul>
+                <p>Project root: {project_root}</p>
+                <p>CWD: {cwd}</p>
+            </body>
+        </html>
+        """,
+        status_code=404
+    )
 
 
 @app.get("/api/health")
