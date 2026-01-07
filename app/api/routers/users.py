@@ -125,7 +125,7 @@ async def get_current_user_endpoint(current_user: UserResponse = Depends(get_cur
     return current_user
 
 
-@router.get("/email/{email}", response_model=UserResponse, dependencies=[])  # Public endpoint - no authentication required
+@router.get("/email/{email}", dependencies=[])  # Public endpoint - no authentication required
 async def get_user_by_email_endpoint(email: str):
     """Get user by email - PUBLIC ENDPOINT (no authentication required)"""
     logger.info(f"Get user by email request: {email}")
@@ -133,9 +133,15 @@ async def get_user_by_email_endpoint(email: str):
         result = get_user_by_email(email)
         logger.info(f"Successfully retrieved user by email: {email}")
         return result
+    except HTTPException as e:
+        # Re-raise HTTPException as-is (including 404)
+        raise
     except Exception as e:
         logger.error(f"Error getting user by email {email}: {e}", exc_info=True)
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving user information"
+        )
 
 
 @router.get("/{user_id}", response_model=UserResponse)

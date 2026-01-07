@@ -39,6 +39,88 @@ from app.db.mongodb import is_connected
 
 MONGODB_AVAILABLE = True  # Always available if imported successfully
 
+# Public endpoints - define first to ensure they're registered before protected routes
+@router.get("/terms-of-service", dependencies=[])  # Explicitly mark as public - no authentication required
+async def get_terms_of_service():
+    """
+    Get the Terms of Service as markdown from S3.
+    This is a public endpoint that requires no authentication.
+    Returns markdown content that can be displayed or rendered by the client.
+    """
+    logger.info("Terms of Service endpoint called")
+    
+    if not S3_AVAILABLE:
+        logger.error("S3 not available")
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed.",
+        )
+
+    try:
+        # S3 path to the Terms of Service markdown file
+        s3_path = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
+        
+        logger.info(f"Attempting to download markdown file from S3: {s3_path}")
+        
+        # Parse S3 path
+        if s3_path.startswith("s3://"):
+            s3_path = s3_path[5:]  # Remove 's3://' prefix
+        
+        # Split bucket and key
+        parts = s3_path.split("/", 1)
+        if len(parts) != 2:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid S3 path format: {s3_path}"
+            )
+        
+        bucket_name = parts[0]
+        object_key = parts[1]
+        
+        # Download markdown file from S3
+        s3_client = get_s3_client()
+        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        markdown_content = response["Body"].read().decode('utf-8')
+        
+        if not markdown_content:
+            logger.error("Downloaded markdown file is empty")
+            raise HTTPException(
+                status_code=404,
+                detail="Terms of Service markdown file not found in S3"
+            )
+        
+        logger.info(f"Successfully retrieved Terms of Service markdown ({len(markdown_content)} characters)")
+        
+        # Return markdown with proper headers
+        return Response(
+            content=markdown_content.encode('utf-8'),
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": 'inline; filename="Terms of Service.md"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        error_msg = f"S3 error: {error_code} - {str(e)}"
+        logger.error(error_msg)
+        if error_code == "NoSuchKey" or error_code == "404":
+            raise HTTPException(
+                status_code=404,
+                detail="Terms of Service markdown file not found in S3"
+            )
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Failed to retrieve Terms of Service: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        # Check if it's a "not found" type error
+        if "NoSuchKey" in str(e) or "404" in str(e) or "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Terms of Service markdown file not found in S3")
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
 def get_s3_bucket_name():
     """Get S3 bucket name from settings"""
     bucket_name = settings.AWS_S3_BUCKET
@@ -514,86 +596,5 @@ async def save_cover_letter(request: SaveCoverLetterRequest, current_user: UserR
     except Exception as e:
         error_msg = f"Save cover letter failed: {str(e)}"
         logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
-
-
-@router.get("/terms-of-service", dependencies=[])
-async def get_terms_of_service():
-    """
-    Get the Terms of Service as markdown from S3.
-    This is a public endpoint that requires no authentication.
-    Returns markdown content that can be displayed or rendered by the client.
-    """
-    logger.info("Terms of Service endpoint called")
-    
-    if not S3_AVAILABLE:
-        logger.error("S3 not available")
-        raise HTTPException(
-            status_code=503,
-            detail="S3 service is not available. boto3 is not installed.",
-        )
-
-    try:
-        # S3 path to the Terms of Service markdown file
-        s3_path = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
-        
-        logger.info(f"Attempting to download markdown file from S3: {s3_path}")
-        
-        # Parse S3 path
-        if s3_path.startswith("s3://"):
-            s3_path = s3_path[5:]  # Remove 's3://' prefix
-        
-        # Split bucket and key
-        parts = s3_path.split("/", 1)
-        if len(parts) != 2:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Invalid S3 path format: {s3_path}"
-            )
-        
-        bucket_name = parts[0]
-        object_key = parts[1]
-        
-        # Download markdown file from S3
-        s3_client = get_s3_client()
-        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
-        markdown_content = response["Body"].read().decode('utf-8')
-        
-        if not markdown_content:
-            logger.error("Downloaded markdown file is empty")
-            raise HTTPException(
-                status_code=404,
-                detail="Terms of Service markdown file not found in S3"
-            )
-        
-        logger.info(f"Successfully retrieved Terms of Service markdown ({len(markdown_content)} characters)")
-        
-        # Return markdown with proper headers
-        return Response(
-            content=markdown_content.encode('utf-8'),
-            media_type="text/markdown; charset=utf-8",
-            headers={
-                "Content-Disposition": 'inline; filename="Terms of Service.md"'
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "Unknown")
-        error_msg = f"S3 error: {error_code} - {str(e)}"
-        logger.error(error_msg)
-        if error_code == "NoSuchKey" or error_code == "404":
-            raise HTTPException(
-                status_code=404,
-                detail="Terms of Service markdown file not found in S3"
-            )
-        raise HTTPException(status_code=500, detail=error_msg)
-    except Exception as e:
-        error_msg = f"Failed to retrieve Terms of Service: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        # Check if it's a "not found" type error
-        if "NoSuchKey" in str(e) or "404" in str(e) or "not found" in str(e).lower():
-            raise HTTPException(status_code=404, detail="Terms of Service markdown file not found in S3")
         raise HTTPException(status_code=500, detail=error_msg)
 
