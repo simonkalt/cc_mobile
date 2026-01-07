@@ -242,7 +242,7 @@ app = FastAPI(
 )
 
 # make static files available
-app.mount("/website", StaticFiles(directory="/website"), html=True, name="website")
+app.mount("/website", StaticFiles(directory="website"), html=True, name="website")
 
 # Configure CORS for React app
 # Get allowed origins from environment variable or use defaults
