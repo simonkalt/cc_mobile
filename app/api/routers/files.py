@@ -57,6 +57,116 @@ async def get_profile_pdf():
     try:
         # Try to find the PDF file
         pdf_filename = "Simon Kaltgrad Resume 2025 Q3.pdf"
+        # Calculate project root: files.py is in app/api/routers/, so go up 3 levels
+        current_file = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+        cwd = os.getcwd()
+        
+        # Try multiple possible paths
+        possible_paths = [
+            os.path.join(project_root, "website", "profile", pdf_filename),
+            os.path.join(cwd, "website", "profile", pdf_filename),
+        ]
+        
+        pdf_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                pdf_path = path
+                break
+        
+        if not pdf_path:
+            logger.error(f"Profile PDF not found. Tried paths: {possible_paths}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Profile PDF not found"
+            )
+        
+        logger.info(f"Serving profile PDF from: {pdf_path}")
+        return FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=pdf_filename,
+            headers={
+                "Content-Disposition": f'attachment; filename="{pdf_filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving profile PDF: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error serving profile PDF"
+        )
+
+@router.get(
+    "/profile/bizcard",
+    dependencies=[],  # Explicitly mark as public - no authentication required
+)
+async def get_profile_bizcard():
+    """
+    Get the Simon Kaltgrad business card PNG image.
+    This is a public endpoint that requires no authentication.
+    Returns the PNG image file.
+    """
+    from fastapi.responses import FileResponse
+    import os
+    
+    try:
+        # Try to find the PNG file
+        png_filename = "bizcardsk.png"
+        # Calculate project root: files.py is in app/api/routers/, so go up 3 levels
+        current_file = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+        cwd = os.getcwd()
+        
+        # Try multiple possible paths
+        possible_paths = [
+            os.path.join(project_root, "website", "profile", png_filename),
+            os.path.join(cwd, "website", "profile", png_filename),
+        ]
+        
+        png_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                png_path = path
+                break
+        
+        if not png_path:
+            logger.error(f"Profile business card PNG not found. Tried paths: {possible_paths}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Profile business card PNG not found"
+            )
+        
+        logger.info(f"Serving profile business card PNG from: {png_path}")
+        return FileResponse(
+            png_path,
+            media_type="image/png",
+            filename=png_filename,
+            headers={
+                "Content-Disposition": f'inline; filename="{png_filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving profile business card PNG: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error serving profile business card PNG"
+        )
+    """
+    Get the Simon Kaltgrad Resume PDF for download.
+    This is a public endpoint that requires no authentication.
+    Returns the PDF file for download.
+    """
+    from fastapi.responses import FileResponse
+    import os
+    
+    try:
+        # Try to find the PDF file
+        pdf_filename = "Simon Kaltgrad Resume 2025 Q3.pdf"
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         cwd = os.getcwd()
         
