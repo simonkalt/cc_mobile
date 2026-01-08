@@ -98,6 +98,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Route to serve profile PDF - MUST be defined BEFORE static file mounts
+@app.get("/website/profile")
+@app.get("/website/profile/")
+async def serve_profile_pdf():
+    """
+    Serve the Simon Kaltgrad Resume PDF for download.
+    """
+    try:
+        # Try to find the PDF file
+        pdf_filename = "Simon Kaltgrad Resume 2025 Q3.pdf"
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cwd = os.getcwd()
+        
+        # Try multiple possible paths
+        possible_paths = [
+            os.path.join(project_root, "website", "profile", pdf_filename),
+            os.path.join(cwd, "website", "profile", pdf_filename),
+        ]
+        
+        pdf_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                pdf_path = path
+                break
+        
+        if not pdf_path:
+            logger.error(f"Profile PDF not found. Tried paths: {possible_paths}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Profile PDF not found"
+            )
+        
+        logger.info(f"Serving profile PDF from: {pdf_path}")
+        return FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=pdf_filename,
+            headers={
+                "Content-Disposition": f'attachment; filename="{pdf_filename}"'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving profile PDF: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error serving profile PDF"
+        )
+
 # Mount static files for website and documents BEFORE routers
 # Get the project root directory - try multiple methods for compatibility
 try:
@@ -136,7 +186,7 @@ try:
         logger.info(f"✓ Successfully mounted documents static files from: {documents_path}")
     else:
         logger.warning(f"✗ Documents directory not found at: {documents_path}")
-        
+    
 except Exception as e:
     logger.error(f"Error mounting static files: {e}", exc_info=True)
 
