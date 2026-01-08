@@ -2,7 +2,7 @@
 User API routes
 """
 import logging
-from fastapi import APIRouter, status, Depends
+from fastapi import APIRouter, status, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.models.user import (
@@ -125,16 +125,37 @@ async def get_current_user_endpoint(current_user: UserResponse = Depends(get_cur
     return current_user
 
 
-@router.get("/email/{email}", dependencies=[])  # Public endpoint - no authentication required
+@router.get(
+    "/email/{email}",
+    dependencies=[],  # Public endpoint - no authentication required
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+)
 async def get_user_by_email_endpoint(email: str):
-    """Get user by email - PUBLIC ENDPOINT (no authentication required)"""
-    logger.info(f"Get user by email request: {email}")
+    """
+    Get user by email - PUBLIC ENDPOINT (no authentication required)
+    
+    This endpoint allows checking if a user exists by email address.
+    It is public and does not require authentication.
+    
+    Args:
+        email: User's email address (URL encoded)
+    
+    Returns:
+        UserResponse: User object if found (200 OK)
+        
+    Raises:
+        HTTPException 404: User not found
+        HTTPException 503: Database unavailable
+    """
     try:
         result = get_user_by_email(email)
-        logger.info(f"Successfully retrieved user by email: {email}")
         return result
     except HTTPException as e:
-        # Re-raise HTTPException as-is (including 404)
+        # Re-raise HTTPException as-is (404 for not found, 503 for service unavailable)
+        # Don't log 404s - they're expected when checking if user exists
+        if e.status_code != status.HTTP_404_NOT_FOUND:
+            logger.warning(f"HTTPException getting user by email {email}: {e.status_code} - {e.detail}")
         raise
     except Exception as e:
         logger.error(f"Error getting user by email {email}: {e}", exc_info=True)

@@ -7,6 +7,7 @@ import re
 from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse, Response
+from fastapi.security import HTTPBearer
 from botocore.exceptions import ClientError
 from app.core.auth import get_current_user
 from app.models.user import UserResponse
@@ -40,14 +41,17 @@ from app.db.mongodb import is_connected
 MONGODB_AVAILABLE = True  # Always available if imported successfully
 
 # Public endpoints - define first to ensure they're registered before protected routes
-@router.get("/terms-of-service", dependencies=[])  # Explicitly mark as public - no authentication required
+@router.get(
+    "/terms-of-service",
+    dependencies=[],  # Explicitly mark as public - no authentication required
+)
 async def get_terms_of_service():
     """
     Get the Terms of Service as markdown from S3.
     This is a public endpoint that requires no authentication.
     Returns markdown content that can be displayed or rendered by the client.
     """
-    logger.info("Terms of Service endpoint called")
+    logger.info("Terms of Service endpoint called - PUBLIC ENDPOINT (no auth required)")
     
     if not S3_AVAILABLE:
         logger.error("S3 not available")

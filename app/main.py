@@ -38,8 +38,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
-from fastapi import Request, status
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, Response
+from fastapi import Request, status, HTTPException
 from fastapi.staticfiles import StaticFiles
 import logging
 import sys
@@ -202,6 +202,73 @@ async def root():
         "version": settings.APP_VERSION,
         "status": "running"
     }
+
+
+# Public endpoint for Terms of Service - defined directly on app to ensure it's truly public
+@app.get("/api/files/terms-of-service", dependencies=[])
+async def get_terms_of_service():
+    """
+    Get the Terms of Service as markdown from S3.
+    This is a public endpoint that requires no authentication.
+    Returns markdown content that can be displayed or rendered by the client.
+    """
+    from app.utils.s3_utils import get_s3_client, S3_AVAILABLE
+    from botocore.exceptions import ClientError
+    
+    if not S3_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="S3 service is not available. boto3 is not installed.",
+        )
+
+    try:
+        s3_path = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
+        
+        if s3_path.startswith("s3://"):
+            s3_path = s3_path[5:]
+        
+        parts = s3_path.split("/", 1)
+        if len(parts) != 2:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid S3 path format: {s3_path}"
+            )
+        
+        bucket_name = parts[0]
+        object_key = parts[1]
+        
+        s3_client = get_s3_client()
+        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        markdown_content = response["Body"].read().decode('utf-8')
+        
+        if not markdown_content:
+            raise HTTPException(
+                status_code=404,
+                detail="Terms of Service markdown file not found in S3"
+            )
+        
+        return Response(
+            content=markdown_content.encode('utf-8'),
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": 'inline; filename="Terms of Service.md"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        if error_code == "NoSuchKey" or error_code == "404":
+            raise HTTPException(
+                status_code=404,
+                detail="Terms of Service markdown file not found in S3"
+            )
+        raise HTTPException(status_code=500, detail=f"S3 error: {error_code}")
+    except Exception as e:
+        if "NoSuchKey" in str(e) or "404" in str(e) or "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Terms of Service markdown file not found in S3")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve Terms of Service: {str(e)}")
 
 
 # Debug endpoint to check static file paths
