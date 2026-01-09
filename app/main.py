@@ -67,6 +67,32 @@ async def lifespan(app: FastAPI):
     connect_to_mongodb()
     logger.info("Application startup complete")
     
+    # Log all registered routes at startup (especially subscription routes)
+    logger.info("=" * 80)
+    logger.info("Checking registered routes...")
+    subscription_routes = []
+    all_routes = []
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            path = route.path
+            methods = list(route.methods) if route.methods else []
+            all_routes.append((path, methods))
+            if "/subscriptions" in path:
+                subscription_routes.append((path, methods))
+                logger.info(f"  ✓ Subscription route: {', '.join(methods):<10} {path}")
+    
+    if subscription_routes:
+        logger.info(f"✓ Found {len(subscription_routes)} subscription route(s)")
+    else:
+        logger.warning("⚠️ WARNING: No subscription routes found! Router may not be registered.")
+        logger.warning(f"   Total routes registered: {len(all_routes)}")
+        # Log a few sample routes to verify router registration is working
+        if all_routes:
+            logger.warning("   Sample routes:")
+            for path, methods in all_routes[:5]:
+                logger.warning(f"     {', '.join(methods):<10} {path}")
+    logger.info("=" * 80)
+    
     yield
     
     # Shutdown - minimal cleanup, let uvicorn handle task cancellation
@@ -194,33 +220,58 @@ except Exception as e:
     logger.error(f"❌ Failed to register some routers: {e}", exc_info=True)
 
 # Import and register subscriptions router separately with detailed error handling
+print("=" * 80)
+print("ATTEMPTING TO IMPORT SUBSCRIPTIONS ROUTER...")
+print("=" * 80)
+logger.info("=" * 80)
+logger.info("ATTEMPTING TO IMPORT SUBSCRIPTIONS ROUTER...")
+logger.info("=" * 80)
 try:
-    logger.info("Attempting to import subscriptions router...")
     from app.api.routers import subscriptions
+    print(f"✓ Successfully imported subscriptions module")
     logger.info(f"✓ Successfully imported subscriptions module: {subscriptions}")
+    print(f"✓ Subscriptions router object exists: {hasattr(subscriptions, 'router')}")
     logger.info(f"✓ Subscriptions router object: {subscriptions.router}")
+    print(f"✓ Subscriptions router prefix: {subscriptions.router.prefix}")
     logger.info(f"✓ Subscriptions router prefix: {subscriptions.router.prefix}")
+    print(f"✓ Subscriptions router routes count: {len(subscriptions.router.routes)}")
     logger.info(f"✓ Subscriptions router routes count: {len(subscriptions.router.routes)}")
     
     # Log all routes in the subscriptions router
+    print("Routes in subscriptions router:")
+    logger.info("Routes in subscriptions router:")
     for route in subscriptions.router.routes:
         if hasattr(route, 'path'):
-            logger.info(f"  - Route: {route.path} (methods: {getattr(route, 'methods', 'N/A')})")
+            path = route.path
+            methods = getattr(route, 'methods', set())
+            print(f"  - Route: {path} (methods: {methods})")
+            logger.info(f"  - Route: {path} (methods: {methods})")
     
     app.include_router(subscriptions.router)
+    print("✓ Successfully registered subscriptions router")
     logger.info("✓ Successfully registered subscriptions router")
+    print("=" * 80)
+    logger.info("=" * 80)
 except ImportError as e:
+    print(f"❌ FAILED TO IMPORT SUBSCRIPTIONS ROUTER: {e}")
     logger.error(f"❌ Failed to import subscriptions router: {e}", exc_info=True)
     import traceback
+    print(traceback.format_exc())
     logger.error(f"Import traceback: {traceback.format_exc()}")
 except AttributeError as e:
+    print(f"❌ SUBSCRIPTIONS ROUTER MISSING 'router' ATTRIBUTE: {e}")
     logger.error(f"❌ Subscriptions router missing 'router' attribute: {e}", exc_info=True)
     import traceback
+    print(traceback.format_exc())
     logger.error(f"AttributeError traceback: {traceback.format_exc()}")
 except Exception as e:
+    print(f"❌ FAILED TO REGISTER SUBSCRIPTIONS ROUTER: {e}")
     logger.error(f"❌ Failed to register subscriptions router: {e}", exc_info=True)
     import traceback
+    print(traceback.format_exc())
     logger.error(f"Exception traceback: {traceback.format_exc()}")
+print("=" * 80)
+logger.info("=" * 80)
 
 
 # Health check endpoints
