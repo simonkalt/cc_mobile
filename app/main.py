@@ -190,8 +190,11 @@ try:
     app.include_router(sms.router)
     app.include_router(email.router)
     app.include_router(subscriptions.router)
+    logger.info("✓ Successfully registered subscriptions router")
 except ImportError as e:
-    logger.warning(f"Some routers could not be imported: {e}")
+    logger.error(f"❌ Some routers could not be imported: {e}", exc_info=True)
+except Exception as e:
+    logger.error(f"❌ Failed to register some routers: {e}", exc_info=True)
 
 
 # Health check endpoints
