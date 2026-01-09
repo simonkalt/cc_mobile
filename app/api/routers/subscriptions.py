@@ -37,7 +37,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["subscriptions"], dependencies=[Depends(get_current_user)])
 
 
-@router.get("/subscriptions/test-connectivity")
+@router.get(
+    "/subscriptions/test-connectivity",
+    dependencies=[],  # Explicitly mark as public - no authentication required
+)
 def test_stripe_connectivity():
     """
     Comprehensive endpoint to test Stripe connectivity using all environment variables.
@@ -298,7 +301,10 @@ def test_stripe_connectivity():
     return result
 
 
-@router.get("/subscriptions/debug/stripe")
+@router.get(
+    "/subscriptions/debug/stripe",
+    dependencies=[],  # Explicitly mark as public - no authentication required
+)
 def debug_stripe():
     """
     Debug endpoint to check Stripe availability and configuration
@@ -344,7 +350,11 @@ def debug_stripe():
     return debug_info
 
 
-@router.get("/subscriptions/plans", response_model=SubscriptionPlansResponse)
+@router.get(
+    "/subscriptions/plans",
+    response_model=SubscriptionPlansResponse,
+    dependencies=[],  # Explicitly mark as public - no authentication required
+)
 def get_plans(force_refresh: bool = False):
     """
     Get available subscription plans with Stripe Price IDs.
@@ -359,19 +369,20 @@ def get_plans(force_refresh: bool = False):
     """
     try:
         plans_data = get_subscription_plans(force_refresh=force_refresh)
-        # plans_count = len(plans_data.get('plans', []))
-        # logger.info(f"Returning {plans_count} subscription plan(s) to client")
-
-        # Log the full JSON response
-        import json
+        plans_count = len(plans_data.get('plans', []))
+        
+        if plans_count == 0:
+            logger.warning(
+                "⚠️ Plans endpoint returning 0 plans. This will show 'No subscription plans available' "
+                "in the frontend. Check logs above for Stripe connection errors."
+            )
+        else:
+            logger.info(f"✅ Returning {plans_count} subscription plan(s) to client")
 
         response_obj = SubscriptionPlansResponse(**plans_data)
-        # response_json = json.dumps(response_obj.dict(), indent=2)
-        # logger.info(f"Plans endpoint JSON response ({plans_count} plan(s)):\n{response_json}")
-
         return response_obj
     except Exception as e:
-        logger.error(f"Error fetching subscription plans: {e}", exc_info=True)
+        logger.error(f"❌ Error fetching subscription plans: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch subscription plans: {str(e)}",

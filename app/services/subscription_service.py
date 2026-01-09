@@ -1108,6 +1108,9 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
 
             # If campaign filter is provided, we'll filter after fetching
             # (Stripe metadata filtering requires specific query format)
+            logger.info(f"Attempting to fetch products from Stripe with params: {product_params}")
+            logger.info(f"Stripe API key configured: {bool(stripe_module.api_key)}")
+            logger.info(f"Stripe API version: {getattr(stripe_module, 'api_version', 'not_set')}")
             products = stripe_module.Product.list(**product_params)
 
             logger.info(f"Found {len(products.data)} active products in Stripe")
@@ -1353,8 +1356,25 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
         return plans
 
     except Exception as e:
+        error_type = type(e).__name__
+        error_details = str(e)
         logger.error(f"Unexpected error fetching Stripe products: {e}", exc_info=True)
-        logger.error(f"Error type: {type(e).__name__}, Error details: {str(e)}")
+        logger.error(f"Error type: {error_type}, Error details: {error_details}")
+        
+        # Check for specific Stripe error types
+        if hasattr(e, 'code'):
+            logger.error(f"Stripe error code: {e.code}")
+        if hasattr(e, 'user_message'):
+            logger.error(f"Stripe user message: {e.user_message}")
+        if hasattr(e, 'param'):
+            logger.error(f"Stripe error parameter: {e.param}")
+        
+        # Log if it's a connection/network error
+        if 'connection' in error_details.lower() or 'network' in error_details.lower() or 'timeout' in error_details.lower():
+            logger.error("⚠️ This appears to be a network/connection error. Check if Render can reach Stripe API.")
+        elif 'authentication' in error_details.lower() or 'unauthorized' in error_details.lower():
+            logger.error("⚠️ This appears to be an authentication error. Check your Stripe API key.")
+        
         return []
 
 
