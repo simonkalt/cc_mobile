@@ -177,7 +177,6 @@ try:
         pdf,
         sms,
         email,
-        subscriptions,
     )
     app.include_router(job_url.router)
     app.include_router(llm_config.router)
@@ -189,12 +188,39 @@ try:
     app.include_router(pdf.router)
     app.include_router(sms.router)
     app.include_router(email.router)
-    app.include_router(subscriptions.router)
-    logger.info("✓ Successfully registered subscriptions router")
 except ImportError as e:
     logger.error(f"❌ Some routers could not be imported: {e}", exc_info=True)
 except Exception as e:
     logger.error(f"❌ Failed to register some routers: {e}", exc_info=True)
+
+# Import and register subscriptions router separately with detailed error handling
+try:
+    logger.info("Attempting to import subscriptions router...")
+    from app.api.routers import subscriptions
+    logger.info(f"✓ Successfully imported subscriptions module: {subscriptions}")
+    logger.info(f"✓ Subscriptions router object: {subscriptions.router}")
+    logger.info(f"✓ Subscriptions router prefix: {subscriptions.router.prefix}")
+    logger.info(f"✓ Subscriptions router routes count: {len(subscriptions.router.routes)}")
+    
+    # Log all routes in the subscriptions router
+    for route in subscriptions.router.routes:
+        if hasattr(route, 'path'):
+            logger.info(f"  - Route: {route.path} (methods: {getattr(route, 'methods', 'N/A')})")
+    
+    app.include_router(subscriptions.router)
+    logger.info("✓ Successfully registered subscriptions router")
+except ImportError as e:
+    logger.error(f"❌ Failed to import subscriptions router: {e}", exc_info=True)
+    import traceback
+    logger.error(f"Import traceback: {traceback.format_exc()}")
+except AttributeError as e:
+    logger.error(f"❌ Subscriptions router missing 'router' attribute: {e}", exc_info=True)
+    import traceback
+    logger.error(f"AttributeError traceback: {traceback.format_exc()}")
+except Exception as e:
+    logger.error(f"❌ Failed to register subscriptions router: {e}", exc_info=True)
+    import traceback
+    logger.error(f"Exception traceback: {traceback.format_exc()}")
 
 
 # Health check endpoints
@@ -332,6 +358,22 @@ async def serve_website():
         status_code=404
     )
 
+
+@app.get("/api/debug/routes")
+async def debug_routes():
+    """Debug endpoint to list all registered routes"""
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            routes.append({
+                "path": route.path,
+                "methods": list(route.methods) if route.methods else [],
+                "name": getattr(route, 'name', 'N/A')
+            })
+    return {
+        "total_routes": len(routes),
+        "routes": sorted(routes, key=lambda x: x['path'])
+    }
 
 @app.get("/api/health")
 async def health_check():
