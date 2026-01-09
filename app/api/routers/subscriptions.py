@@ -34,7 +34,11 @@ from app.services.subscription_service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["subscriptions"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    prefix="/api",
+    tags=["subscriptions"],
+    # No router-level dependencies - protect endpoints individually
+)
 
 
 @router.get(
@@ -389,7 +393,11 @@ def get_plans(force_refresh: bool = False):
         )
 
 
-@router.get("/subscriptions/products", response_model=StripeProductsResponse)
+@router.get(
+    "/subscriptions/products",
+    response_model=StripeProductsResponse,
+    dependencies=[],  # Explicitly mark as public - no authentication required
+)
 def get_raw_products(force_refresh: bool = False):
     """
     Get raw Stripe products with full structure including marketing_features.
@@ -417,7 +425,7 @@ def get_raw_products(force_refresh: bool = False):
 
 
 @router.get("/subscriptions/{user_id}", response_model=SubscriptionResponse)
-def list_subscription(user_id: str):
+def list_subscription(user_id: str, current_user: UserResponse = Depends(get_current_user)):
     """
     Get user's subscription information
 
@@ -448,7 +456,9 @@ def list_subscription(user_id: str):
 
 
 @router.post("/subscriptions/create-payment-intent", response_model=CreatePaymentIntentResponse)
-def create_payment_intent_endpoint(request: CreatePaymentIntentRequest):
+def create_payment_intent_endpoint(
+    request: CreatePaymentIntentRequest, current_user: UserResponse = Depends(get_current_user)
+):
     """
     Create a PaymentIntent for subscription payment via PaymentSheet.
     This is PCI compliant - card data never touches our servers.
@@ -478,7 +488,9 @@ def create_payment_intent_endpoint(request: CreatePaymentIntentRequest):
 @router.get(
     "/subscriptions/payment-intent/{payment_intent_id}", response_model=PaymentIntentStatusResponse
 )
-def get_payment_intent_status_endpoint(payment_intent_id: str):
+def get_payment_intent_status_endpoint(
+    payment_intent_id: str, current_user: UserResponse = Depends(get_current_user)
+):
     """
     Get the status of a PaymentIntent.
     Used by frontend to check payment status after confirmation.
@@ -511,7 +523,7 @@ def get_payment_intent_status_endpoint(payment_intent_id: str):
 
 
 @router.post("/subscriptions/subscribe")
-def subscribe(request: SubscribeRequest):
+def subscribe(request: SubscribeRequest, current_user: UserResponse = Depends(get_current_user)):
     """
     Create a new subscription for a user.
     Supports both PaymentSheet (payment_intent_id) and legacy (payment_method_id) flows.
@@ -564,7 +576,7 @@ def subscribe(request: SubscribeRequest):
 
 
 @router.put("/subscriptions/upgrade")
-def upgrade(request: UpgradeRequest):
+def upgrade(request: UpgradeRequest, current_user: UserResponse = Depends(get_current_user)):
     """
     Upgrade user's subscription to a new plan
 
@@ -598,7 +610,7 @@ def upgrade(request: UpgradeRequest):
 
 
 @router.post("/subscriptions/cancel")
-def cancel(request: CancelRequest):
+def cancel(request: CancelRequest, current_user: UserResponse = Depends(get_current_user)):
     """
     Cancel user's subscription
 
