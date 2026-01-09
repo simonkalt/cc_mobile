@@ -19,3 +19,5 @@ dist/
 
 .oci/config
 .pem
+
+.cursor/mcp.json
