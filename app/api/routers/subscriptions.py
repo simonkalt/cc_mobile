@@ -473,7 +473,16 @@ def create_payment_intent_endpoint(
     try:
         result = create_payment_intent(user_id=request.user_id, price_id=request.price_id)
         logger.info(f"Successfully created payment intent for user {request.user_id}")
-        return CreatePaymentIntentResponse(**result)
+        
+        # Log response details (without sensitive data)
+        logger.info(f"Payment intent response keys: {list(result.keys())}")
+        logger.info(f"client_secret present: {'client_secret' in result}")
+        logger.info(f"customer_id present: {'customer_id' in result}")
+        logger.info(f"customer_ephemeral_key_secret present: {'customer_ephemeral_key_secret' in result}")
+        
+        response = CreatePaymentIntentResponse(**result)
+        logger.info(f"Response model validated successfully")
+        return response
     except HTTPException as e:
         logger.error(f"HTTP error creating payment intent: {e.status_code} - {e.detail}")
         raise

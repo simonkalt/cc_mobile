@@ -499,11 +499,34 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
 
         logger.info(f"Created PaymentIntent {payment_intent.id} for user {user_id}")
 
-        return {
+        response_data = {
             "client_secret": payment_intent.client_secret,
             "customer_id": stripe_customer_id,
             "customer_ephemeral_key_secret": ephemeral_key.secret,
         }
+        
+        # Validate all required fields are present
+        if not response_data.get("client_secret"):
+            logger.error("PaymentIntent missing client_secret!")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="PaymentIntent created but missing client_secret"
+            )
+        if not response_data.get("customer_id"):
+            logger.error("Response missing customer_id!")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Customer ID missing from response"
+            )
+        if not response_data.get("customer_ephemeral_key_secret"):
+            logger.error("Response missing customer_ephemeral_key_secret!")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Ephemeral key missing from response"
+            )
+        
+        logger.info(f"Payment intent response validated - all fields present")
+        return response_data
 
     except stripe_to_use.error.StripeError as e:
         logger.error(f"Stripe error creating payment intent: {e}")
