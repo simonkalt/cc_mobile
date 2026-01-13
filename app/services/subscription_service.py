@@ -1163,26 +1163,61 @@ def create_subscription(
                 if isinstance(invoice_payment_intent, str):
                     invoice_payment_intent = stripe_to_use.PaymentIntent.retrieve(invoice_pi_id)
 
-                # If the invoice PaymentIntent is incomplete, pay it using the confirmed payment method
-                if (
-                    invoice_payment_intent.status in ["requires_payment_method", "incomplete"]
-                    and payment_method_id
-                ):
-                    try:
-                        # Update and confirm the invoice PaymentIntent using the confirmed payment method
-                        confirmed_pi = stripe_to_use.PaymentIntent.confirm(
-                            invoice_pi_id, payment_method=payment_method_id
+                # If the invoice PaymentIntent needs confirmation or is incomplete, confirm it
+                if invoice_payment_intent.status in [
+                    "requires_confirmation",
+                    "requires_payment_method",
+                    "incomplete",
+                ]:
+                    # Use payment method from invoice PaymentIntent if available, otherwise use the one from original PaymentIntent
+                    invoice_pm_id = None
+                    if (
+                        hasattr(invoice_payment_intent, "payment_method")
+                        and invoice_payment_intent.payment_method
+                    ):
+                        invoice_pm_id = (
+                            invoice_payment_intent.payment_method
+                            if isinstance(invoice_payment_intent.payment_method, str)
+                            else invoice_payment_intent.payment_method.id
                         )
-                        logger.info(
-                            f"✅ Confirmed subscription invoice PaymentIntent {invoice_pi_id} using payment method from confirmed PaymentIntent"
-                        )
-                        logger.info(f"   Invoice PaymentIntent status: {confirmed_pi.status}")
-                    except stripe_to_use.error.StripeError as e:
+                        logger.debug(f"Invoice PaymentIntent has payment method: {invoice_pm_id}")
+
+                    # Use invoice payment method if available, otherwise fall back to original
+                    pm_to_use = invoice_pm_id or payment_method_id
+
+                    if pm_to_use:
+                        try:
+                            # Confirm the invoice PaymentIntent using the payment method
+                            confirm_params = {"payment_method": pm_to_use}
+                            logger.info(
+                                f"Confirming invoice PaymentIntent {invoice_pi_id} with payment method {pm_to_use} (status: {invoice_payment_intent.status})"
+                            )
+                            confirmed_pi = stripe_to_use.PaymentIntent.confirm(
+                                invoice_pi_id, **confirm_params
+                            )
+                            logger.info(
+                                f"✅ Confirmed subscription invoice PaymentIntent {invoice_pi_id}. New status: {confirmed_pi.status}"
+                            )
+
+                            # If still requires confirmation, log warning but don't fail
+                            if confirmed_pi.status == "requires_confirmation":
+                                logger.warning(
+                                    f"⚠️ Invoice PaymentIntent {invoice_pi_id} still requires confirmation after confirm() call. "
+                                    f"This may require additional action or the payment may process asynchronously."
+                                )
+                        except stripe_to_use.error.StripeError as e:
+                            logger.error(
+                                f"❌ Failed to confirm invoice PaymentIntent {invoice_pi_id}: {e}"
+                            )
+                            logger.error(
+                                f"   Error details: {str(e)}. This may result in an incomplete PaymentIntent in Stripe."
+                            )
+                            # Don't raise - let the subscription creation continue
+                            # The payment might still process asynchronously
+                    else:
                         logger.warning(
-                            f"⚠️ Could not confirm invoice PaymentIntent {invoice_pi_id}: {e}"
-                        )
-                        logger.warning(
-                            f"   This may result in an incomplete PaymentIntent in Stripe. Error: {str(e)}"
+                            f"⚠️ Invoice PaymentIntent {invoice_pi_id} needs confirmation but no payment_method available. "
+                            f"Status: {invoice_payment_intent.status}"
                         )
                 elif invoice_payment_intent.status == "succeeded":
                     logger.info(f"✅ Invoice PaymentIntent {invoice_pi_id} already succeeded")
