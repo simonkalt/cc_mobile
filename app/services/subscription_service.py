@@ -81,7 +81,9 @@ if STRIPE_AVAILABLE:
         stripe.api_version = STRIPE_API_VERSION
         # Log which key type is being used (without exposing the key)
         key_type = "production" if settings.STRIPE_API_KEY else "test"
-        logger.info(f"Stripe API key configured ({key_type} mode), API version: {STRIPE_API_VERSION}")
+        logger.info(
+            f"Stripe API key configured ({key_type} mode), API version: {STRIPE_API_VERSION}"
+        )
         # Verify the key format (Stripe keys start with sk_test_ or sk_live_)
         if stripe_api_key.startswith("sk_live_"):
             logger.info("Using Stripe PRODUCTION API key")
@@ -101,101 +103,273 @@ else:
 
 def get_user_subscription(user_id: str) -> SubscriptionResponse:
     """
-    Get user's subscription information from database
-    
+    Get user's subscription information from database, automatically syncing with Stripe.
+
+    This function:
+    1. Reads subscription data from MongoDB
+    2. Verifies subscription status with Stripe
+    3. Automatically updates MongoDB if there's a mismatch
+
     Args:
         user_id: User ID
-        
+
     Returns:
-        SubscriptionResponse with subscription details
+        SubscriptionResponse with subscription details (synced with Stripe)
     """
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     user = collection.find_one({"_id": user_id_obj})
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    
-    # Get product ID - either from database or fetch from Stripe if we have a subscription
+
+    # Get current subscription data from MongoDB
+    mongo_subscription_id = user.get("subscriptionId")
+    mongo_status = user.get("subscriptionStatus", "free")
+    mongo_plan = user.get("subscriptionPlan", "free")
     product_id = user.get("subscriptionProductId")
-    
-    # If we don't have product_id stored but have a subscription, try to get it from Stripe
-    if not product_id and user.get("subscriptionId") and STRIPE_AVAILABLE:
-        try:
-            stripe_to_use = _get_stripe_module()
-            if stripe_to_use:
-                subscription_id = user.get("subscriptionId")
-                logger.info(f"Fetching product ID from Stripe for subscription {subscription_id}")
-                
-                # Retrieve subscription with expanded price data
-                subscription = stripe_to_use.Subscription.retrieve(
-                    subscription_id,
-                    expand=["items.data.price.product"]
-                )
-                
-                # Access items correctly - items is a ListObject, use .data to get the list
-                items_data = subscription.items.data if hasattr(subscription.items, 'data') else []
-                if items_data and len(items_data) > 0:
-                    price_obj = items_data[0].price
-                    
-                    # Try to get product ID from expanded price object first
-                    if hasattr(price_obj, "product") and price_obj.product:
-                        if isinstance(price_obj.product, str):
-                            product_id = price_obj.product
-                        elif hasattr(price_obj.product, "id"):
-                            product_id = price_obj.product.id
-                    
-                    # If not expanded, retrieve price separately
+    stripe_customer_id = user.get("stripeCustomerId")
+    current_period_end = user.get("subscriptionCurrentPeriodEnd")
+    subscription_ended_at = user.get("subscriptionEndedAt")
+    last_payment_date = user.get("lastPaymentDate")
+
+    # Map Stripe statuses to our internal statuses
+    def map_stripe_status(stripe_status: str) -> str:
+        """Map Stripe subscription status to our internal status."""
+        status_map = {
+            "active": "active",
+            "trialing": "active",
+            "past_due": "past_due",
+            "canceled": "canceled",
+            "unpaid": "canceled",
+            "incomplete": "canceled",
+            "incomplete_expired": "canceled",
+        }
+        return status_map.get(stripe_status, "free")
+
+    # Verify subscription status with Stripe if we have Stripe available
+    if STRIPE_AVAILABLE:
+        stripe_to_use = _get_stripe_module()
+        if stripe_to_use:
+            # Case 1: We have a subscription ID in MongoDB - verify it exists and check status
+            if mongo_subscription_id:
+                try:
+                    logger.debug(
+                        f"Verifying subscription {mongo_subscription_id} with Stripe for user {user_id}"
+                    )
+                    subscription = stripe_to_use.Subscription.retrieve(
+                        mongo_subscription_id, expand=["items.data.price.product"]
+                    )
+
+                    # Subscription exists in Stripe - get its status
+                    stripe_status = subscription.status
+                    expected_status = map_stripe_status(stripe_status)
+                    stripe_period_end = (
+                        datetime.fromtimestamp(subscription.current_period_end)
+                        if subscription.current_period_end
+                        else None
+                    )
+                    # Get ended_at if subscription is canceled
+                    stripe_ended_at = (
+                        datetime.fromtimestamp(subscription.ended_at)
+                        if hasattr(subscription, "ended_at") and subscription.ended_at
+                        else None
+                    )
+
+                    # Get product ID from subscription if we don't have it
                     if not product_id:
-                        price_id = price_obj.id if hasattr(price_obj, "id") else str(price_obj)
-                        logger.debug(f"Retrieving price {price_id} to get product ID")
-                        price = stripe_to_use.Price.retrieve(price_id, expand=["product"])
-                        
-                        if hasattr(price, "product"):
-                            if isinstance(price.product, str):
-                                product_id = price.product
-                            elif hasattr(price.product, "id"):
-                                product_id = price.product.id
-                    
-                    # Update database with product ID for future use
-                    if product_id:
-                        logger.info(f"Found product ID {product_id} for subscription {subscription_id}")
-                        collection.update_one(
-                            {"_id": user_id_obj},
-                            {"$set": {"subscriptionProductId": product_id}}
+                        items_data = (
+                            subscription.items.data if hasattr(subscription.items, "data") else []
                         )
+                        if items_data and len(items_data) > 0:
+                            price_obj = items_data[0].price
+
+                            # Try to get product ID from expanded price object
+                            if hasattr(price_obj, "product") and price_obj.product:
+                                if isinstance(price_obj.product, str):
+                                    product_id = price_obj.product
+                                elif hasattr(price_obj.product, "id"):
+                                    product_id = price_obj.product.id
+
+                            # If not expanded, retrieve price separately
+                            if not product_id:
+                                price_id = (
+                                    price_obj.id if hasattr(price_obj, "id") else str(price_obj)
+                                )
+                                try:
+                                    price = stripe_to_use.Price.retrieve(
+                                        price_id, expand=["product"]
+                                    )
+                                    if hasattr(price, "product"):
+                                        if isinstance(price.product, str):
+                                            product_id = price.product
+                                        elif hasattr(price.product, "id"):
+                                            product_id = price.product.id
+                                except Exception as e:
+                                    logger.debug(f"Could not retrieve price {price_id}: {e}")
+
+                    # Check if MongoDB status matches Stripe status
+                    if mongo_status != expected_status:
+                        logger.warning(
+                            f"Subscription status mismatch for user {user_id}: "
+                            f"MongoDB={mongo_status}, Stripe={stripe_status} (expected={expected_status}). "
+                            f"Updating MongoDB to match Stripe."
+                        )
+
+                        # Update MongoDB to match Stripe
+                        update_user_subscription(
+                            user_id=user_id,
+                            subscription_id=mongo_subscription_id,
+                            subscription_status=expected_status,
+                            subscription_plan=mongo_plan,  # Keep existing plan name
+                            subscription_product_id=product_id,
+                            current_period_end=stripe_period_end,
+                            subscription_ended_at=stripe_ended_at,
+                        )
+
+                        # Update local variables to return correct data
+                        mongo_status = expected_status
+                        current_period_end = stripe_period_end
+                        subscription_ended_at = stripe_ended_at
+
+                    # Update product_id if we found it
+                    if product_id and not user.get("subscriptionProductId"):
+                        collection.update_one(
+                            {"_id": user_id_obj}, {"$set": {"subscriptionProductId": product_id}}
+                        )
+
+                except Exception as e:
+                    # Check if subscription doesn't exist in Stripe
+                    error_str = str(e).lower()
+                    if (
+                        "no such subscription" in error_str
+                        or "resource_missing" in error_str
+                        or "does not exist" in error_str
+                    ):
+                        logger.warning(
+                            f"Subscription {mongo_subscription_id} does not exist in Stripe for user {user_id}. "
+                            f"Updating MongoDB to reflect this."
+                        )
+
+                        # Subscription doesn't exist in Stripe - set to free
+                        update_user_subscription(
+                            user_id=user_id,
+                            subscription_id=None,
+                            subscription_status="free",
+                            subscription_plan="free",
+                        )
+
+                        # Update local variables
+                        mongo_subscription_id = None
+                        mongo_status = "free"
+                        mongo_plan = "free"
+                        current_period_end = None
                     else:
-                        logger.warning(f"Could not extract product ID from subscription {subscription_id}")
-                else:
-                    logger.warning(f"Subscription {subscription_id} has no items")
-        except Exception as e:
-            logger.error(f"Could not fetch product ID from Stripe: {e}", exc_info=True)
-    
+                        # Some other error - log it but continue with MongoDB data
+                        logger.error(
+                            f"Error verifying subscription {mongo_subscription_id} with Stripe for user {user_id}: {e}",
+                            exc_info=True,
+                        )
+
+            # Case 2: No subscription ID in MongoDB, but we have a Stripe customer ID
+            # Check if there are any active subscriptions in Stripe
+            elif stripe_customer_id and mongo_status == "free":
+                try:
+                    logger.debug(
+                        f"Checking for active subscriptions in Stripe for customer {stripe_customer_id}"
+                    )
+                    subscriptions = stripe_to_use.Subscription.list(
+                        customer=stripe_customer_id, status="all", limit=10
+                    )
+
+                    # Find active subscriptions
+                    active_subscriptions = [
+                        s
+                        for s in subscriptions.data
+                        if s.status in ["active", "trialing", "past_due"]
+                    ]
+
+                    if active_subscriptions:
+                        # Found active subscription in Stripe but not in MongoDB
+                        subscription = active_subscriptions[0]  # Use the first active one
+                        logger.warning(
+                            f"Found active subscription {subscription.id} in Stripe for user {user_id} "
+                            f"but MongoDB shows 'free'. Updating MongoDB."
+                        )
+
+                        # Get product ID
+                        items_data = (
+                            subscription.items.data if hasattr(subscription.items, "data") else []
+                        )
+                        if items_data and len(items_data) > 0:
+                            price_obj = items_data[0].price
+                            if hasattr(price_obj, "product") and price_obj.product:
+                                if isinstance(price_obj.product, str):
+                                    product_id = price_obj.product
+                                elif hasattr(price_obj.product, "id"):
+                                    product_id = price_obj.product.id
+
+                        stripe_period_end = (
+                            datetime.fromtimestamp(subscription.current_period_end)
+                            if subscription.current_period_end
+                            else None
+                        )
+                        stripe_ended_at = (
+                            datetime.fromtimestamp(subscription.ended_at)
+                            if hasattr(subscription, "ended_at") and subscription.ended_at
+                            else None
+                        )
+
+                        # Update MongoDB with active subscription
+                        update_user_subscription(
+                            user_id=user_id,
+                            subscription_id=subscription.id,
+                            subscription_status=map_stripe_status(subscription.status),
+                            subscription_plan=mongo_plan,  # Keep existing plan or could try to determine from product
+                            subscription_product_id=product_id,
+                            current_period_end=stripe_period_end,
+                            subscription_ended_at=stripe_ended_at,
+                        )
+
+                        # Update local variables
+                        mongo_subscription_id = subscription.id
+                        mongo_status = map_stripe_status(subscription.status)
+                        current_period_end = stripe_period_end
+                        subscription_ended_at = stripe_ended_at
+
+                except Exception as e:
+                    # Error checking Stripe - log but continue with MongoDB data
+                    logger.debug(
+                        f"Error checking Stripe subscriptions for customer {stripe_customer_id}: {e}"
+                    )
+
+    # Return the (potentially updated) subscription data
     return SubscriptionResponse(
-        subscriptionId=user.get("subscriptionId"),
-        subscriptionStatus=user.get("subscriptionStatus", "free"),
-        subscriptionPlan=user.get("subscriptionPlan", "free"),
+        subscriptionId=mongo_subscription_id,
+        subscriptionStatus=mongo_status,
+        subscriptionPlan=mongo_plan,
         productId=product_id,
-        subscriptionCurrentPeriodEnd=user.get("subscriptionCurrentPeriodEnd"),
-        lastPaymentDate=user.get("lastPaymentDate"),
-        stripeCustomerId=user.get("stripeCustomerId"),
+        subscriptionCurrentPeriodEnd=current_period_end,
+        subscriptionEndedAt=subscription_ended_at,
+        lastPaymentDate=last_payment_date,
+        stripeCustomerId=stripe_customer_id,
     )
 
 
@@ -207,11 +381,12 @@ def update_user_subscription(
     subscription_product_id: Optional[str] = None,
     stripe_customer_id: Optional[str] = None,
     current_period_end: Optional[datetime] = None,
+    subscription_ended_at: Optional[datetime] = None,
     last_payment_date: Optional[datetime] = None,
 ) -> None:
     """
     Update user's subscription information in database
-    
+
     Args:
         user_id: User ID
         subscription_id: Stripe subscription ID
@@ -220,6 +395,7 @@ def update_user_subscription(
         subscription_product_id: Stripe Product ID
         stripe_customer_id: Stripe customer ID
         current_period_end: Current period end date
+        subscription_ended_at: When subscription actually ended (for canceled subscriptions)
         last_payment_date: Last payment date
     """
     if not is_connected():
@@ -227,64 +403,65 @@ def update_user_subscription(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     update_data = {
         "subscriptionId": subscription_id,
         "subscriptionStatus": subscription_status,
         "subscriptionPlan": subscription_plan,
         "subscriptionProductId": subscription_product_id,
         "subscriptionCurrentPeriodEnd": current_period_end,
+        "subscriptionEndedAt": subscription_ended_at,
         "lastPaymentDate": last_payment_date,
         "stripeCustomerId": stripe_customer_id,
         "dateUpdated": datetime.utcnow(),
     }
-    
+
     # Remove None values
     update_data = {k: v for k, v in update_data.items() if v is not None}
-    
+
     result = collection.update_one({"_id": user_id_obj}, {"$set": update_data})
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    
+
     logger.info(f"Updated subscription for user {user_id}")
 
 
 def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None) -> str:
     """
     Create a Stripe customer for the user
-    
+
     Args:
         user_id: User ID (used as metadata)
         email: User email
         name: User name (optional)
-        
+
     Returns:
         Stripe customer ID
     """
     # Use _get_stripe_module() to ensure API key is properly configured
     stripe_to_use = _get_stripe_module()
-    
+
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0"
+            detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
         )
-    
+
     # Verify API key is set
     if not stripe_to_use.api_key:
         stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
@@ -296,9 +473,11 @@ def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None)
             )
         stripe_to_use.api_key = stripe_api_key
         logger.debug("Stripe API key set in create_stripe_customer")
-    
+
     try:
-        customer = stripe_to_use.Customer.create(email=email, name=name, metadata={"user_id": user_id})
+        customer = stripe_to_use.Customer.create(
+            email=email, name=name, metadata={"user_id": user_id}
+        )
         logger.info(f"Created Stripe customer {customer.id} for user {user_id}")
         return customer.id
     except stripe_to_use.error.StripeError as e:
@@ -313,21 +492,21 @@ def get_payment_intent_status(payment_intent_id: str) -> dict:
     """
     Get the status of a PaymentIntent.
     Used by frontend to check payment status after confirmation.
-    
+
     Args:
         payment_intent_id: Stripe PaymentIntent ID
-        
+
     Returns:
         Dictionary with payment intent status and details
     """
     stripe_to_use = _get_stripe_module()
-    
+
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
         )
-    
+
     if not stripe_to_use.api_key:
         stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
         if not stripe_api_key:
@@ -337,10 +516,10 @@ def get_payment_intent_status(payment_intent_id: str) -> dict:
                 detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
             )
         stripe_to_use.api_key = stripe_api_key
-    
+
     try:
         payment_intent = stripe_to_use.PaymentIntent.retrieve(payment_intent_id)
-        
+
         status_messages = {
             "succeeded": "Payment completed successfully",
             "requires_action": "Payment requires additional authentication (3D Secure)",
@@ -348,27 +527,33 @@ def get_payment_intent_status(payment_intent_id: str) -> dict:
             "requires_payment_method": "Payment failed. Please try a different payment method",
             "canceled": "Payment was canceled",
         }
-        
+
         result = {
             "payment_intent_id": payment_intent.id,
             "status": payment_intent.status,
             "client_secret": payment_intent.client_secret,
-            "message": status_messages.get(payment_intent.status, f"Payment status: {payment_intent.status}"),
+            "message": status_messages.get(
+                payment_intent.status, f"Payment status: {payment_intent.status}"
+            ),
         }
-        
+
         # Add next_action if present (for 3DS)
         if hasattr(payment_intent, "next_action") and payment_intent.next_action:
             result["next_action"] = {
                 "type": payment_intent.next_action.type,
                 "redirect_to_url": getattr(payment_intent.next_action, "redirect_to_url", None),
             }
-        
+
         # Add payment method info if available
         if payment_intent.payment_method:
-            result["payment_method_id"] = payment_intent.payment_method if isinstance(payment_intent.payment_method, str) else payment_intent.payment_method.id
-        
+            result["payment_method_id"] = (
+                payment_intent.payment_method
+                if isinstance(payment_intent.payment_method, str)
+                else payment_intent.payment_method.id
+            )
+
         return result
-        
+
     except stripe_to_use.error.InvalidRequestError as e:
         logger.error(f"Invalid PaymentIntent ID: {e}")
         raise HTTPException(
@@ -397,7 +582,7 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
     """
     # Use _get_stripe_module() to ensure API key is properly configured
     stripe_to_use = _get_stripe_module()
-    
+
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -463,7 +648,9 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
             # Customer ID exists in database - verify it exists in Stripe
             try:
                 stripe_to_use.Customer.retrieve(stripe_customer_id)
-                logger.debug(f"Verified existing Stripe customer {stripe_customer_id} for user {user_id}")
+                logger.debug(
+                    f"Verified existing Stripe customer {stripe_customer_id} for user {user_id}"
+                )
             except stripe_to_use.error.InvalidRequestError as e:
                 # Customer doesn't exist in Stripe (maybe deleted or wrong account)
                 if "No such customer" in str(e) or e.code == "resource_missing":
@@ -504,27 +691,27 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
             "customer_id": stripe_customer_id,
             "customer_ephemeral_key_secret": ephemeral_key.secret,
         }
-        
+
         # Validate all required fields are present
         if not response_data.get("client_secret"):
             logger.error("PaymentIntent missing client_secret!")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="PaymentIntent created but missing client_secret"
+                detail="PaymentIntent created but missing client_secret",
             )
         if not response_data.get("customer_id"):
             logger.error("Response missing customer_id!")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Customer ID missing from response"
+                detail="Customer ID missing from response",
             )
         if not response_data.get("customer_ephemeral_key_secret"):
             logger.error("Response missing customer_ephemeral_key_secret!")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Ephemeral key missing from response"
+                detail="Ephemeral key missing from response",
             )
-        
+
         logger.info(f"Payment intent response validated - all fields present")
         return response_data
 
@@ -564,7 +751,7 @@ def create_subscription(
 ) -> dict:
     """
     Create a new subscription in Stripe
-    
+
     Args:
         user_id: User ID
         price_id: Stripe Price ID
@@ -572,13 +759,13 @@ def create_subscription(
         payment_intent_id: PaymentIntent ID from PaymentSheet (preferred)
         payment_method_id: Payment method ID (legacy support)
         trial_days: Trial period in days (optional)
-        
+
     Returns:
         Stripe subscription object
     """
     # Use _get_stripe_module() to ensure API key is properly configured
     stripe_to_use = _get_stripe_module()
-    
+
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -623,7 +810,7 @@ def create_subscription(
     # Get or create customer - ensure customer exists in Stripe
     if not customer_id:
         customer_id = user.get("stripeCustomerId")
-    
+
     # Verify customer exists in Stripe, create if it doesn't
     if customer_id:
         try:
@@ -651,11 +838,11 @@ def create_subscription(
         )
         # Update user with customer ID
         update_user_subscription(user_id=user_id, stripe_customer_id=customer_id)
-    
+
     if not customer_id:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail="Failed to create or retrieve Stripe customer"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create or retrieve Stripe customer",
         )
 
     # Handle PaymentIntent flow (PaymentSheet) - MUST be done BEFORE creating subscription
@@ -664,7 +851,9 @@ def create_subscription(
         try:
             # Step 1: Retrieve PaymentIntent
             payment_intent = stripe_to_use.PaymentIntent.retrieve(payment_intent_id)
-            logger.debug(f"Retrieved PaymentIntent {payment_intent_id}, status: {payment_intent.status}")
+            logger.debug(
+                f"Retrieved PaymentIntent {payment_intent_id}, status: {payment_intent.status}"
+            )
 
             # Handle different payment intent statuses
             if payment_intent.status == "succeeded":
@@ -679,11 +868,17 @@ def create_subscription(
                         "message": "Payment requires additional authentication (3D Secure). Please complete authentication in the frontend.",
                         "payment_intent_id": payment_intent_id,
                         "client_secret": payment_intent.client_secret,
-                        "next_action": {
-                            "type": payment_intent.next_action.type,
-                            "redirect_to_url": getattr(payment_intent.next_action, "redirect_to_url", None),
-                        } if hasattr(payment_intent, "next_action") and payment_intent.next_action else None,
-                    }
+                        "next_action": (
+                            {
+                                "type": payment_intent.next_action.type,
+                                "redirect_to_url": getattr(
+                                    payment_intent.next_action, "redirect_to_url", None
+                                ),
+                            }
+                            if hasattr(payment_intent, "next_action") and payment_intent.next_action
+                            else None
+                        ),
+                    },
                 )
             elif payment_intent.status == "processing":
                 # Payment is being processed (async payment methods like ACH)
@@ -693,7 +888,7 @@ def create_subscription(
                         "status": "processing",
                         "message": "Payment is being processed. Please wait for confirmation.",
                         "payment_intent_id": payment_intent_id,
-                    }
+                    },
                 )
             elif payment_intent.status == "requires_payment_method":
                 # Payment failed - need new payment method
@@ -703,7 +898,7 @@ def create_subscription(
                         "status": "requires_payment_method",
                         "message": "Payment failed. Please try a different payment method.",
                         "payment_intent_id": payment_intent_id,
-                    }
+                    },
                 )
             elif payment_intent.status == "canceled":
                 # Payment was canceled
@@ -713,7 +908,7 @@ def create_subscription(
                         "status": "canceled",
                         "message": "Payment was canceled. Please create a new payment intent.",
                         "payment_intent_id": payment_intent_id,
-                    }
+                    },
                 )
             else:
                 # Unknown status
@@ -723,7 +918,7 @@ def create_subscription(
                         "status": payment_intent.status,
                         "message": f"Payment not completed. PaymentIntent status: {payment_intent.status}",
                         "payment_intent_id": payment_intent_id,
-                    }
+                    },
                 )
 
             # Step 2: Get payment method from PaymentIntent
@@ -742,19 +937,20 @@ def create_subscription(
             try:
                 # First, retrieve the payment method to check if it's already attached
                 payment_method = stripe_to_use.PaymentMethod.retrieve(payment_method_id)
-                
+
                 if payment_method.customer == customer_id:
                     # Payment method is already attached to this customer
-                    logger.info(f"Payment method {payment_method_id} already attached to customer {customer_id}")
+                    logger.info(
+                        f"Payment method {payment_method_id} already attached to customer {customer_id}"
+                    )
                     payment_method_attached = True
                 elif payment_method.customer is None:
                     # Payment method is not attached to any customer - try to attach it
                     try:
-                        stripe_to_use.PaymentMethod.attach(
-                            payment_method_id,
-                            customer=customer_id
+                        stripe_to_use.PaymentMethod.attach(payment_method_id, customer=customer_id)
+                        logger.info(
+                            f"Attached payment method {payment_method_id} to customer {customer_id}"
                         )
-                        logger.info(f"Attached payment method {payment_method_id} to customer {customer_id}")
                         payment_method_attached = True
                     except stripe_to_use.error.InvalidRequestError as attach_error:
                         # Check if it's the "previously used" error
@@ -778,7 +974,7 @@ def create_subscription(
                         )
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Payment method belongs to a different customer"
+                            detail="Payment method belongs to a different customer",
                         )
                     else:
                         payment_method_attached = True
@@ -788,7 +984,7 @@ def create_subscription(
                 if "no such payment_method" in error_msg:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Payment method {payment_method_id} not found"
+                        detail=f"Payment method {payment_method_id} not found",
                     )
                 else:
                     logger.warning(f"Could not retrieve payment method {payment_method_id}: {e}")
@@ -798,12 +994,11 @@ def create_subscription(
             if payment_method_attached:
                 try:
                     stripe_to_use.Customer.modify(
-                        customer_id,
-                        invoice_settings={
-                            "default_payment_method": payment_method_id
-                        }
+                        customer_id, invoice_settings={"default_payment_method": payment_method_id}
                     )
-                    logger.info(f"Set payment method {payment_method_id} as default for customer {customer_id}")
+                    logger.info(
+                        f"Set payment method {payment_method_id} as default for customer {customer_id}"
+                    )
                 except stripe_to_use.error.StripeError as e:
                     logger.warning(f"Could not set payment method as default: {e}")
                     # Continue - subscription creation will still work
@@ -828,8 +1023,8 @@ def create_subscription(
                         "message": str(e),
                     },
                 },
-        )
-    
+            )
+
     # Step 5: THEN create the subscription (after payment method is attached and set as default)
     try:
         subscription_params = {
@@ -838,7 +1033,7 @@ def create_subscription(
             "metadata": {"user_id": user_id},
             "expand": ["latest_invoice.payment_intent"],
         }
-        
+
         # Only set default_payment_method if it was successfully attached to the customer
         # Stripe requires the payment method to be attached before it can be used in subscription
         if payment_method_id and payment_method_attached:
@@ -851,22 +1046,22 @@ def create_subscription(
                 f"Payment method {payment_method_id} not attached, so not setting as default_payment_method. "
                 f"Subscription will use payment from PaymentIntent."
             )
-        
+
         # Payment is already completed via PaymentIntent, so subscription should be active
         # Use "default_incomplete" - we'll pay the invoice immediately after creation
         # This prevents Stripe from trying to charge immediately (which could fail)
         subscription_params["payment_behavior"] = "default_incomplete"
-        
+
         subscription_params["payment_settings"] = {
             "payment_method_types": ["card"],
             "save_default_payment_method": "on_subscription",
         }
-        
+
         if trial_days:
             subscription_params["trial_period_days"] = trial_days
-        
+
         logger.info(f"Creating subscription for customer {customer_id} with price {price_id}")
-        
+
         # Get product ID from price before creating subscription
         product_id = None
         try:
@@ -875,55 +1070,68 @@ def create_subscription(
             logger.debug(f"Retrieved product ID {product_id} from price {price_id}")
         except Exception as e:
             logger.warning(f"Could not retrieve product ID from price {price_id}: {e}")
-        
+
         subscription = stripe_to_use.Subscription.create(**subscription_params)
-        
+
         # Note: PaymentIntent is already confirmed by PaymentSheet before this point
         # The subscription creates an invoice with its own PaymentIntent (status: "incomplete")
         # We need to pay this invoice using the already-confirmed payment method
-        
+
         # Retrieve the subscription with expanded invoice to get the PaymentIntent
         subscription = stripe_to_use.Subscription.retrieve(
-            subscription.id,
-            expand=["latest_invoice.payment_intent"]
+            subscription.id, expand=["latest_invoice.payment_intent"]
         )
-        
+
         # Pay the subscription's invoice using the confirmed payment method
         if hasattr(subscription, "latest_invoice") and subscription.latest_invoice:
             invoice = subscription.latest_invoice
             invoice_id = invoice.id if hasattr(invoice, "id") else invoice
-            
+
             # Retrieve invoice with payment intent
             if isinstance(invoice, str):
                 invoice = stripe_to_use.Invoice.retrieve(invoice_id, expand=["payment_intent"])
-            
+
             # Check if invoice has a PaymentIntent that needs to be paid
             if hasattr(invoice, "payment_intent") and invoice.payment_intent:
                 invoice_payment_intent = invoice.payment_intent
-                invoice_pi_id = invoice_payment_intent.id if hasattr(invoice_payment_intent, "id") else invoice_payment_intent
-                
+                invoice_pi_id = (
+                    invoice_payment_intent.id
+                    if hasattr(invoice_payment_intent, "id")
+                    else invoice_payment_intent
+                )
+
                 # Retrieve the PaymentIntent
                 if isinstance(invoice_payment_intent, str):
                     invoice_payment_intent = stripe_to_use.PaymentIntent.retrieve(invoice_pi_id)
-                
+
                 # If the invoice PaymentIntent is incomplete, pay it using the confirmed payment method
-                if invoice_payment_intent.status in ["requires_payment_method", "incomplete"] and payment_method_id:
+                if (
+                    invoice_payment_intent.status in ["requires_payment_method", "incomplete"]
+                    and payment_method_id
+                ):
                     try:
                         # Update and confirm the invoice PaymentIntent using the confirmed payment method
                         confirmed_pi = stripe_to_use.PaymentIntent.confirm(
-                            invoice_pi_id,
-                            payment_method=payment_method_id
+                            invoice_pi_id, payment_method=payment_method_id
                         )
-                        logger.info(f"✅ Confirmed subscription invoice PaymentIntent {invoice_pi_id} using payment method from confirmed PaymentIntent")
+                        logger.info(
+                            f"✅ Confirmed subscription invoice PaymentIntent {invoice_pi_id} using payment method from confirmed PaymentIntent"
+                        )
                         logger.info(f"   Invoice PaymentIntent status: {confirmed_pi.status}")
                     except stripe_to_use.error.StripeError as e:
-                        logger.warning(f"⚠️ Could not confirm invoice PaymentIntent {invoice_pi_id}: {e}")
-                        logger.warning(f"   This may result in an incomplete PaymentIntent in Stripe. Error: {str(e)}")
+                        logger.warning(
+                            f"⚠️ Could not confirm invoice PaymentIntent {invoice_pi_id}: {e}"
+                        )
+                        logger.warning(
+                            f"   This may result in an incomplete PaymentIntent in Stripe. Error: {str(e)}"
+                        )
                 elif invoice_payment_intent.status == "succeeded":
                     logger.info(f"✅ Invoice PaymentIntent {invoice_pi_id} already succeeded")
                 else:
-                    logger.info(f"ℹ️ Invoice PaymentIntent {invoice_pi_id} status: {invoice_payment_intent.status}")
-        
+                    logger.info(
+                        f"ℹ️ Invoice PaymentIntent {invoice_pi_id} status: {invoice_payment_intent.status}"
+                    )
+
         # Update user subscription info
         current_period_end = datetime.fromtimestamp(subscription.current_period_end)
         update_user_subscription(
@@ -935,7 +1143,7 @@ def create_subscription(
             stripe_customer_id=customer_id,
             current_period_end=current_period_end,
         )
-        
+
         logger.info(f"Created subscription {subscription.id} for user {user_id}")
         return subscription
     except stripe_to_use.error.StripeError as e:
@@ -949,23 +1157,23 @@ def create_subscription(
 def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
     """
     Upgrade user's subscription to a new plan
-    
+
     Args:
         user_id: User ID
         new_price_id: New Stripe Price ID
-        
+
     Returns:
         Updated Stripe subscription object
     """
     # Use _get_stripe_module() to ensure API key is properly configured
     stripe_to_use = _get_stripe_module()
-    
+
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0",
         )
-    
+
     # Verify API key is set
     if not stripe_to_use.api_key:
         stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
@@ -977,7 +1185,7 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             )
         stripe_to_use.api_key = stripe_api_key
         logger.debug("Stripe API key set in upgrade_subscription")
-    
+
     # Get current subscription
     subscription_info = get_user_subscription(user_id)
     if not subscription_info.subscriptionId:
@@ -985,11 +1193,11 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User does not have an active subscription",
         )
-    
+
     try:
         # Retrieve current subscription
         subscription = stripe_to_use.Subscription.retrieve(subscription_info.subscriptionId)
-        
+
         # Get product ID from new price before updating subscription
         product_id = None
         try:
@@ -998,20 +1206,20 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             logger.debug(f"Retrieved product ID {product_id} from price {new_price_id}")
         except Exception as e:
             logger.warning(f"Could not retrieve product ID from price {new_price_id}: {e}")
-        
+
         # Update subscription with new price
         updated_subscription = stripe_to_use.Subscription.modify(
             subscription.id,
             items=[
                 {
-                "id": subscription["items"]["data"][0].id,
-                "price": new_price_id,
+                    "id": subscription["items"]["data"][0].id,
+                    "price": new_price_id,
                 }
             ],
             proration_behavior="always_invoice",  # Prorate and invoice immediately
             metadata={"user_id": user_id},
         )
-        
+
         # Update user subscription info
         current_period_end = datetime.fromtimestamp(updated_subscription.current_period_end)
         update_user_subscription(
@@ -1022,7 +1230,7 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             subscription_product_id=product_id,  # Store product ID
             current_period_end=current_period_end,
         )
-        
+
         logger.info(f"Upgraded subscription {updated_subscription.id} for user {user_id}")
         return updated_subscription
     except stripe_to_use.error.StripeError as e:
@@ -1036,11 +1244,11 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
 def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
     """
     Cancel user's subscription
-    
+
     Args:
         user_id: User ID
         cancel_immediately: If True, cancel immediately; if False, cancel at period end
-        
+
     Returns:
         Updated Stripe subscription object
     """
@@ -1048,7 +1256,7 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stripe library not available"
         )
-    
+
     # Get current subscription
     subscription_info = get_user_subscription(user_id)
     if not subscription_info.subscriptionId:
@@ -1056,7 +1264,7 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User does not have an active subscription",
         )
-    
+
     try:
         if cancel_immediately:
             # Cancel immediately
@@ -1068,7 +1276,12 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
                 subscription_info.subscriptionId, cancel_at_period_end=True
             )
             subscription_status = canceled_subscription.status
-        
+
+        # Get ended_at if subscription was canceled
+        subscription_ended_at = None
+        if hasattr(canceled_subscription, "ended_at") and canceled_subscription.ended_at:
+            subscription_ended_at = datetime.fromtimestamp(canceled_subscription.ended_at)
+
         # Update user subscription info
         update_user_subscription(
             user_id=user_id,
@@ -1079,6 +1292,7 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
                 if canceled_subscription.current_period_end
                 else None
             ),
+            subscription_ended_at=subscription_ended_at,
         )
 
         logger.info(
@@ -1242,7 +1456,12 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                                 features = [
                                     feat.get("name") if isinstance(feat, dict) else str(feat)
                                     for feat in marketing_features
-                                    if feat and (isinstance(feat, dict) and feat.get("name") or not isinstance(feat, dict))
+                                    if feat
+                                    and (
+                                        isinstance(feat, dict)
+                                        and feat.get("name")
+                                        or not isinstance(feat, dict)
+                                    )
                                 ]
                             else:
                                 # Handle single feature object
@@ -1260,7 +1479,9 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                                 features = [str(f) for f in features_list]
                             else:
                                 features = [str(features_list)]
-                            logger.debug(f"Using Stripe features field for product {product.id}: {len(features)} features")
+                            logger.debug(
+                                f"Using Stripe features field for product {product.id}: {len(features)} features"
+                            )
                         elif product.metadata:
                             # Fallback to metadata if native fields are not available
                             feature_list = product.metadata.get("features")
@@ -1274,7 +1495,9 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                                         if feature_list.startswith("[")
                                         else feature_list.split(",")
                                     )
-                                    logger.debug(f"Using metadata features for product {product.id}: {len(features)} features")
+                                    logger.debug(
+                                        f"Using metadata features for product {product.id}: {len(features)} features"
+                                    )
                                 except:
                                     features = [f.strip() for f in feature_list.split(",")]
                                     logger.debug(
@@ -1383,21 +1606,27 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
         error_details = str(e)
         logger.error(f"Unexpected error fetching Stripe products: {e}", exc_info=True)
         logger.error(f"Error type: {error_type}, Error details: {error_details}")
-        
+
         # Check for specific Stripe error types
-        if hasattr(e, 'code'):
+        if hasattr(e, "code"):
             logger.error(f"Stripe error code: {e.code}")
-        if hasattr(e, 'user_message'):
+        if hasattr(e, "user_message"):
             logger.error(f"Stripe user message: {e.user_message}")
-        if hasattr(e, 'param'):
+        if hasattr(e, "param"):
             logger.error(f"Stripe error parameter: {e.param}")
-        
+
         # Log if it's a connection/network error
-        if 'connection' in error_details.lower() or 'network' in error_details.lower() or 'timeout' in error_details.lower():
-            logger.error("⚠️ This appears to be a network/connection error. Check if Render can reach Stripe API.")
-        elif 'authentication' in error_details.lower() or 'unauthorized' in error_details.lower():
+        if (
+            "connection" in error_details.lower()
+            or "network" in error_details.lower()
+            or "timeout" in error_details.lower()
+        ):
+            logger.error(
+                "⚠️ This appears to be a network/connection error. Check if Render can reach Stripe API."
+            )
+        elif "authentication" in error_details.lower() or "unauthorized" in error_details.lower():
             logger.error("⚠️ This appears to be an authentication error. Check your Stripe API key.")
-        
+
         return []
 
 
@@ -1434,7 +1663,9 @@ def get_raw_stripe_products(force_refresh: bool = False) -> dict:
                 "active": product.active,
                 "attributes": getattr(product, "attributes", []),
                 "created": product.created,
-                "default_price": product.default_price if hasattr(product, "default_price") else None,
+                "default_price": (
+                    product.default_price if hasattr(product, "default_price") else None
+                ),
                 "description": product.description,
                 "images": product.images if hasattr(product, "images") else [],
                 "livemode": product.livemode,

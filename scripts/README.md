@@ -203,3 +203,46 @@ For users missing subscription fields, the script sets:
 - Ensure `MONGODB_COLLECTION_NAME` is set correctly (default: "users")
 - Verify database permissions
 
+
+---
+
+## cancel_subscription.py
+
+A script to cancel a user's subscription via the API.
+
+### What it does
+
+1. **Prompts for User ID**: Asks for the user ID whose subscription should be canceled
+2. **Prompts for Cancel Option**: Asks whether to cancel immediately or at period end
+3. **Authenticates**: Uses JWT access token for API authentication
+4. **Calls API**: Makes POST request to `/api/subscriptions/cancel` endpoint
+5. **Displays Result**: Shows success/failure and response details
+
+### Usage
+
+```bash
+# From the project root directory
+python scripts/cancel_subscription.py
+```
+
+### Requirements
+
+- Python 3.7+
+- API server running (local or remote)
+- JWT access token (can be provided via environment variable or prompt)
+- Required Python packages: `requests`, `python-dotenv`
+
+### Environment Variables (Optional)
+
+- `API_BASE_URL`: Base URL for the API (default: `http://localhost:8000`)
+- `JWT_ACCESS_TOKEN`: JWT access token for authentication (will prompt if not set)
+
+### Cancel Options
+
+- **Cancel Immediately**: Subscription is canceled right away. User loses access immediately.
+- **Cancel at Period End**: Subscription remains active until the end of the current billing period. User keeps access until then.
+
+### Related Documentation
+
+- [JWT Authentication Guide](../documentation/JWT_AUTHENTICATION.md)
+- [Subscription API Documentation](../documentation/STRIPE_PAYMENTSHEET_API.md)
