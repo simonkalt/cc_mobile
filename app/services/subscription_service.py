@@ -670,11 +670,14 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
         price = stripe_to_use.Price.retrieve(price_id)
 
         # Create PaymentIntent
+        # setup_future_usage='off_session' forces the payment method to be saved
+        # and allows it to be used for future subscription renewals
         payment_intent = stripe_to_use.PaymentIntent.create(
             amount=int(price.unit_amount),  # Amount in cents
             currency=price.currency,
             customer=stripe_customer_id,
             payment_method_types=["card"],
+            setup_future_usage="off_session",  # Force save payment method for future use
             metadata={"user_id": user_id, "price_id": price_id, "subscription_type": "new"},
         )
 
