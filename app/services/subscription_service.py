@@ -672,12 +672,14 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
         # Create PaymentIntent
         # setup_future_usage='off_session' forces the payment method to be saved
         # and allows it to be used for future subscription renewals
+        # confirmation_method='automatic' allows PaymentSheet to confirm automatically
         payment_intent = stripe_to_use.PaymentIntent.create(
             amount=int(price.unit_amount),  # Amount in cents
             currency=price.currency,
             customer=stripe_customer_id,
             payment_method_types=["card"],
             setup_future_usage="off_session",  # Force save payment method for future use
+            confirmation_method="automatic",  # Allow PaymentSheet to confirm automatically
             metadata={"user_id": user_id, "price_id": price_id, "subscription_type": "new"},
         )
 
@@ -864,16 +866,49 @@ def create_subscription(
                     f"PaymentIntent {payment_intent_id} requires confirmation. Confirming now..."
                 )
                 try:
-                    payment_intent = stripe_to_use.PaymentIntent.confirm(payment_intent_id)
+                    # Get payment method from PaymentIntent if available
+                    confirm_params = {}
+                    if payment_intent.payment_method:
+                        payment_method_id = (
+                            payment_intent.payment_method
+                            if isinstance(payment_intent.payment_method, str)
+                            else payment_intent.payment_method.id
+                        )
+                        confirm_params["payment_method"] = payment_method_id
+                        logger.debug(
+                            f"Confirming PaymentIntent with payment method: {payment_method_id}"
+                        )
+
+                    # Confirm the PaymentIntent
+                    payment_intent = stripe_to_use.PaymentIntent.confirm(
+                        payment_intent_id, **confirm_params
+                    )
                     logger.info(
                         f"✅ Successfully confirmed PaymentIntent {payment_intent_id}. New status: {payment_intent.status}"
                     )
+
+                    # If still requires_confirmation after confirmation, there might be an issue
+                    if payment_intent.status == "requires_confirmation":
+                        logger.warning(
+                            f"⚠️ PaymentIntent {payment_intent_id} still requires confirmation after confirm() call. "
+                            f"This may indicate the payment method needs to be attached or there's an issue with the payment."
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                            detail={
+                                "status": payment_intent.status,
+                                "message": "Payment confirmation failed. Please try again or use a different payment method.",
+                                "payment_intent_id": payment_intent_id,
+                            },
+                        )
+                except HTTPException:
+                    raise
                 except stripe_to_use.error.StripeError as e:
                     logger.error(f"Failed to confirm PaymentIntent {payment_intent_id}: {e}")
                     raise HTTPException(
                         status_code=status.HTTP_402_PAYMENT_REQUIRED,
                         detail={
-                            "status": payment_intent.status,
+                            "status": "requires_confirmation",
                             "message": f"Failed to confirm payment: {str(e)}",
                             "payment_intent_id": payment_intent_id,
                         },
