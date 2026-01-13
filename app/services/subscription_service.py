@@ -858,6 +858,27 @@ def create_subscription(
                 f"Retrieved PaymentIntent {payment_intent_id}, status: {payment_intent.status}"
             )
 
+            # Step 1.5: Confirm PaymentIntent if it's in requires_confirmation state
+            if payment_intent.status == "requires_confirmation":
+                logger.info(
+                    f"PaymentIntent {payment_intent_id} requires confirmation. Confirming now..."
+                )
+                try:
+                    payment_intent = stripe_to_use.PaymentIntent.confirm(payment_intent_id)
+                    logger.info(
+                        f"✅ Successfully confirmed PaymentIntent {payment_intent_id}. New status: {payment_intent.status}"
+                    )
+                except stripe_to_use.error.StripeError as e:
+                    logger.error(f"Failed to confirm PaymentIntent {payment_intent_id}: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                        detail={
+                            "status": payment_intent.status,
+                            "message": f"Failed to confirm payment: {str(e)}",
+                            "payment_intent_id": payment_intent_id,
+                        },
+                    )
+
             # Handle different payment intent statuses
             if payment_intent.status == "succeeded":
                 # Payment completed successfully - proceed
