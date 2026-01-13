@@ -38,7 +38,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, Response
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, Response, RedirectResponse
 from fastapi import Request, status, HTTPException
 from fastapi.staticfiles import StaticFiles
 import logging
@@ -220,38 +220,20 @@ except Exception as e:
     logger.error(f"❌ Failed to register some routers: {e}", exc_info=True)
 
 # Import and register subscriptions router separately with detailed error handling
-print("=" * 80)
-print("ATTEMPTING TO IMPORT SUBSCRIPTIONS ROUTER...")
-print("=" * 80)
-logger.info("=" * 80)
-logger.info("ATTEMPTING TO IMPORT SUBSCRIPTIONS ROUTER...")
-logger.info("=" * 80)
+# Note: This module may be imported multiple times (by start script check, uvicorn reloader, and server process)
+# This is normal behavior - we log once per process at INFO level, detailed route info at DEBUG level
 try:
     from app.api.routers import subscriptions
-    print(f"✓ Successfully imported subscriptions module")
-    logger.info(f"✓ Successfully imported subscriptions module: {subscriptions}")
-    print(f"✓ Subscriptions router object exists: {hasattr(subscriptions, 'router')}")
-    logger.info(f"✓ Subscriptions router object: {subscriptions.router}")
-    print(f"✓ Subscriptions router prefix: {subscriptions.router.prefix}")
-    logger.info(f"✓ Subscriptions router prefix: {subscriptions.router.prefix}")
-    print(f"✓ Subscriptions router routes count: {len(subscriptions.router.routes)}")
-    logger.info(f"✓ Subscriptions router routes count: {len(subscriptions.router.routes)}")
-    
-    # Log all routes in the subscriptions router
-    print("Routes in subscriptions router:")
-    logger.info("Routes in subscriptions router:")
+    logger.info(f"Imported subscriptions router: {len(subscriptions.router.routes)} routes")
+    # Log individual routes at DEBUG level to reduce startup noise
     for route in subscriptions.router.routes:
         if hasattr(route, 'path'):
             path = route.path
             methods = getattr(route, 'methods', set())
-            print(f"  - Route: {path} (methods: {methods})")
-            logger.info(f"  - Route: {path} (methods: {methods})")
+            logger.debug(f"  Subscription route: {', '.join(methods):<10} {path}")
     
     app.include_router(subscriptions.router)
-    print("✓ Successfully registered subscriptions router")
-    logger.info("✓ Successfully registered subscriptions router")
-    print("=" * 80)
-    logger.info("=" * 80)
+    logger.info("Registered subscriptions router")
 except ImportError as e:
     print(f"❌ FAILED TO IMPORT SUBSCRIPTIONS ROUTER: {e}")
     logger.error(f"❌ Failed to import subscriptions router: {e}", exc_info=True)
@@ -274,15 +256,11 @@ print("=" * 80)
 logger.info("=" * 80)
 
 
-# Health check endpoints
+# Root route - redirect to marketing website
 @app.get("/")
 async def root():
-    """Root endpoint"""
-    return {
-        "message": "Cover Letter API",
-        "version": settings.APP_VERSION,
-        "status": "running"
-    }
+    """Root endpoint - redirects to marketing website"""
+    return RedirectResponse(url="/website", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 # Public endpoint for Terms of Service - defined directly on app to ensure it's truly public
 @app.get("/api/files/terms-of-service", dependencies=[])
