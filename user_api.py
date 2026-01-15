@@ -161,17 +161,65 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
     """Convert MongoDB user document to UserResponse"""
     # Normalize preferences to ensure personalityProfiles have correct structure
     # Create a copy to avoid mutating the original document
+    import copy
+    import logging
+    logger = logging.getLogger(__name__)
+    
     preferences = user_doc.get("preferences")
     if preferences and isinstance(preferences, dict):
         # Deep copy preferences to avoid mutating original
-        import copy
         preferences = copy.deepcopy(preferences)
+        
+        # Ensure appSettings exists
+        if "appSettings" not in preferences:
+            preferences["appSettings"] = {}
+        
         app_settings = preferences.get("appSettings", {})
-        if isinstance(app_settings, dict) and "personalityProfiles" in app_settings:
+        if isinstance(app_settings, dict):
+            # Always ensure personalityProfiles exists and is normalized
+            # Get existing profiles or default to empty list
+            existing_profiles = app_settings.get("personalityProfiles", [])
+            
+            # Log for debugging (especially on Render)
+            if not existing_profiles:
+                logger.debug(
+                    f"User {user_doc.get('_id')}: No personalityProfiles found in appSettings. "
+                    f"appSettings keys: {list(app_settings.keys()) if isinstance(app_settings, dict) else 'N/A'}"
+                )
+            else:
+                logger.debug(
+                    f"User {user_doc.get('_id')}: Found {len(existing_profiles) if isinstance(existing_profiles, list) else 'N/A'} personality profile(s)"
+                )
+            
             # Normalize personalityProfiles to ensure structure is {"id", "name", "description"} only
-            app_settings["personalityProfiles"] = normalize_personality_profiles(
-                app_settings.get("personalityProfiles", [])
+            # This will return an empty list if profiles is None or invalid
+            normalized_profiles = normalize_personality_profiles(
+                existing_profiles if isinstance(existing_profiles, list) else []
             )
+            
+            # Always set personalityProfiles (even if empty) to ensure it's present in response
+            app_settings["personalityProfiles"] = normalized_profiles
+            
+            logger.debug(
+                f"User {user_doc.get('_id')}: Returning {len(normalized_profiles)} normalized personality profile(s)"
+            )
+        else:
+            logger.warning(
+                f"User {user_doc.get('_id')}: appSettings is not a dict (type: {type(app_settings)}). "
+                f"Initializing appSettings with empty personalityProfiles."
+            )
+            preferences["appSettings"] = {"personalityProfiles": []}
+    else:
+        # If preferences is None or not a dict, initialize it with empty personalityProfiles
+        logger.debug(
+            f"User {user_doc.get('_id')}: preferences is {type(preferences)}. "
+            f"Initializing with empty personalityProfiles."
+        )
+        preferences = {
+            "appSettings": {
+                "personalityProfiles": []
+            }
+        }
     
     return UserResponse(
         id=str(user_doc["_id"]),
