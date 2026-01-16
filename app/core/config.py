@@ -77,14 +77,20 @@ class Settings:
     REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
     REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")
 
-    # SMTP Configuration
+    # Zoho Mail API Configuration
+    ZOHO_CLIENT_ID: Optional[str] = os.getenv("ZOHO_CLIENT_ID")
+    ZOHO_CLIENT_SECRET: Optional[str] = os.getenv("ZOHO_CLIENT_SECRET")
+    ZOHO_REFRESH_TOKEN: Optional[str] = os.getenv("ZOHO_REFRESH_TOKEN")
+    ZOHO_ACCOUNT_ID: Optional[str] = os.getenv("ZOHO_ACCOUNT_ID")
+    FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL", "no-reply@saimonsoft.com")
+
+    # Legacy SMTP Configuration (deprecated - kept for backward compatibility)
     SMTP_SERVER: Optional[str] = os.getenv("SMTP_SERVER")
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
     SMTP_USERNAME: Optional[str] = os.getenv("SMTP_USERNAME")
     SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
     SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
     SMTP_USE_SSL: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
-    FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL")
 
     # Stripe Configuration
     STRIPE_TEST_API_KEY: Optional[str] = os.getenv("STRIPE_TEST_API_KEY")

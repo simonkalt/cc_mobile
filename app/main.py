@@ -67,31 +67,6 @@ async def lifespan(app: FastAPI):
     connect_to_mongodb()
     logger.info("Application startup complete")
     
-    # Log all registered routes at startup (especially subscription routes)
-    logger.info("=" * 80)
-    logger.info("Checking registered routes...")
-    subscription_routes = []
-    all_routes = []
-    for route in app.routes:
-        if hasattr(route, 'path') and hasattr(route, 'methods'):
-            path = route.path
-            methods = list(route.methods) if route.methods else []
-            all_routes.append((path, methods))
-            if "/subscriptions" in path:
-                subscription_routes.append((path, methods))
-                logger.info(f"  ✓ Subscription route: {', '.join(methods):<10} {path}")
-    
-    if subscription_routes:
-        logger.info(f"✓ Found {len(subscription_routes)} subscription route(s)")
-    else:
-        logger.warning("⚠️ WARNING: No subscription routes found! Router may not be registered.")
-        logger.warning(f"   Total routes registered: {len(all_routes)}")
-        # Log a few sample routes to verify router registration is working
-        if all_routes:
-            logger.warning("   Sample routes:")
-            for path, methods in all_routes[:5]:
-                logger.warning(f"     {', '.join(methods):<10} {path}")
-    logger.info("=" * 80)
     
     yield
     
@@ -261,6 +236,54 @@ logger.info("=" * 80)
 async def root():
     """Root endpoint - redirects to marketing website"""
     return RedirectResponse(url="/website", status_code=status.HTTP_301_MOVED_PERMANENTLY)
+
+
+# OAuth callback endpoint for Zoho Mail API setup
+@app.get("/oauth/callback", dependencies=[])
+async def oauth_callback(request: Request):
+    """
+    OAuth callback endpoint for Zoho Mail API authorization.
+    Returns a JSON object with the authorization code or error information.
+    """
+    code = request.query_params.get("code")
+    error = request.query_params.get("error")
+    error_description = request.query_params.get("error_description")
+    
+    if error:
+        logger.warning(f"OAuth callback error: {error} - {error_description}")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": error,
+                "error_description": error_description or "No description provided",
+                "message": "OAuth authorization failed. Please try the authorization process again."
+            }
+        )
+    
+    if not code:
+        logger.warning("OAuth callback received without authorization code")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "missing_code",
+                "error_description": "The authorization code was not found in the callback URL.",
+                "message": "No authorization code received. Please try the authorization process again."
+            }
+        )
+    
+    # Success - return the authorization code
+    logger.info(f"OAuth callback received - Authorization code: {code[:20]}...")
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "code": code,
+            "message": "Authorization code received successfully. Use this code to generate your refresh token.",
+            "next_step": "Exchange this authorization code for a refresh token using the Zoho OAuth token endpoint."
+        }
+    )
 
 # Public endpoint for Terms of Service - defined directly on app to ensure it's truly public
 @app.get("/api/files/terms-of-service", dependencies=[])

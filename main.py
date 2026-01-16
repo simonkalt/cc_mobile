@@ -241,6 +241,53 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# OAuth callback endpoint for Zoho Mail API setup - defined early to ensure it's registered
+@app.get("/oauth/callback")
+async def oauth_callback(request: Request):
+    """
+    OAuth callback endpoint for Zoho Mail API authorization.
+    Returns a JSON object with the authorization code or error information.
+    """
+    code = request.query_params.get("code")
+    error = request.query_params.get("error")
+    error_description = request.query_params.get("error_description")
+    
+    if error:
+        logger.warning(f"OAuth callback error: {error} - {error_description}")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": error,
+                "error_description": error_description or "No description provided",
+                "message": "OAuth authorization failed. Please try the authorization process again."
+            }
+        )
+    
+    if not code:
+        logger.warning("OAuth callback received without authorization code")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "missing_code",
+                "error_description": "The authorization code was not found in the callback URL.",
+                "message": "No authorization code received. Please try the authorization process again."
+            }
+        )
+    
+    # Success - return the authorization code
+    logger.info(f"OAuth callback received - Authorization code: {code[:20]}...")
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "code": code,
+            "message": "Authorization code received successfully. Use this code to generate your refresh token.",
+            "next_step": "Exchange this authorization code for a refresh token using the Zoho OAuth token endpoint."
+        }
+    )
+
 # Mount static files for website and documents
 # Get the project root directory - try multiple methods for compatibility
 try:
