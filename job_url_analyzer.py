@@ -17,6 +17,7 @@ Usage:
 import json
 import re
 import logging
+import codecs
 from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -1284,10 +1285,32 @@ Extraction Guidelines:
                     r'"full_description"\s*:\s*"(.*?)(?:"\s*[,}])', content, re.DOTALL
                 )
                 if desc_match:
-                    # Found complete description - decode escape sequences
+                    # Found complete description - decode escape sequences properly
                     desc_content = desc_match.group(1)
-                    # Decode JSON escape sequences (\n, \t, \r, \\, \", etc.)
-                    data["full_description"] = desc_content.encode().decode("unicode_escape")
+                    # Decode JSON escape sequences while preserving UTF-8 encoding
+                    try:
+                        # Check if string contains escape sequences that need decoding
+                        if "\\" in desc_content:
+                            # Use codecs.decode with unicode_escape to handle escape sequences
+                            # Encode to latin-1 first (preserves all byte values 0-255), then decode escapes
+                            # This properly decodes \n, \t, \uXXXX, etc. while preserving UTF-8
+                            desc_content = desc_content.encode("latin-1").decode("unicode_escape")
+                            # The result is now a string with escape sequences decoded
+                            # If the original was UTF-8, it should still be valid UTF-8
+                        # If no escape sequences, use as-is (already properly decoded)
+                    except (UnicodeDecodeError, UnicodeError, ValueError, AttributeError) as e:
+                        # Fallback: manually replace common escape sequences
+                        logger.warning(
+                            f"Error decoding description with codecs, using fallback: {e}"
+                        )
+                        desc_content = (
+                            desc_content.replace("\\n", "\n")
+                            .replace("\\t", "\t")
+                            .replace("\\r", "\r")
+                            .replace('\\"', '"')
+                            .replace("\\\\", "\\")
+                        )
+                    data["full_description"] = desc_content
                 else:
                     # Try to extract partial description (truncated)
                     desc_partial_match = re.search(
@@ -1301,12 +1324,24 @@ Extraction Guidelines:
                         # Remove trailing incomplete quotes
                         if desc_content.endswith("\\"):
                             desc_content = desc_content[:-1]
-                        # Decode JSON escape sequences (\n, \t, \r, \\, \", etc.)
+                        # Decode JSON escape sequences while preserving UTF-8 encoding
                         try:
-                            # Use unicode_escape to decode escape sequences
-                            desc_content = desc_content.encode().decode("unicode_escape")
-                        except (UnicodeDecodeError, UnicodeError):
-                            # If decoding fails, try a safer approach - just replace common escapes
+                            # Check if string contains escape sequences that need decoding
+                            if "\\" in desc_content:
+                                # Use codecs.decode with unicode_escape to handle escape sequences
+                                # Encode to latin-1 first (preserves all byte values 0-255), then decode escapes
+                                # This properly decodes \n, \t, \uXXXX, etc. while preserving UTF-8
+                                desc_content = desc_content.encode("latin-1").decode(
+                                    "unicode_escape"
+                                )
+                                # The result is now a string with escape sequences decoded
+                                # If the original was UTF-8, it should still be valid UTF-8
+                            # If no escape sequences, use as-is (already properly decoded)
+                        except (UnicodeDecodeError, UnicodeError, ValueError, AttributeError) as e:
+                            # Fallback: manually replace common escape sequences
+                            logger.warning(
+                                f"Error decoding truncated description with codecs, using fallback: {e}"
+                            )
                             desc_content = (
                                 desc_content.replace("\\n", "\n")
                                 .replace("\\t", "\t")
@@ -1351,6 +1386,91 @@ Extraction Guidelines:
         logger.debug(f"ChatGPT response received ({len(content)} characters)")
     except Exception as e:
         logger.error(f"ChatGPT extraction error: {e}")
+
+        # Check if this is an insufficient_quota error and send email notification
+        try:
+            error_code = None
+            error_str = str(e)
+
+            # Try to get error code from OpenAI exception attributes
+            # OpenAI SDK exceptions typically have 'response' or 'body' attributes
+            if hasattr(e, "response"):
+                try:
+                    # Check if response has json() method
+                    if hasattr(e.response, "json"):
+                        error_data = e.response.json()
+                        if isinstance(error_data, dict) and "error" in error_data:
+                            error_code = error_data["error"].get("code")
+                    # Or check if response is a dict directly
+                    elif isinstance(e.response, dict) and "error" in e.response:
+                        error_code = e.response["error"].get("code")
+                except:
+                    pass
+
+            # Also check 'body' attribute (some OpenAI exceptions use this)
+            if not error_code and hasattr(e, "body"):
+                error_body = e.body
+                if isinstance(error_body, dict) and "error" in error_body:
+                    error_code = error_body["error"].get("code")
+                elif isinstance(error_body, str):
+                    # Try to parse as JSON if it's a string
+                    try:
+                        parsed = json.loads(error_body)
+                        if isinstance(parsed, dict) and "error" in parsed:
+                            error_code = parsed["error"].get("code")
+                    except:
+                        pass
+
+            # Check 'code' attribute directly
+            if not error_code and hasattr(e, "code"):
+                error_code = e.code
+
+            # Parse error string representation (fallback)
+            # Error log shows: "Error code: 429 - {'error': {'code': 'insufficient_quota', ...}}"
+            if not error_code and "'code': 'insufficient_quota'" in error_str:
+                error_code = "insufficient_quota"
+            elif not error_code and '"code": "insufficient_quota"' in error_str:
+                error_code = "insufficient_quota"
+            elif not error_code:
+                # Try to extract from error string using regex
+                import re
+
+                code_match = re.search(r"'code'\s*:\s*['\"]insufficient_quota['\"]", error_str)
+                if not code_match:
+                    code_match = re.search(r'"code"\s*:\s*["\']insufficient_quota["\']', error_str)
+                if code_match:
+                    error_code = "insufficient_quota"
+
+            # Check if it's insufficient_quota
+            if error_code == "insufficient_quota":
+                logger.warning("OpenAI API quota exceeded - sending email notification")
+                try:
+                    from app.utils.email_utils import send_email
+
+                    send_email(
+                        to_email="simonkalt@gmail.com",
+                        subject="OpenAI API Quota Exceeded - Job URL Extraction",
+                        body=f"""OpenAI API quota has been exceeded for the job URL extraction feature.
+
+Error Details:
+- Error Code: insufficient_quota
+- Error Message: {error_str}
+- Model: gpt-5.2
+- Feature: Job URL Extraction
+
+Please check your OpenAI account billing and plan details to resolve this issue.
+
+For more information: https://platform.openai.com/docs/guides/error-codes/api-errors
+""",
+                    )
+                    logger.info(
+                        "Email notification sent to simonkalt@gmail.com for OpenAI quota issue"
+                    )
+                except Exception as email_error:
+                    logger.error(f"Failed to send quota exceeded email notification: {email_error}")
+        except Exception as check_error:
+            # Don't let email notification errors break the extraction flow
+            logger.debug(f"Error checking for quota issue: {check_error}")
 
     return result
 

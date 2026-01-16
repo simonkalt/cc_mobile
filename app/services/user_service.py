@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from typing import Dict
 from bson import ObjectId
+from pymongo import ReturnDocument
 from fastapi import HTTPException, status
 
 from app.models.user import (
@@ -448,20 +449,30 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
             detail="Invalid user ID format"
         )
     
-    # Get current user to preserve existing personalityProfiles if not explicitly updated
-    current_user = collection.find_one({"_id": user_id_obj})
-    existing_profiles = []
-    if current_user:
-        existing_profiles = current_user.get("preferences", {}).get("appSettings", {}).get("personalityProfiles", [])
-        logger.debug(f"Current user has {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing personality profile(s)")
-    
     # Build update document (only include fields that are provided)
     update_doc = {"dateUpdated": datetime.utcnow()}
+    
+    # Check if we need to preserve existing personalityProfiles
+    # Only fetch current user if personalityProfiles might be updated
+    needs_profile_preservation = (
+        updates.preferences 
+        and isinstance(updates.preferences, dict) 
+        and "appSettings" in updates.preferences
+        and "personalityProfiles" in updates.preferences.get("appSettings", {})
+    )
+    
+    existing_profiles = []
+    if needs_profile_preservation:
+        # Only fetch current user if we need to preserve profiles
+        current_user = collection.find_one({"_id": user_id_obj})
+        if current_user:
+            existing_profiles = current_user.get("preferences", {}).get("appSettings", {}).get("personalityProfiles", [])
+            logger.debug(f"Current user has {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing personality profile(s)")
     
     if updates.name is not None:
         update_doc["name"] = updates.name
     if updates.email is not None:
-        # Check if email is already taken by another user
+        # Check if email is already taken by another user (only if email is being changed)
         existing = collection.find_one({"email": updates.email, "_id": {"$ne": user_id_obj}})
         if existing:
             raise HTTPException(
@@ -567,19 +578,20 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         update_doc["last_llm_used"] = updates.last_llm_used
     
     try:
-        result = collection.update_one(
+        # Use find_one_and_update to get the updated document in one operation
+        # This reduces database round trips from 2 (update + find) to 1
+        updated_user = collection.find_one_and_update(
             {"_id": user_id_obj},
-            {"$set": update_doc}
+            {"$set": update_doc},
+            return_document=ReturnDocument.AFTER
         )
         
-        if result.matched_count == 0:
+        if not updated_user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
-        # Return updated user
-        updated_user = collection.find_one({"_id": user_id_obj})
         logger.info(f"User updated: {user_id}")
         return user_doc_to_response(updated_user)
     except HTTPException:
@@ -744,12 +756,14 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
             )
         
         # Use MongoDB's $inc operator to increment the count
+        # Also update selectedModel to keep it in sync with last_llm_used
         result = collection.update_one(
             {"_id": user_id_obj},
             {
                 "$inc": {f"llm_counts.{llm_name}": 1},
                 "$set": {
                     "last_llm_used": llm_name,
+                    "preferences.appSettings.selectedModel": llm_name,  # Auto-update selectedModel to match last_llm_used
                     "dateUpdated": datetime.utcnow()
                 }
             }

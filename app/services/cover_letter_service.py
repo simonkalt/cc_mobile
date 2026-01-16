@@ -445,7 +445,7 @@ Apply this personality throughout the entire cover letter. This instruction take
                         if font_family and font_family.lower() == "default":
                             font_instruction = """
 === HTML FORMATTING INSTRUCTION ===
-When generating HTML output, ensure all text uses a minimum font-size of 14pt. This should be applied to the main content and all paragraphs.
+When generating HTML output, ensure all text uses a minimum base font-size of 14pt. Headers should be larger, etc., so 14pt is the smallest font-size on the document. This method should be applied to the main content and all paragraphs.
 Use inline styles like: style="font-size: 14pt;" on your HTML elements to ensure proper text sizing.
 === END HTML FORMATTING INSTRUCTION ===
 """
@@ -876,22 +876,11 @@ Please incorporate these instructions while maintaining consistency with all oth
         raw_html = re.sub(r" +", " ", raw_html)
 
         # Apply user's print settings to HTML
-        # Note: The user object was already retrieved earlier for personality profiles
-        # We'll retrieve it again here to access print settings (or reuse if available)
+        # Reuse the user object that was already retrieved earlier for personality profiles
         styled_html = raw_html
         try:
-            # Retrieve user to get print settings
-            user_for_styling = None
-            if user_id:
-                try:
-                    user_for_styling = get_user_by_id(user_id)
-                except Exception:
-                    pass  # If lookup fails, continue without styling
-            elif user_email:
-                try:
-                    user_for_styling = get_user_by_email(user_email)
-                except Exception:
-                    pass  # If lookup fails, continue without styling
+            # Reuse the user object that was already fetched (avoid duplicate database call)
+            user_for_styling = user  # Use the user object from earlier in the function
 
             if user_for_styling and user_for_styling.preferences:
                 app_settings = user_for_styling.preferences.get("appSettings", {})

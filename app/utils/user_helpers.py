@@ -101,18 +101,16 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
     user_id = str(user_doc.get("_id", "unknown"))
     
     # Normalize preferences to ensure personalityProfiles have correct structure
-    # Create a copy to avoid mutating the original document
+    # Use shallow copy instead of deep copy for better performance
+    # Only deep copy if we actually need to modify nested structures
     preferences = user_doc.get("preferences")
     
-    # Log raw preferences structure for debugging
-    logger.info(
-        f"User {user_id}: Processing preferences. Type: {type(preferences)}, "
-        f"is None: {preferences is None}, keys: {list(preferences.keys()) if isinstance(preferences, dict) else 'N/A'}"
-    )
-    
     if preferences and isinstance(preferences, dict):
-        # Deep copy preferences to avoid mutating original
-        preferences = copy.deepcopy(preferences)
+        # Only deep copy if we need to modify nested structures (appSettings)
+        # Use shallow copy first, then deep copy only appSettings if it exists
+        preferences = preferences.copy()  # Shallow copy is faster
+        if "appSettings" in preferences:
+            preferences["appSettings"] = copy.deepcopy(preferences["appSettings"])
         
         # Ensure appSettings exists
         if "appSettings" not in preferences:
@@ -120,26 +118,14 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
             preferences["appSettings"] = {}
         
         app_settings = preferences.get("appSettings", {})
-        logger.info(
-            f"User {user_id}: appSettings type: {type(app_settings)}, "
-            f"is None: {app_settings is None}, keys: {list(app_settings.keys()) if isinstance(app_settings, dict) else 'N/A'}"
-        )
         
         if isinstance(app_settings, dict):
             # Always ensure personalityProfiles exists and is normalized
             # Get existing profiles or default to empty list
             existing_profiles = app_settings.get("personalityProfiles")
             
-            # Log detailed info about what we found
-            logger.info(
-                f"User {user_id}: personalityProfiles from DB - "
-                f"type: {type(existing_profiles)}, "
-                f"is None: {existing_profiles is None}, "
-                f"value: {existing_profiles}"
-            )
-            
             if existing_profiles is None:
-                logger.warning(
+                logger.debug(
                     f"User {user_id}: personalityProfiles is None in database. "
                     f"appSettings keys: {list(app_settings.keys())}"
                 )
@@ -151,46 +137,40 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
                 )
                 existing_profiles = []
             
-            # Log each profile before normalization
-            if existing_profiles:
-                logger.info(
-                    f"User {user_id}: Found {len(existing_profiles)} profile(s) before normalization. "
-                    f"Sample profile structure: {existing_profiles[0] if existing_profiles else 'N/A'}"
-                )
-            
             # Normalize personalityProfiles to ensure structure is {"id", "name", "description"} only
             # This will return an empty list if profiles is None or invalid
             normalized_profiles = normalize_personality_profiles(existing_profiles)
             
-            # Log after normalization
-            logger.info(
-                f"User {user_id}: After normalization - {len(normalized_profiles)} profile(s). "
-                f"Normalized profiles: {normalized_profiles}"
-            )
-            
             # Always set personalityProfiles (even if empty) to ensure it's present in response
             app_settings["personalityProfiles"] = normalized_profiles
             
-            # Verify it's set correctly
-            logger.info(
-                f"User {user_id}: Final appSettings['personalityProfiles'] = {app_settings.get('personalityProfiles')}"
-            )
+            # Ensure selectedModel defaults to last_llm_used if not set
+            # This ensures the user's last used model is their default
+            if not app_settings.get("selectedModel") and user_doc.get("last_llm_used"):
+                app_settings["selectedModel"] = user_doc.get("last_llm_used")
+                logger.debug(f"User {user_id}: Set selectedModel to last_llm_used: {user_doc.get('last_llm_used')}")
         else:
             logger.warning(
                 f"User {user_id}: appSettings is not a dict (type: {type(app_settings)}). "
                 f"Initializing appSettings with empty personalityProfiles."
             )
-            preferences["appSettings"] = {"personalityProfiles": []}
+            # Initialize appSettings and set selectedModel from last_llm_used if available
+            app_settings_init = {"personalityProfiles": []}
+            if user_doc.get("last_llm_used"):
+                app_settings_init["selectedModel"] = user_doc.get("last_llm_used")
+            preferences["appSettings"] = app_settings_init
     else:
         # If preferences is None or not a dict, initialize it with empty personalityProfiles
         logger.warning(
             f"User {user_id}: preferences is {type(preferences)}. "
             f"Initializing with empty personalityProfiles."
         )
+        # Initialize preferences and set selectedModel from last_llm_used if available
+        app_settings_init = {"personalityProfiles": []}
+        if user_doc.get("last_llm_used"):
+            app_settings_init["selectedModel"] = user_doc.get("last_llm_used")
         preferences = {
-            "appSettings": {
-                "personalityProfiles": []
-            }
+            "appSettings": app_settings_init
         }
 
     return UserResponse(
