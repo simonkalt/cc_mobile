@@ -37,7 +37,7 @@ except ImportError:
         "OpenAI not available - ChatGPT extraction will be skipped. Install openai to enable ChatGPT extraction."
     )
 
-token_limit = 100000
+token_limit = 150000  # Increased by 50% from 100000 to allow more HTML content
 
 
 class JobExtractionResult:
@@ -559,17 +559,13 @@ class GenericParser(BaseJobParser):
                     if isinstance(data, dict):
                         # Handle both single objects and arrays
                         if data.get("@type") == "JobPosting":
-                            result.company = data.get("hiringOrganization", {}).get(
-                                "name"
-                            )
+                            result.company = data.get("hiringOrganization", {}).get("name")
                             result.job_title = data.get("title")
                             result.job_description = data.get("description")
                         elif isinstance(data, list):
                             for item in data:
                                 if item.get("@type") == "JobPosting":
-                                    result.company = item.get(
-                                        "hiringOrganization", {}
-                                    ).get("name")
+                                    result.company = item.get("hiringOrganization", {}).get("name")
                                     result.job_title = item.get("title")
                                     result.job_description = item.get("description")
                                     break
@@ -652,9 +648,7 @@ class GenericParser(BaseJobParser):
                 for element in desc_patterns:
                     if element:
                         text = element.get_text(strip=True)
-                        if (
-                            text and len(text) > 100
-                        ):  # Description should be substantial
+                        if text and len(text) > 100:  # Description should be substantial
                             result.job_description = text[:5000]  # Limit length
                             break
 
@@ -712,9 +706,7 @@ def detect_captcha(html: str) -> bool:
         "jobsearch-jobinfobullet",  # Indeed-specific
     ]
 
-    has_job_content = any(
-        indicator in html_lower for indicator in job_content_indicators
-    )
+    has_job_content = any(indicator in html_lower for indicator in job_content_indicators)
 
     # If we have job content, be more conservative about CAPTCHA detection
     # Only detect CAPTCHA if there are strong indicators AND no job content
@@ -738,9 +730,7 @@ def detect_captcha(html: str) -> bool:
     ]
 
     # Check for strong CAPTCHA indicators
-    has_strong_captcha = any(
-        indicator in html_lower for indicator in strong_captcha_indicators
-    )
+    has_strong_captcha = any(indicator in html_lower for indicator in strong_captcha_indicators)
 
     # If we have job content, don't detect CAPTCHA (it's already completed)
     if has_job_content:
@@ -784,17 +774,13 @@ def detect_captcha(html: str) -> bool:
     # Only use weak indicators if we don't have job content
     for indicator in weak_captcha_indicators:
         if indicator in html_lower:
-            logger.info(
-                f"CAPTCHA detected: found weak indicator '{indicator}' (no job content)"
-            )
+            logger.info(f"CAPTCHA detected: found weak indicator '{indicator}' (no job content)")
             return True
 
     return False
 
 
-def fetch_html(
-    url: str, timeout: int = 10
-) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
+def fetch_html(url: str, timeout: int = 10) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
     """
     Fetch HTML content from URL using requests
 
@@ -813,9 +799,7 @@ def fetch_html(
             "Upgrade-Insecure-Requests": "1",
         }
 
-        response = requests.get(
-            url, headers=headers, timeout=timeout, allow_redirects=True
-        )
+        response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
 
         # Try to detect encoding
         if response.encoding:
@@ -829,9 +813,7 @@ def fetch_html(
 
         # If CAPTCHA is detected, return it even if status is not 200
         if captcha_detected:
-            logger.warning(
-                f"CAPTCHA detected for URL: {url} (status: {response.status_code})"
-            )
+            logger.warning(f"CAPTCHA detected for URL: {url} (status: {response.status_code})")
             return html, None, captcha_detected
 
         # For error status codes (403, 429, 503), check for CAPTCHA
@@ -968,9 +950,7 @@ def extract_from_html(html: str, url: str) -> JobExtractionResult:
         for pattern_match in hiring_manager_patterns:
             if pattern_match:
                 # Try to find the name near the pattern
-                parent = (
-                    pattern_match.parent if hasattr(pattern_match, "parent") else None
-                )
+                parent = pattern_match.parent if hasattr(pattern_match, "parent") else None
                 if parent:
                     # Look for name-like text nearby
                     text = parent.get_text(strip=True)
@@ -1068,11 +1048,7 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
             for pattern_match in hiring_manager_patterns:
                 if pattern_match:
                     # Try to find the name near the pattern
-                    parent = (
-                        pattern_match.parent
-                        if hasattr(pattern_match, "parent")
-                        else None
-                    )
+                    parent = pattern_match.parent if hasattr(pattern_match, "parent") else None
                     if parent:
                         # Look for name-like text nearby
                         text = parent.get_text(strip=True)
@@ -1098,9 +1074,7 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     return result
 
 
-def extract_with_chatgpt(
-    html: str, openai_client: Optional[OpenAI] = None
-) -> JobExtractionResult:
+def extract_with_chatgpt(html: str, openai_client: Optional[OpenAI] = None) -> JobExtractionResult:
     """
     Extract job information using ChatGPT (fallback method)
 
@@ -1206,9 +1180,7 @@ Extraction Guidelines:
         # Call OpenAI ChatGPT API - using gpt-5.2 for better extraction
         # GPT-5.2 supports 128,000 max completion tokens, 400,000 context window
         model_name = "gpt-5.2"
-        max_completion_tokens_value = (
-            128000  # GPT-5.2 supports up to 128,000 max completion tokens
-        )
+        max_completion_tokens_value = 128000  # GPT-5.2 maximum supported completion tokens
         response = openai_client.chat.completions.create(
             model=model_name,
             messages=[{"role": "user", "content": prompt}],
@@ -1221,18 +1193,152 @@ Extraction Guidelines:
         raw_response = response.choices[0].message.content.strip()
         content = raw_response
 
+        # Check if response was truncated (check finish_reason)
+        finish_reason = response.choices[0].finish_reason
+        if finish_reason == "length":
+            logger.warning(
+                f"ChatGPT response was truncated (finish_reason='length'). "
+                f"Response length: {len(content)} characters. "
+                f"Consider increasing max_completion_tokens or reducing HTML input size."
+            )
+
+        logger.info(
+            f"ChatGPT response length: {len(content)} characters, finish_reason: {finish_reason}"
+        )
+        logger.debug(f"ChatGPT response preview (first 500 chars): {content[:500]}")
+
         # Remove markdown code blocks if present
         if content.startswith("```"):
             content = re.sub(r"^```(?:json)?\s*\n", "", content)
             content = re.sub(r"\n```\s*$", "", content)
 
+        # Try to fix incomplete JSON if response was truncated
+        if finish_reason == "length":
+            # Attempt to close the JSON properly
+            # Find the last complete field and close the JSON
+            logger.warning("Attempting to fix truncated JSON response...")
+
+            # Try to find the last complete key-value pair
+            # Look for the last complete string value
+            last_quote = content.rfind('"')
+            if last_quote > 0:
+                # Find the opening quote for this string
+                opening_quote = content.rfind('"', 0, last_quote)
+                if opening_quote > 0:
+                    # Check if this looks like an incomplete string value
+                    before_opening = content[:opening_quote].rstrip()
+                    if before_opening.endswith(":"):
+                        # This is likely an incomplete string value - try to close it
+                        # Find the key name
+                        key_start = before_opening.rfind('"')
+                        if key_start > 0:
+                            key_end = before_opening.find('"', key_start + 1)
+                            if key_end > 0:
+                                key = content[key_start + 1 : key_end]
+                                logger.info(f"Detected incomplete field: {key}")
+                                # Close the string and JSON object
+                                content = content[: last_quote + 1] + '"}'
+                                logger.info(
+                                    "Attempted to fix truncated JSON by closing the last string field"
+                                )
+
         # Parse JSON
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as json_error:
+            # Log more details about the JSON error
+            logger.error(f"JSON parsing error: {json_error}")
+            logger.error(f"Error position: line {json_error.lineno}, column {json_error.colno}")
+            logger.error(f"Response length: {len(content)} characters")
+            logger.error(f"Response ends with: ...{content[-200:]}")
+
+            # Try to extract partial data if possible
+            # Look for complete fields before the error
+            try:
+                logger.warning("Attempting to extract partial data from incomplete JSON...")
+                data = {}
+
+                # Extract company (complete field)
+                company_match = re.search(r'"company"\s*:\s*"([^"]*)"', content)
+                if company_match:
+                    data["company"] = company_match.group(1)
+
+                # Extract job_title (complete field)
+                job_title_match = re.search(r'"job_title"\s*:\s*"([^"]*)"', content)
+                if job_title_match:
+                    data["job_title"] = job_title_match.group(1)
+
+                # Extract hiring_manager (complete field)
+                hiring_manager_match = re.search(r'"hiring_manager"\s*:\s*"([^"]*)"', content)
+                if hiring_manager_match:
+                    data["hiring_manager"] = hiring_manager_match.group(1)
+
+                # Extract ad_source (complete field)
+                ad_source_match = re.search(r'"ad_source"\s*:\s*"([^"]*)"', content)
+                if ad_source_match:
+                    data["ad_source"] = ad_source_match.group(1)
+
+                # For full_description, try to extract what we can (may be truncated)
+                # Look for the start of full_description and extract up to where it breaks
+                desc_match = re.search(
+                    r'"full_description"\s*:\s*"(.*?)(?:"\s*[,}])', content, re.DOTALL
+                )
+                if desc_match:
+                    # Found complete description - decode escape sequences
+                    desc_content = desc_match.group(1)
+                    # Decode JSON escape sequences (\n, \t, \r, \\, \", etc.)
+                    data["full_description"] = desc_content.encode().decode("unicode_escape")
+                else:
+                    # Try to extract partial description (truncated)
+                    desc_partial_match = re.search(
+                        r'"full_description"\s*:\s*"(.*)', content, re.DOTALL
+                    )
+                    if desc_partial_match:
+                        desc_content = desc_partial_match.group(1)
+                        # Clean up any trailing incomplete content
+                        # Remove trailing backslashes, incomplete escape sequences
+                        desc_content = desc_content.rstrip()
+                        # Remove trailing incomplete quotes
+                        if desc_content.endswith("\\"):
+                            desc_content = desc_content[:-1]
+                        # Decode JSON escape sequences (\n, \t, \r, \\, \", etc.)
+                        try:
+                            # Use unicode_escape to decode escape sequences
+                            desc_content = desc_content.encode().decode("unicode_escape")
+                        except (UnicodeDecodeError, UnicodeError):
+                            # If decoding fails, try a safer approach - just replace common escapes
+                            desc_content = (
+                                desc_content.replace("\\n", "\n")
+                                .replace("\\t", "\t")
+                                .replace("\\r", "\r")
+                                .replace('\\"', '"')
+                                .replace("\\\\", "\\")
+                            )
+                        data["full_description"] = (
+                            desc_content + " [TRUNCATED - response exceeded token limit]"
+                        )
+                    else:
+                        data["full_description"] = "[TRUNCATED - could not extract description]"
+
+                # Set defaults for missing fields
+                data.setdefault("company", "Not specified")
+                data.setdefault("job_title", "Not specified")
+                data.setdefault(
+                    "full_description", "Description truncated - response exceeded AI Model limit"
+                )
+                data.setdefault("hiring_manager", "")
+                data.setdefault("ad_source", "generic")
+
+                logger.warning(
+                    f"✓ Extracted partial data: company={data.get('company')}, job_title={data.get('job_title')}"
+                )
+                logger.warning("Using partial data extracted from incomplete JSON")
+            except Exception as e:
+                logger.error(f"Could not extract partial data: {e}")
+                raise json_error
 
         result.company = data.get("company", "Not specified")
-        result.job_title = data.get("job_title") or data.get(
-            "jobTitle", "Not specified"
-        )
+        result.job_title = data.get("job_title") or data.get("jobTitle", "Not specified")
         result.job_description = data.get("full_description") or data.get(
             "jobDescription", "Not specified"
         )

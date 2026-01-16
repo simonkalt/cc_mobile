@@ -430,6 +430,31 @@ Apply this personality throughout the entire cover letter. This instruction take
         f"Personality instruction prepared ({len(personality_instruction)} chars): {selected_profile[:100]}..."
     )
 
+    # Get font settings for LLM prompting (if user is available)
+    font_instruction = ""
+    try:
+        if user:
+            user_prefs = user.preferences if user.preferences else {}
+            if isinstance(user_prefs, dict):
+                app_settings = user_prefs.get("appSettings", {})
+                if isinstance(app_settings, dict):
+                    print_props = app_settings.get("printProperties", {})
+                    if isinstance(print_props, dict):
+                        font_family = print_props.get("fontFamily", "")
+                        # If fontFamily is "default", add font-size instruction to LLM
+                        if font_family and font_family.lower() == "default":
+                            font_instruction = """
+=== HTML FORMATTING INSTRUCTION ===
+When generating HTML output, ensure all text uses a minimum font-size of 14pt. This should be applied to the main content and all paragraphs.
+Use inline styles like: style="font-size: 14pt;" on your HTML elements to ensure proper text sizing.
+=== END HTML FORMATTING INSTRUCTION ===
+"""
+                            logger.info(
+                                "Added font-size: 14pt instruction to LLM prompt (fontFamily is 'default')"
+                            )
+    except Exception as e:
+        logger.warning(f"Could not retrieve font settings for LLM prompting: {e}")
+
     # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
         "llm": llm,
@@ -543,8 +568,8 @@ Please incorporate these instructions while maintaining consistency with all oth
     try:
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
-            # Include personality instruction prominently at the start
-            msg = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            # Include personality instruction prominently at the start, and font instruction if applicable
+            msg = f"{system_message}{personality_instruction}{font_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             if additional_instructions_text:
                 if "OVERRIDE" in additional_instructions_text:
                     logger.debug(
@@ -581,11 +606,18 @@ Please incorporate these instructions while maintaining consistency with all oth
                     "role": "user",
                     "content": personality_instruction.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"role": "user", "content": message},
-                {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
-                {"role": "user", "content": f"Company Name: {company_name}"},
-                {"role": "user", "content": f"Ad Source: {ad_source}"},
             ]
+            # Add font instruction if applicable
+            if font_instruction:
+                messages.append({"role": "user", "content": font_instruction.strip()})
+            messages.extend(
+                [
+                    {"role": "user", "content": message},
+                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+                    {"role": "user", "content": f"Company Name: {company_name}"},
+                    {"role": "user", "content": f"Ad Source: {ad_source}"},
+                ]
+            )
             # Append additional instructions last as a separate message
             if additional_instructions_text:
                 messages.append({"role": "user", "content": additional_instructions_text.strip()})
@@ -626,11 +658,18 @@ Please incorporate these instructions while maintaining consistency with all oth
                     "role": "user",
                     "content": personality_instruction.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"role": "user", "content": message},
-                {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
-                {"role": "user", "content": f"Company Name: {company_name}"},
-                {"role": "user", "content": f"Ad Source: {ad_source}"},
             ]
+            # Add font instruction if applicable
+            if font_instruction:
+                messages_list.append({"role": "user", "content": font_instruction.strip()})
+            messages_list.extend(
+                [
+                    {"role": "user", "content": message},
+                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+                    {"role": "user", "content": f"Company Name: {company_name}"},
+                    {"role": "user", "content": f"Ad Source: {ad_source}"},
+                ]
+            )
             # Append additional instructions last
             if additional_instructions_text:
                 messages_list.append(
@@ -656,8 +695,8 @@ Please incorporate these instructions while maintaining consistency with all oth
             r = result["choices"][0]["message"]["content"]
 
         elif llm == "OCI" or llm == "oci-generative-ai":
-            # Include personality instruction prominently at the start
-            full_prompt = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            # Include personality instruction prominently at the start, and font instruction if applicable
+            full_prompt = f"{system_message}{personality_instruction}{font_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
 
@@ -678,8 +717,11 @@ Please incorporate these instructions while maintaining consistency with all oth
                     "role": "user",
                     "content": personality_instruction.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"role": "user", "content": message_llama},
             ]
+            # Add font instruction if applicable
+            if font_instruction:
+                messages.append({"role": "user", "content": font_instruction.strip()})
+            messages.append({"role": "user", "content": message_llama})
             # Append additional instructions last
             if additional_instructions_text:
                 messages.append({"role": "user", "content": additional_instructions_text.strip()})
@@ -703,11 +745,18 @@ Please incorporate these instructions while maintaining consistency with all oth
                     "type": "text",
                     "text": personality_instruction.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"type": "text", "text": message},
-                {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
-                {"type": "text", "text": f"Company Name: {company_name}"},
-                {"type": "text", "text": f"Ad Source: {ad_source}"},
             ]
+            # Add font instruction if applicable
+            if font_instruction:
+                content_list.append({"type": "text", "text": font_instruction.strip()})
+            content_list.extend(
+                [
+                    {"type": "text", "text": message},
+                    {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
+                    {"type": "text", "text": f"Company Name: {company_name}"},
+                    {"type": "text", "text": f"Ad Source: {ad_source}"},
+                ]
+            )
             # Append additional instructions last
             if additional_instructions_text:
                 content_list.append({"type": "text", "text": additional_instructions_text.strip()})
