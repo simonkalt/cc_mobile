@@ -147,22 +147,15 @@ def verify_code(user_id: str, code: str, purpose: str) -> bool:
             logger.warning(f"Verification purpose mismatch for user {user_id}")
             return False
         
-        # Check if already verified
-        if verification_data.get("verified", False):
-            logger.warning(f"Verification code already used for user {user_id}")
-            return False
-        
         # Check if expired
         expires_at = verification_data.get("expires_at")
         if expires_at and datetime.utcnow() > expires_at:
             logger.warning(f"Verification code expired for user {user_id}")
             return False
         
-        # Mark as verified
-        collection.update_one(
-            {"_id": ObjectId(user_id)},
-            {"$set": {"verification_code.verified": True}}
-        )
+        # Note: We don't mark as verified here - that happens when the code is actually used
+        # (e.g., in reset-password, change-password endpoints)
+        # This allows the code to be verified multiple times before being consumed
         
         logger.info(f"Verification code verified successfully for user {user_id}")
         return True

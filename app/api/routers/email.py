@@ -230,7 +230,16 @@ async def reset_password_endpoint(request: ResetPasswordRequest):
             detail="Invalid or expired verification code"
         )
     
-    # Update password
+    # Check if code was already used (marked as verified)
+    user_doc = collection.find_one({"_id": ObjectId(user.id)})
+    verification_data = user_doc.get("verification_code") if user_doc else None
+    if verification_data and verification_data.get("verified", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has already been used"
+        )
+    
+    # Update password and mark code as verified/used
     from datetime import datetime
     
     hashed_password = hash_password(request.new_password)
@@ -240,9 +249,9 @@ async def reset_password_endpoint(request: ResetPasswordRequest):
         {
             "$set": {
                 "hashedPassword": hashed_password,
-                "passwordChangedAt": datetime.utcnow()
-            },
-            "$unset": {"verification_code": ""}
+                "passwordChangedAt": datetime.utcnow(),
+                "verification_code.verified": True  # Mark as used
+            }
         }
     )
     

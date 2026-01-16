@@ -243,7 +243,8 @@ async def root():
 async def oauth_callback(request: Request):
     """
     OAuth callback endpoint for Zoho Mail API authorization.
-    Returns a JSON object with the authorization code or error information.
+    Automatically exchanges the authorization code for a refresh token.
+    Returns a JSON object with the refresh token or error information.
     """
     code = request.query_params.get("code")
     error = request.query_params.get("error")
@@ -273,17 +274,121 @@ async def oauth_callback(request: Request):
             }
         )
     
-    # Success - return the authorization code
+    # Check if client credentials are configured
+    if not settings.ZOHO_CLIENT_ID or not settings.ZOHO_CLIENT_SECRET:
+        logger.error("ZOHO_CLIENT_ID or ZOHO_CLIENT_SECRET not configured")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": "configuration_error",
+                "error_description": "Zoho Mail API credentials not configured",
+                "message": "Please configure ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET before using the OAuth callback.",
+                "code": code,  # Return the code so user can manually exchange it
+                "instructions": "Configure ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET, then use this code to get refresh token:\n"
+                              f"curl -X POST 'https://accounts.zoho.com/oauth/v2/token' \\\n"
+                              f"  -d 'grant_type=authorization_code' \\\n"
+                              f"  -d 'client_id=YOUR_CLIENT_ID' \\\n"
+                              f"  -d 'client_secret=YOUR_CLIENT_SECRET' \\\n"
+                              f"  -d 'redirect_uri={request.url.scheme}://{request.url.netloc}/oauth/callback' \\\n"
+                              f"  -d 'code={code}'"
+            }
+        )
+    
+    # Exchange authorization code for refresh token
     logger.info(f"OAuth callback received - Authorization code: {code[:20]}...")
-    return JSONResponse(
-        status_code=200,
-        content={
-            "success": True,
+    logger.info("Exchanging authorization code for refresh token...")
+    
+    try:
+        import requests
+        
+        token_url = "https://accounts.zoho.com/oauth/v2/token"
+        redirect_uri = f"{request.url.scheme}://{request.url.netloc}/oauth/callback"
+        
+        params = {
+            "grant_type": "authorization_code",
+            "client_id": settings.ZOHO_CLIENT_ID,
+            "client_secret": settings.ZOHO_CLIENT_SECRET,
+            "redirect_uri": redirect_uri,
             "code": code,
-            "message": "Authorization code received successfully. Use this code to generate your refresh token.",
-            "next_step": "Exchange this authorization code for a refresh token using the Zoho OAuth token endpoint."
         }
-    )
+        
+        logger.info(f"Requesting token from: {token_url}")
+        logger.debug(f"Redirect URI: {redirect_uri}")
+        
+        response = requests.post(token_url, params=params, timeout=10)
+        
+        logger.info(f"Token exchange response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            refresh_token = data.get("refresh_token")
+            access_token = data.get("access_token")
+            expires_in = data.get("expires_in", 3600)
+            
+            if refresh_token:
+                logger.info("✓ Successfully obtained refresh token")
+                logger.info(f"Refresh token length: {len(refresh_token)}")
+                logger.info(f"Access token expires in: {expires_in} seconds")
+                
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "success": True,
+                        "refresh_token": refresh_token,
+                        "access_token": access_token,  # Optional, for immediate use
+                        "expires_in": expires_in,
+                        "message": "Successfully exchanged authorization code for refresh token!",
+                        "instructions": f"Add this to your .env file or Render environment variables:\n"
+                                      f"ZOHO_REFRESH_TOKEN={refresh_token}"
+                    }
+                )
+            else:
+                logger.error(f"Token response missing refresh_token. Response: {data}")
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "success": False,
+                        "error": "missing_refresh_token",
+                        "error_description": "The token exchange succeeded but no refresh token was returned.",
+                        "response": data,
+                        "message": "Token exchange completed but refresh token not found in response."
+                    }
+                )
+        else:
+            logger.error(f"Token exchange failed: HTTP {response.status_code}")
+            logger.error(f"Response text: {response.text}")
+            try:
+                error_data = response.json()
+                logger.error(f"Error response: {error_data}")
+            except:
+                pass
+            
+            return JSONResponse(
+                status_code=response.status_code,
+                content={
+                    "success": False,
+                    "error": "token_exchange_failed",
+                    "error_description": f"Failed to exchange authorization code for refresh token",
+                    "status_code": response.status_code,
+                    "response": response.text,
+                    "message": "Could not exchange authorization code. Please check your client credentials and try again.",
+                    "code": code  # Return the code so user can manually retry
+                }
+            )
+            
+    except Exception as e:
+        logger.error(f"Error during token exchange: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": "unexpected_error",
+                "error_description": str(e),
+                "message": "An unexpected error occurred. Please try again.",
+                "code": code  # Return the code so user can manually retry
+            }
+        )
 
 # Public endpoint for Terms of Service - defined directly on app to ensure it's truly public
 @app.get("/api/files/terms-of-service", dependencies=[])
