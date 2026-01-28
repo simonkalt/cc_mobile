@@ -52,7 +52,8 @@ async def register_user_endpoint(user_data: UserRegisterRequest):
 
 @router.post(
     "/login",
-    response_model=UserLoginResponse,
+    # Removed response_model to avoid FastAPI re-serialization that might strip tokens
+    # We manually return JSONResponse with all fields included
     dependencies=[],  # Explicitly mark as public - no authentication required
 )
 async def login_user_endpoint(login_data: UserLoginRequest):
@@ -69,6 +70,14 @@ async def login_user_endpoint(login_data: UserLoginRequest):
             logger.info(f"  Email: {login_response.user.email}")
             logger.info("=" * 80)
 
+        # Log token values for debugging
+        logger.info(f"Access token present: {login_response.access_token is not None}")
+        logger.info(f"Refresh token present: {login_response.refresh_token is not None}")
+        if login_response.access_token:
+            logger.info(f"Access token length: {len(login_response.access_token)}")
+        if login_response.refresh_token:
+            logger.info(f"Refresh token length: {len(login_response.refresh_token)}")
+
         # Explicitly serialize to ensure all fields (including tokens) are included
         # Use mode='json' for proper datetime serialization and exclude_none=False to include all fields
         response_dict = login_response.model_dump(mode="json", exclude_none=False)
@@ -77,11 +86,20 @@ async def login_user_endpoint(login_data: UserLoginRequest):
         if not response_dict.get("access_token") or not response_dict.get("refresh_token"):
             logger.error(f"Tokens missing in login response for {login_data.email}")
             logger.error(f"Response keys: {list(response_dict.keys())}")
+            logger.error(f"Access token in dict: {response_dict.get('access_token')}")
+            logger.error(f"Refresh token in dict: {response_dict.get('refresh_token')}")
+            logger.error(f"Full response_dict: {response_dict}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to generate authentication tokens",
             )
 
+        # Explicitly ensure tokens are in the response (defensive programming)
+        response_dict["access_token"] = login_response.access_token
+        response_dict["refresh_token"] = login_response.refresh_token
+        response_dict["token_type"] = login_response.token_type
+
+        logger.info(f"Final response keys: {list(response_dict.keys())}")
         return JSONResponse(content=response_dict, status_code=status.HTTP_200_OK)
     except HTTPException:
         raise

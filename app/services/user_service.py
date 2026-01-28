@@ -1,6 +1,7 @@
 """
 User service - business logic for user operations
 """
+
 import logging
 import time
 from datetime import datetime
@@ -33,74 +34,65 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     # Check if user already exists
     existing_user = collection.find_one({"email": user_data.email})
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User with this email already exists"
+            status_code=status.HTTP_409_CONFLICT, detail="User with this email already exists"
         )
-    
+
     # Hash password
     hashed_password_str = hash_password(user_data.password)
-    
+
     # Extract preferences if provided
     preferences = user_data.preferences or {}
     app_settings = preferences.get("appSettings", {})
     personality_profiles = app_settings.get("personalityProfiles", [])
-    
+
     # If no personality profiles provided or empty, create default profile
     if not personality_profiles or len(personality_profiles) == 0:
         default_profile = {
             "id": str(int(time.time() * 1000)),  # Current timestamp in milliseconds
             "name": "Professional",
-            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
+            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional.",
         }
         personality_profiles = [default_profile]
         logger.info(f"Created default personality profile for new user: {user_data.email}")
-    
+
     # Ensure appSettings exists in preferences
     if "appSettings" not in preferences:
         preferences["appSettings"] = {}
-    
+
     # Set the personality profiles (either provided or default)
     preferences["appSettings"]["personalityProfiles"] = personality_profiles
-    
+
     # Merge provided preferences with defaults to ensure all required fields exist
     default_preferences = {
         "newsletterOptIn": False,
         "theme": "light",
         "appSettings": {
             "printProperties": {
-                "margins": {
-                    "top": 1.0,
-                    "right": 0.75,
-                    "bottom": 0.25,
-                    "left": 0.75
-                },
+                "margins": {"top": 1.0, "right": 0.75, "bottom": 0.25, "left": 0.75},
                 "fontFamily": "Georgia",
                 "fontSize": 11.0,
                 "lineHeight": 1.15,
-                "pageSize": {
-                    "width": 8.5,
-                    "height": 11.0
-                },
-                "useDefaultFonts": False
+                "pageSize": {"width": 8.5, "height": 11.0},
+                "useDefaultFonts": False,
             },
             "personalityProfiles": personality_profiles,
             "selectedModel": None,
             "lastResumeUsed": None,
-            "last_personality_profile_used": None
+            "last_personality_profile_used": None,
         },
         "formDefaults": {
             "companyName": "",
@@ -111,10 +103,10 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             "tone": "Professional",
             "address": "",
             "phoneNumber": "",
-            "resume": ""
-        }
+            "resume": "",
+        },
     }
-    
+
     # Deep merge: start with defaults, then overlay provided preferences
     def deep_merge(default: dict, provided: dict) -> dict:
         """Recursively merge provided dict into default dict"""
@@ -125,11 +117,11 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             else:
                 result[key] = value
         return result
-    
+
     final_preferences = deep_merge(default_preferences, preferences)
     # Ensure personalityProfiles is set (in case it was overwritten)
     final_preferences["appSettings"]["personalityProfiles"] = personality_profiles
-    
+
     # Build user document
     user_doc = {
         "name": user_data.name,
@@ -143,13 +135,8 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "passwordChangedAt": None,
         "avatarUrl": None,
         "phone": user_data.phone,
-        "address": user_data.address or {
-            "street": None,
-            "city": None,
-            "state": None,
-            "zip": None,
-            "country": None
-        },
+        "address": user_data.address
+        or {"street": None, "city": None, "state": None, "zip": None, "country": None},
         "dateCreated": datetime.utcnow(),
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},  # Initialize empty LLM usage counts object
@@ -165,7 +152,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "generation_credits": 10,  # Default to 10 free generation credits for new users
         "max_credits": 10,  # Fixed maximum credits for free tier
     }
-    
+
     try:
         result = collection.insert_one(user_doc)
         user_doc["_id"] = result.inserted_id
@@ -175,14 +162,16 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         logger.error(f"Error registering user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to register user: {str(e)}"
+            detail=f"Failed to register user: {str(e)}",
         )
 
 
-def create_user_from_registration_data(registration_data: dict, is_email_verified: bool = False) -> UserResponse:
+def create_user_from_registration_data(
+    registration_data: dict, is_email_verified: bool = False
+) -> UserResponse:
     """
     Create a user from registration data (used when completing registration from Redis)
-    
+
     Args:
         registration_data: Dictionary containing user registration data
             - name: User's name
@@ -191,81 +180,74 @@ def create_user_from_registration_data(registration_data: dict, is_email_verifie
             - password: Already hashed password
             - preferences: User preferences (optional)
         is_email_verified: Whether email is already verified (default: False)
-        
+
     Returns:
         UserResponse object
-        
+
     Raises:
         HTTPException: If user creation fails
     """
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     # Check if user already exists
     existing_user = collection.find_one({"email": registration_data["email"]})
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User with this email already exists"
+            status_code=status.HTTP_409_CONFLICT, detail="User with this email already exists"
         )
-    
+
     # Extract preferences if provided
     preferences = registration_data.get("preferences", {})
     app_settings = preferences.get("appSettings", {})
     personality_profiles = app_settings.get("personalityProfiles", [])
-    
+
     # If no personality profiles provided or empty, create default profile
     if not personality_profiles or len(personality_profiles) == 0:
         default_profile = {
             "id": str(int(time.time() * 1000)),
             "name": "Professional",
-            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
+            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional.",
         }
         personality_profiles = [default_profile]
-        logger.info(f"Created default personality profile for new user: {registration_data['email']}")
-    
+        logger.info(
+            f"Created default personality profile for new user: {registration_data['email']}"
+        )
+
     # Ensure appSettings exists in preferences
     if "appSettings" not in preferences:
         preferences["appSettings"] = {}
-    
+
     # Set the personality profiles (either provided or default)
     preferences["appSettings"]["personalityProfiles"] = personality_profiles
-    
+
     # Merge provided preferences with defaults
     default_preferences = {
         "newsletterOptIn": False,
         "theme": "light",
         "appSettings": {
             "printProperties": {
-                "margins": {
-                    "top": 1.0,
-                    "right": 0.75,
-                    "bottom": 0.25,
-                    "left": 0.75
-                },
+                "margins": {"top": 1.0, "right": 0.75, "bottom": 0.25, "left": 0.75},
                 "fontFamily": "Georgia",
                 "fontSize": 11.0,
                 "lineHeight": 1.15,
-                "pageSize": {
-                    "width": 8.5,
-                    "height": 11.0
-                },
-                "useDefaultFonts": False
+                "pageSize": {"width": 8.5, "height": 11.0},
+                "useDefaultFonts": False,
             },
             "personalityProfiles": personality_profiles,
             "selectedModel": None,
             "lastResumeUsed": None,
-            "last_personality_profile_used": None
+            "last_personality_profile_used": None,
         },
         "formDefaults": {
             "companyName": "",
@@ -276,10 +258,10 @@ def create_user_from_registration_data(registration_data: dict, is_email_verifie
             "tone": "Professional",
             "address": "",
             "phoneNumber": "",
-            "resume": ""
-        }
+            "resume": "",
+        },
     }
-    
+
     # Deep merge: start with defaults, then overlay provided preferences
     def deep_merge(default: dict, provided: dict) -> dict:
         """Recursively merge provided dict into default dict"""
@@ -290,11 +272,11 @@ def create_user_from_registration_data(registration_data: dict, is_email_verifie
             else:
                 result[key] = value
         return result
-    
+
     final_preferences = deep_merge(default_preferences, preferences)
     # Ensure personalityProfiles is set
     final_preferences["appSettings"]["personalityProfiles"] = personality_profiles
-    
+
     # Build user document
     user_doc = {
         "name": registration_data["name"],
@@ -308,13 +290,8 @@ def create_user_from_registration_data(registration_data: dict, is_email_verifie
         "passwordChangedAt": None,
         "avatarUrl": None,
         "phone": registration_data.get("phone"),
-        "address": registration_data.get("address") or {
-            "street": None,
-            "city": None,
-            "state": None,
-            "zip": None,
-            "country": None
-        },
+        "address": registration_data.get("address")
+        or {"street": None, "city": None, "state": None, "zip": None, "country": None},
         "dateCreated": datetime.utcnow(),
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},
@@ -330,17 +307,19 @@ def create_user_from_registration_data(registration_data: dict, is_email_verifie
         "generation_credits": 10,  # Default to 10 free generation credits for new users
         "max_credits": 10,  # Fixed maximum credits for free tier
     }
-    
+
     try:
         result = collection.insert_one(user_doc)
         user_doc["_id"] = result.inserted_id
-        logger.info(f"User created from registration data: {registration_data['email']} (ID: {result.inserted_id})")
+        logger.info(
+            f"User created from registration data: {registration_data['email']} (ID: {result.inserted_id})"
+        )
         return user_doc_to_response(user_doc)
     except Exception as e:
         logger.error(f"Error creating user from registration data: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create user: {str(e)}"
+            detail=f"Failed to create user: {str(e)}",
         )
 
 
@@ -349,24 +328,23 @@ def get_user_by_id(user_id: str) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     logger.info(f"Querying MongoDB for user_id: {user_id} (ObjectId: {user_id_obj})")
     try:
         user = collection.find_one({"_id": user_id_obj})
@@ -374,21 +352,24 @@ def get_user_by_id(user_id: str) -> UserResponse:
             # Log collection info for debugging
             try:
                 total_users = collection.estimated_document_count()
-                logger.warning(f"User not found: {user_id}. Estimated total users in collection: {total_users}")
+                logger.warning(
+                    f"User not found: {user_id}. Estimated total users in collection: {total_users}"
+                )
                 # Try to find any user to verify collection access
                 sample_user = collection.find_one({})
                 if sample_user:
-                    logger.info(f"Sample user in collection: {sample_user.get('_id')}, email: {sample_user.get('email')}")
+                    logger.info(
+                        f"Sample user in collection: {sample_user.get('_id')}, email: {sample_user.get('email')}"
+                    )
                 else:
                     logger.warning("Collection is empty - no users found")
             except Exception as count_error:
                 logger.error(f"Could not count documents: {count_error}")
-            
+
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User not found with ID: {user_id}"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"User not found with ID: {user_id}"
             )
-        
+
         logger.info(f"Found user: {user.get('email')} (ID: {user.get('_id')})")
         return user_doc_to_response(user)
     except HTTPException:
@@ -396,8 +377,7 @@ def get_user_by_id(user_id: str) -> UserResponse:
     except Exception as e:
         logger.error(f"Error querying user {user_id}: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {str(e)}"
         )
 
 
@@ -406,23 +386,20 @@ def get_user_by_email(email: str) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     user = collection.find_one({"email": email})
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     return user_doc_to_response(user)
 
 
@@ -431,44 +408,49 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     # Build update document (only include fields that are provided)
     update_doc = {"dateUpdated": datetime.utcnow()}
-    
+
     # Check if we need to preserve existing personalityProfiles
     # Only fetch current user if personalityProfiles might be updated
     needs_profile_preservation = (
-        updates.preferences 
-        and isinstance(updates.preferences, dict) 
+        updates.preferences
+        and isinstance(updates.preferences, dict)
         and "appSettings" in updates.preferences
         and "personalityProfiles" in updates.preferences.get("appSettings", {})
     )
-    
+
     existing_profiles = []
     if needs_profile_preservation:
         # Only fetch current user if we need to preserve profiles
         current_user = collection.find_one({"_id": user_id_obj})
         if current_user:
-            existing_profiles = current_user.get("preferences", {}).get("appSettings", {}).get("personalityProfiles", [])
-            logger.debug(f"Current user has {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing personality profile(s)")
-    
+            existing_profiles = (
+                current_user.get("preferences", {})
+                .get("appSettings", {})
+                .get("personalityProfiles", [])
+            )
+            logger.debug(
+                f"Current user has {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing personality profile(s)"
+            )
+
     if updates.name is not None:
         update_doc["name"] = updates.name
     if updates.email is not None:
@@ -476,8 +458,7 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         existing = collection.find_one({"email": updates.email, "_id": {"$ne": user_id_obj}})
         if existing:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already in use by another user"
+                status_code=status.HTTP_409_CONFLICT, detail="Email already in use by another user"
             )
         update_doc["email"] = updates.email
     if updates.phone is not None:
@@ -504,28 +485,43 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                             # Update margins
                             if "margins" in print_props:
                                 for margin_key, margin_value in print_props["margins"].items():
-                                    update_doc[f"preferences.appSettings.printProperties.margins.{margin_key}"] = margin_value
+                                    update_doc[
+                                        f"preferences.appSettings.printProperties.margins.{margin_key}"
+                                    ] = margin_value
                             # Update other printProperties fields
-                            for prop_key in ["fontFamily", "fontSize", "lineHeight", "useDefaultFonts"]:
+                            for prop_key in [
+                                "fontFamily",
+                                "fontSize",
+                                "lineHeight",
+                                "useDefaultFonts",
+                            ]:
                                 if prop_key in print_props:
-                                    update_doc[f"preferences.appSettings.printProperties.{prop_key}"] = print_props[prop_key]
+                                    update_doc[
+                                        f"preferences.appSettings.printProperties.{prop_key}"
+                                    ] = print_props[prop_key]
                             # Update pageSize
                             if "pageSize" in print_props:
                                 for size_key, size_value in print_props["pageSize"].items():
-                                    update_doc[f"preferences.appSettings.printProperties.pageSize.{size_key}"] = size_value
+                                    update_doc[
+                                        f"preferences.appSettings.printProperties.pageSize.{size_key}"
+                                    ] = size_value
                     # Update personalityProfiles
                     # IMPORTANT: Only update if explicitly provided in the request
                     # If not provided, preserve existing profiles
                     if "personalityProfiles" in app_settings:
                         personality_profiles = app_settings["personalityProfiles"]
-                        logger.info(f"personalityProfiles provided in update request for user {user_id}: type={type(personality_profiles)}, value={personality_profiles}")
-                        
+                        logger.info(
+                            f"personalityProfiles provided in update request for user {user_id}: type={type(personality_profiles)}, value={personality_profiles}"
+                        )
+
                         if isinstance(personality_profiles, list):
                             # Only update if explicitly provided (even if empty array)
                             # If the array is empty, that means user wants to clear profiles
                             # If normalization filters out invalid profiles, preserve existing ones
-                            normalized_profiles = normalize_personality_profiles(personality_profiles)
-                            
+                            normalized_profiles = normalize_personality_profiles(
+                                personality_profiles
+                            )
+
                             # If frontend sent empty array, clear profiles (explicit intent)
                             if len(personality_profiles) == 0:
                                 update_doc["preferences.appSettings.personalityProfiles"] = []
@@ -542,28 +538,42 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                                 # Don't update - preserve existing profiles
                             # If we have valid normalized profiles, update them
                             elif len(normalized_profiles) > 0:
-                                update_doc["preferences.appSettings.personalityProfiles"] = normalized_profiles
+                                update_doc["preferences.appSettings.personalityProfiles"] = (
+                                    normalized_profiles
+                                )
                                 logger.info(
                                     f"Updated personalityProfiles for user {user_id}: {len(normalized_profiles)} profile(s) "
                                     f"(replaced {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing)"
                                 )
                         elif personality_profiles is None:
                             # Explicitly set to None - don't update, preserve existing
-                            logger.info(f"personalityProfiles set to None in update request for user {user_id}. Preserving existing profiles.")
+                            logger.info(
+                                f"personalityProfiles set to None in update request for user {user_id}. Preserving existing profiles."
+                            )
                         else:
-                            logger.error(f"Invalid personalityProfiles type for user {user_id}: {type(personality_profiles)}. Expected list. Preserving existing profiles.")
+                            logger.error(
+                                f"Invalid personalityProfiles type for user {user_id}: {type(personality_profiles)}. Expected list. Preserving existing profiles."
+                            )
                     else:
                         # personalityProfiles not in update request - preserve existing
-                        logger.debug(f"personalityProfiles not in update request for user {user_id}. Preserving {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing profile(s).")
+                        logger.debug(
+                            f"personalityProfiles not in update request for user {user_id}. Preserving {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing profile(s)."
+                        )
                     # Update selectedModel
                     if "selectedModel" in app_settings:
-                        update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]
+                        update_doc["preferences.appSettings.selectedModel"] = app_settings[
+                            "selectedModel"
+                        ]
                     # Update lastResumeUsed
                     if "lastResumeUsed" in app_settings:
-                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["lastResumeUsed"]
+                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings[
+                            "lastResumeUsed"
+                        ]
                     # Update last_personality_profile_used
                     if "last_personality_profile_used" in app_settings:
-                        update_doc["preferences.appSettings.last_personality_profile_used"] = app_settings["last_personality_profile_used"]
+                        update_doc["preferences.appSettings.last_personality_profile_used"] = (
+                            app_settings["last_personality_profile_used"]
+                        )
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]
@@ -576,22 +586,17 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         update_doc["avatarUrl"] = updates.avatarUrl
     if updates.last_llm_used is not None:
         update_doc["last_llm_used"] = updates.last_llm_used
-    
+
     try:
         # Use find_one_and_update to get the updated document in one operation
         # This reduces database round trips from 2 (update + find) to 1
         updated_user = collection.find_one_and_update(
-            {"_id": user_id_obj},
-            {"$set": update_doc},
-            return_document=ReturnDocument.AFTER
+            {"_id": user_id_obj}, {"$set": update_doc}, return_document=ReturnDocument.AFTER
         )
-        
+
         if not updated_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
         logger.info(f"User updated: {user_id}")
         return user_doc_to_response(updated_user)
     except HTTPException:
@@ -600,7 +605,7 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         logger.error(f"Error updating user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update user: {str(e)}"
+            detail=f"Failed to update user: {str(e)}",
         )
 
 
@@ -609,32 +614,28 @@ def delete_user(user_id: str) -> Dict:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     result = collection.delete_one({"_id": user_id_obj})
-    
+
     if result.deleted_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     logger.info(f"User deleted: {user_id}")
     return {"success": True, "message": "User deleted successfully"}
 
@@ -645,71 +646,84 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
         logger.error("Database connection unavailable when attempting login")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable. Please try again in a moment."
+            detail="Database connection unavailable. Please try again in a moment.",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         logger.error("Failed to get users collection")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     # Find user by email
     user = collection.find_one({"email": login_data.email})
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
-    
+
     # Check if user is active
     if not user.get("isActive", True):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive"
+            status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive"
         )
-    
+
     # Verify password
     hashed_password_str = user.get("hashedPassword", "")
     if not verify_password(login_data.password, hashed_password_str):
         # Increment failed login attempts
-        collection.update_one(
-            {"_id": user["_id"]},
-            {"$inc": {"failedLoginAttempts": 1}}
-        )
+        collection.update_one({"_id": user["_id"]}, {"$inc": {"failedLoginAttempts": 1}})
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
-    
+
     # Reset failed login attempts and update last login
     collection.update_one(
-        {"_id": user["_id"]},
-        {
-            "$set": {
-                "lastLogin": datetime.utcnow(),
-                "failedLoginAttempts": 0
-            }
-        }
+        {"_id": user["_id"]}, {"$set": {"lastLogin": datetime.utcnow(), "failedLoginAttempts": 0}}
     )
-    
+
     logger.info(f"User logged in: {login_data.email}")
-    
+
     # Generate JWT tokens
     user_id = str(user["_id"])
     token_data = {"sub": user_id, "email": user.get("email", "")}
-    access_token = create_access_token(data=token_data)
-    refresh_token = create_refresh_token(data=token_data)
-    
+
+    try:
+        access_token = create_access_token(data=token_data)
+        refresh_token = create_refresh_token(data=token_data)
+
+        # Verify tokens were created successfully
+        if not access_token or not refresh_token:
+            logger.error(
+                f"Token creation returned None or empty string for user {login_data.email}"
+            )
+            logger.error(f"Access token: {access_token}, Refresh token: {refresh_token}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate authentication tokens",
+            )
+
+        logger.info(f"Tokens created successfully for user {login_data.email}")
+        logger.info(
+            f"Access token length: {len(access_token)}, Refresh token length: {len(refresh_token)}"
+        )
+
+    except Exception as e:
+        logger.error(f"Error creating tokens for user {login_data.email}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate authentication tokens: {str(e)}",
+        )
+
     return UserLoginResponse(
         success=True,
         user=user_doc_to_response(user),
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
-        message="Login successful"
+        message="Login successful",
     )
 
 
@@ -718,43 +732,40 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
     Increment the usage count for a specific LLM in the user's record.
     If the LLM doesn't exist in llm_counts, add it and set count to 1.
     Also updates the last_llm_used field to track the most recently used LLM.
-    
+
     Args:
         user_id: User ID
         llm_name: Name of the LLM
-        
+
     Returns:
         True if successful, False otherwise
     """
     if not is_connected():
         logger.warning("Database connection unavailable. Cannot update LLM usage count.")
         return False
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         logger.warning("Failed to access users collection. Cannot update LLM usage count.")
         return False
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         logger.warning(f"Invalid user ID format: {user_id}")
         return False
-    
+
     try:
         # First, ensure llm_counts field exists
         user = collection.find_one({"_id": user_id_obj})
         if not user:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
             return False
-        
+
         # Initialize llm_counts if it doesn't exist
         if "llm_counts" not in user:
-            collection.update_one(
-                {"_id": user_id_obj},
-                {"$set": {"llm_counts": {}}}
-            )
-        
+            collection.update_one({"_id": user_id_obj}, {"$set": {"llm_counts": {}}})
+
         # Use MongoDB's $inc operator to increment the count
         # Also update selectedModel to keep it in sync with last_llm_used
         result = collection.update_one(
@@ -764,11 +775,11 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
                 "$set": {
                     "last_llm_used": llm_name,
                     "preferences.appSettings.selectedModel": llm_name,  # Auto-update selectedModel to match last_llm_used
-                    "dateUpdated": datetime.utcnow()
-                }
-            }
+                    "dateUpdated": datetime.utcnow(),
+                },
+            },
         )
-        
+
         if result.matched_count > 0:
             updated_user = collection.find_one({"_id": user_id_obj})
             if updated_user and "llm_counts" in updated_user:
@@ -776,12 +787,14 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
                 if count == 1:
                     logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
                 else:
-                    logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
+                    logger.debug(
+                        f"Incremented LLM count for {llm_name} to {count} for user {user_id}"
+                    )
             return True
         else:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
             return False
-            
+
     except Exception as e:
         logger.error(f"Error incrementing LLM usage count: {e}")
         return False
@@ -791,69 +804,70 @@ def decrement_generation_credits(user_id: str) -> bool:
     """
     Decrement generation_credits for a user if they have no active subscription.
     Only decrements if credits > 0.
-    
+
     Args:
         user_id: User ID
-        
+
     Returns:
         True if credits were decremented, False otherwise (including if user has subscription)
     """
     if not is_connected():
         logger.warning("Database connection unavailable. Cannot decrement generation credits.")
         return False
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         logger.warning("Failed to access users collection. Cannot decrement generation credits.")
         return False
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         logger.warning(f"Invalid user ID format: {user_id}")
         return False
-    
+
     try:
         user = collection.find_one({"_id": user_id_obj})
         if not user:
             logger.warning(f"User {user_id} not found. Cannot decrement generation credits.")
             return False
-        
+
         # Check subscription status - only decrement if user has no subscription (status is "free")
         subscription_status = user.get("subscriptionStatus", "free")
         if subscription_status != "free":
-            logger.debug(f"User {user_id} has subscription status '{subscription_status}'. Skipping credit decrement.")
+            logger.debug(
+                f"User {user_id} has subscription status '{subscription_status}'. Skipping credit decrement."
+            )
             return False
-        
+
         # Get current credits (default to 0 if not set)
         current_credits = user.get("generation_credits", 0)
-        
+
         # Only decrement if credits > 0
         if current_credits <= 0:
-            logger.debug(f"User {user_id} has no generation credits ({current_credits}). Cannot decrement.")
+            logger.debug(
+                f"User {user_id} has no generation credits ({current_credits}). Cannot decrement."
+            )
             return False
-        
+
         # Decrement credits
         result = collection.update_one(
             {"_id": user_id_obj},
-            {
-                "$inc": {"generation_credits": -1},
-                "$set": {
-                    "dateUpdated": datetime.utcnow()
-                }
-            }
+            {"$inc": {"generation_credits": -1}, "$set": {"dateUpdated": datetime.utcnow()}},
         )
-        
+
         if result.matched_count > 0:
             updated_user = collection.find_one({"_id": user_id_obj})
             if updated_user:
                 new_credits = updated_user.get("generation_credits", 0)
-                logger.info(f"Decremented generation credits for user {user_id}: {current_credits} -> {new_credits}")
+                logger.info(
+                    f"Decremented generation credits for user {user_id}: {current_credits} -> {new_credits}"
+                )
             return True
         else:
             logger.warning(f"User {user_id} not found. Cannot decrement generation credits.")
             return False
-            
+
     except Exception as e:
         logger.error(f"Error decrementing generation credits: {e}")
         return False
