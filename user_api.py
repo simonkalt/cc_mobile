@@ -1,6 +1,7 @@
 """
 User API endpoints for registration and CRUD operations
 """
+
 import bcrypt
 from fastapi import HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -110,19 +111,22 @@ class UserLoginResponse(BaseModel):
     success: bool
     user: Optional[UserResponse] = None
     message: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    token_type: str = "bearer"
 
 
 # Helper Functions
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt"""
     salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed.decode('utf-8')
+    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
     """Verify a password against a hash"""
-    return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
+    return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 def normalize_personality_profile(profile: dict) -> dict:
@@ -132,11 +136,11 @@ def normalize_personality_profile(profile: dict) -> dict:
     """
     if not isinstance(profile, dict):
         return None
-    
+
     return {
         "id": profile.get("id", ""),
         "name": profile.get("name", ""),
-        "description": profile.get("description", "")
+        "description": profile.get("description", ""),
     }
 
 
@@ -147,13 +151,13 @@ def normalize_personality_profiles(profiles: list) -> list:
     """
     if not isinstance(profiles, list):
         return []
-    
+
     normalized = []
     for profile in profiles:
         normalized_profile = normalize_personality_profile(profile)
         if normalized_profile and normalized_profile.get("id") and normalized_profile.get("name"):
             normalized.append(normalized_profile)
-    
+
     return normalized
 
 
@@ -163,23 +167,24 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
     # Create a copy to avoid mutating the original document
     import copy
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     preferences = user_doc.get("preferences")
     if preferences and isinstance(preferences, dict):
         # Deep copy preferences to avoid mutating original
         preferences = copy.deepcopy(preferences)
-        
+
         # Ensure appSettings exists
         if "appSettings" not in preferences:
             preferences["appSettings"] = {}
-        
+
         app_settings = preferences.get("appSettings", {})
         if isinstance(app_settings, dict):
             # Always ensure personalityProfiles exists and is normalized
             # Get existing profiles or default to empty list
             existing_profiles = app_settings.get("personalityProfiles", [])
-            
+
             # Log for debugging (especially on Render)
             if not existing_profiles:
                 logger.debug(
@@ -190,16 +195,16 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
                 logger.debug(
                     f"User {user_doc.get('_id')}: Found {len(existing_profiles) if isinstance(existing_profiles, list) else 'N/A'} personality profile(s)"
                 )
-            
+
             # Normalize personalityProfiles to ensure structure is {"id", "name", "description"} only
             # This will return an empty list if profiles is None or invalid
             normalized_profiles = normalize_personality_profiles(
                 existing_profiles if isinstance(existing_profiles, list) else []
             )
-            
+
             # Always set personalityProfiles (even if empty) to ensure it's present in response
             app_settings["personalityProfiles"] = normalized_profiles
-            
+
             logger.debug(
                 f"User {user_doc.get('_id')}: Returning {len(normalized_profiles)} normalized personality profile(s)"
             )
@@ -215,12 +220,8 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
             f"User {user_doc.get('_id')}: preferences is {type(preferences)}. "
             f"Initializing with empty personalityProfiles."
         )
-        preferences = {
-            "appSettings": {
-                "personalityProfiles": []
-            }
-        }
-    
+        preferences = {"appSettings": {"personalityProfiles": []}}
+
     return UserResponse(
         id=str(user_doc["_id"]),
         name=user_doc.get("name", ""),
@@ -236,7 +237,7 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         dateUpdated=user_doc.get("dateUpdated"),
         lastLogin=user_doc.get("lastLogin"),
         llm_counts=user_doc.get("llm_counts"),
-        last_llm_used=user_doc.get("last_llm_used")
+        last_llm_used=user_doc.get("last_llm_used"),
     )
 
 
@@ -246,27 +247,26 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     # Check if user already exists
     existing_user = collection.find_one({"email": user_data.email})
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User with this email already exists"
+            status_code=status.HTTP_409_CONFLICT, detail="User with this email already exists"
         )
-    
+
     # Hash password
     hashed_password = hash_password(user_data.password)
-    
+
     # Build user document
     user_doc = {
         "name": user_data.name,
@@ -280,41 +280,29 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "passwordChangedAt": None,
         "avatarUrl": None,
         "phone": user_data.phone,
-        "address": user_data.address or {
-            "street": None,
-            "city": None,
-            "state": None,
-            "zip": None,
-            "country": None
-        },
+        "address": user_data.address
+        or {"street": None, "city": None, "state": None, "zip": None, "country": None},
         "dateCreated": datetime.utcnow(),
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},  # Initialize empty LLM usage counts object
         "last_llm_used": None,  # Initialize last LLM used field
-        "preferences": user_data.preferences or {
+        "preferences": user_data.preferences
+        or {
             "newsletterOptIn": False,
             "theme": "light",
             "appSettings": {
                 "printProperties": {
-                    "margins": {
-                        "top": 1.0,
-                        "right": 0.75,
-                        "bottom": 0.25,
-                        "left": 0.75
-                    },
+                    "margins": {"top": 1.0, "right": 0.75, "bottom": 0.25, "left": 0.75},
                     "fontFamily": "Georgia",
                     "fontSize": 11.0,
                     "lineHeight": 1.15,
-                    "pageSize": {
-                        "width": 8.5,
-                        "height": 11.0
-                    },
-                    "useDefaultFonts": False
+                    "pageSize": {"width": 8.5, "height": 11.0},
+                    "useDefaultFonts": False,
                 },
                 "personalityProfiles": [],
                 "selectedModel": None,
                 "lastResumeUsed": None,
-                "last_personality_profile_used": None
+                "last_personality_profile_used": None,
             },
             # Form field defaults - ensure all form fields start empty for new users
             "formDefaults": {
@@ -326,11 +314,11 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
                 "tone": "Professional",
                 "address": "",
                 "phoneNumber": "",
-                "resume": ""
-            }
-        }
+                "resume": "",
+            },
+        },
     }
-    
+
     try:
         result = collection.insert_one(user_doc)
         user_doc["_id"] = result.inserted_id
@@ -340,7 +328,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         logger.error(f"Error registering user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to register user: {str(e)}"
+            detail=f"Failed to register user: {str(e)}",
         )
 
 
@@ -349,31 +337,27 @@ def get_user_by_id(user_id: str) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     user = collection.find_one({"_id": user_id_obj})
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     return user_doc_to_response(user)
 
 
@@ -382,23 +366,20 @@ def get_user_by_email(email: str) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     user = collection.find_one({"email": email})
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     return user_doc_to_response(user)
 
 
@@ -407,27 +388,26 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     # Build update document (only include fields that are provided)
     update_doc = {"dateUpdated": datetime.utcnow()}
-    
+
     if updates.name is not None:
         update_doc["name"] = updates.name
     if updates.email is not None:
@@ -435,8 +415,7 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         existing = collection.find_one({"email": updates.email, "_id": {"$ne": user_id_obj}})
         if existing:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already in use by another user"
+                status_code=status.HTTP_409_CONFLICT, detail="Email already in use by another user"
             )
         update_doc["email"] = updates.email
     if updates.phone is not None:
@@ -466,15 +445,26 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                             # Update margins
                             if "margins" in print_props:
                                 for margin_key, margin_value in print_props["margins"].items():
-                                    update_doc[f"preferences.appSettings.printProperties.margins.{margin_key}"] = margin_value
+                                    update_doc[
+                                        f"preferences.appSettings.printProperties.margins.{margin_key}"
+                                    ] = margin_value
                             # Update other printProperties fields
-                            for prop_key in ["fontFamily", "fontSize", "lineHeight", "useDefaultFonts"]:
+                            for prop_key in [
+                                "fontFamily",
+                                "fontSize",
+                                "lineHeight",
+                                "useDefaultFonts",
+                            ]:
                                 if prop_key in print_props:
-                                    update_doc[f"preferences.appSettings.printProperties.{prop_key}"] = print_props[prop_key]
+                                    update_doc[
+                                        f"preferences.appSettings.printProperties.{prop_key}"
+                                    ] = print_props[prop_key]
                             # Update pageSize
                             if "pageSize" in print_props:
                                 for size_key, size_value in print_props["pageSize"].items():
-                                    update_doc[f"preferences.appSettings.printProperties.pageSize.{size_key}"] = size_value
+                                    update_doc[
+                                        f"preferences.appSettings.printProperties.pageSize.{size_key}"
+                                    ] = size_value
                     # Update personalityProfiles
                     # Only update if explicitly provided and is a valid list
                     # IMPORTANT: Only update if personalityProfiles is explicitly in the request
@@ -491,64 +481,96 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                                     normalized_profile = {
                                         "id": profile.get("id", ""),
                                         "name": profile.get("name", ""),
-                                        "description": profile.get("description", "")
+                                        "description": profile.get("description", ""),
                                     }
                                     # Validate required fields
                                     if not normalized_profile["id"]:
-                                        logger.warning(f"Profile at index {idx} missing 'id' field, skipping")
+                                        logger.warning(
+                                            f"Profile at index {idx} missing 'id' field, skipping"
+                                        )
                                         continue
                                     if not normalized_profile["name"]:
-                                        logger.warning(f"Profile at index {idx} missing 'name' field, skipping")
+                                        logger.warning(
+                                            f"Profile at index {idx} missing 'name' field, skipping"
+                                        )
                                         continue
                                     if not normalized_profile["description"]:
-                                        logger.warning(f"Profile at index {idx} missing 'description' field, using empty string")
+                                        logger.warning(
+                                            f"Profile at index {idx} missing 'description' field, using empty string"
+                                        )
                                     normalized_profiles.append(normalized_profile)
                                 else:
-                                    logger.warning(f"Profile at index {idx} is not a dict, skipping: {type(profile)}")
-                            
+                                    logger.warning(
+                                        f"Profile at index {idx} is not a dict, skipping: {type(profile)}"
+                                    )
+
                             # Check if user has existing profiles before clearing
                             if len(normalized_profiles) == 0:
                                 # Get current user to check existing profiles
                                 try:
                                     current_user = collection.find_one({"_id": user_id_obj})
                                     if current_user:
-                                        existing_profiles = current_user.get("preferences", {}).get("appSettings", {}).get("personalityProfiles", [])
+                                        existing_profiles = (
+                                            current_user.get("preferences", {})
+                                            .get("appSettings", {})
+                                            .get("personalityProfiles", [])
+                                        )
                                         if existing_profiles and len(existing_profiles) > 0:
                                             logger.warning(
                                                 f"⚠️ WARNING: Updating personalityProfiles to empty array for user {user_id}. "
                                                 f"This will DELETE {len(existing_profiles)} existing profile(s): {[p.get('name', 'Unknown') for p in existing_profiles if isinstance(p, dict)]}"
                                             )
                                         else:
-                                            logger.info(f"Setting personalityProfiles to empty array for user {user_id} (no existing profiles to delete)")
+                                            logger.info(
+                                                f"Setting personalityProfiles to empty array for user {user_id} (no existing profiles to delete)"
+                                            )
                                 except Exception as e:
-                                    logger.warning(f"Could not check existing profiles before update: {e}")
-                            
+                                    logger.warning(
+                                        f"Could not check existing profiles before update: {e}"
+                                    )
+
                             # Save normalized profiles (only id, name, description)
                             if len(normalized_profiles) > 0:
-                                update_doc["preferences.appSettings.personalityProfiles"] = normalized_profiles
-                                logger.info(f"Updated personalityProfiles for user {user_id}: {len(normalized_profiles)} profile(s) saved with structure {{id, name, description}}")
+                                update_doc["preferences.appSettings.personalityProfiles"] = (
+                                    normalized_profiles
+                                )
+                                logger.info(
+                                    f"Updated personalityProfiles for user {user_id}: {len(normalized_profiles)} profile(s) saved with structure {{id, name, description}}"
+                                )
                             else:
                                 # If all profiles were invalid, only update if explicitly clearing
                                 if len(personality_profiles) == 0:
                                     update_doc["preferences.appSettings.personalityProfiles"] = []
                                     logger.info(f"Cleared personalityProfiles for user {user_id}")
                                 else:
-                                    logger.warning(f"All personalityProfiles were invalid for user {user_id}. Not updating to preserve existing profiles.")
+                                    logger.warning(
+                                        f"All personalityProfiles were invalid for user {user_id}. Not updating to preserve existing profiles."
+                                    )
                         elif personality_profiles is None:
                             # If explicitly set to None, don't update (preserve existing)
-                            logger.warning(f"personalityProfiles set to None in update request for user {user_id}. Ignoring to preserve existing profiles.")
+                            logger.warning(
+                                f"personalityProfiles set to None in update request for user {user_id}. Ignoring to preserve existing profiles."
+                            )
                         else:
                             # Invalid type - log error but don't update
-                            logger.error(f"Invalid personalityProfiles type for user {user_id}: {type(personality_profiles)}. Expected list. Ignoring update.")
+                            logger.error(
+                                f"Invalid personalityProfiles type for user {user_id}: {type(personality_profiles)}. Expected list. Ignoring update."
+                            )
                     # Update selectedModel
                     if "selectedModel" in app_settings:
-                        update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]
+                        update_doc["preferences.appSettings.selectedModel"] = app_settings[
+                            "selectedModel"
+                        ]
                     # Update lastResumeUsed
                     if "lastResumeUsed" in app_settings:
-                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["lastResumeUsed"]
+                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings[
+                            "lastResumeUsed"
+                        ]
                     # Update last_personality_profile_used
                     if "last_personality_profile_used" in app_settings:
-                        update_doc["preferences.appSettings.last_personality_profile_used"] = app_settings["last_personality_profile_used"]
+                        update_doc["preferences.appSettings.last_personality_profile_used"] = (
+                            app_settings["last_personality_profile_used"]
+                        )
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]
@@ -561,19 +583,13 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         update_doc["avatarUrl"] = updates.avatarUrl
     if updates.last_llm_used is not None:
         update_doc["last_llm_used"] = updates.last_llm_used
-    
+
     try:
-        result = collection.update_one(
-            {"_id": user_id_obj},
-            {"$set": update_doc}
-        )
-        
+        result = collection.update_one({"_id": user_id_obj}, {"$set": update_doc})
+
         if result.matched_count == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
         # Return updated user
         updated_user = collection.find_one({"_id": user_id_obj})
         logger.info(f"User updated: {user_id}")
@@ -584,9 +600,8 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         logger.error(f"Error updating user: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update user: {str(e)}"
+            detail=f"Failed to update user: {str(e)}",
         )
-
 
 
 def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
@@ -599,32 +614,29 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
     if not is_connected():
         logger.warning("Database connection unavailable. Cannot update LLM usage count.")
         return False
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         logger.warning("Failed to access users collection. Cannot update LLM usage count.")
         return False
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         logger.warning(f"Invalid user ID format: {user_id}")
         return False
-    
+
     try:
         # First, ensure llm_counts field exists
         user = collection.find_one({"_id": user_id_obj})
         if not user:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
             return False
-        
+
         # Initialize llm_counts if it doesn't exist
         if "llm_counts" not in user:
-            collection.update_one(
-                {"_id": user_id_obj},
-                {"$set": {"llm_counts": {}}}
-            )
-        
+            collection.update_one({"_id": user_id_obj}, {"$set": {"llm_counts": {}}})
+
         # Use MongoDB's $inc operator to increment the count
         # If the field doesn't exist, MongoDB will create it with value 1
         # Also update last_llm_used field to track the most recently used LLM
@@ -632,13 +644,10 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
             {"_id": user_id_obj},
             {
                 "$inc": {f"llm_counts.{llm_name}": 1},
-                "$set": {
-                    "last_llm_used": llm_name,
-                    "dateUpdated": datetime.utcnow()
-                }
-            }
+                "$set": {"last_llm_used": llm_name, "dateUpdated": datetime.utcnow()},
+            },
         )
-        
+
         if result.matched_count > 0:
             # Verify the increment worked (check if field was created or incremented)
             updated_user = collection.find_one({"_id": user_id_obj})
@@ -647,7 +656,9 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
                 if count == 1:
                     logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
                 else:
-                    logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
+                    logger.debug(
+                        f"Incremented LLM count for {llm_name} to {count} for user {user_id}"
+                    )
                 # Log last_llm_used update
                 if updated_user.get("last_llm_used") == llm_name:
                     logger.debug(f"Updated last_llm_used to {llm_name} for user {user_id}")
@@ -655,42 +666,39 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
         else:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
             return False
-            
+
     except Exception as e:
         logger.error(f"Error incrementing LLM usage count: {e}")
         return False
+
 
 def delete_user(user_id: str) -> dict:
     """Delete user"""
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     try:
         user_id_obj = ObjectId(user_id)
     except Exception:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid user ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
         )
-    
+
     result = collection.delete_one({"_id": user_id_obj})
-    
+
     if result.deleted_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     logger.info(f"User deleted: {user_id}")
     return {"success": True, "message": "User deleted successfully"}
 
@@ -700,68 +708,65 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
+            detail="Database connection unavailable",
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to access users collection"
+            detail="Failed to access users collection",
         )
-    
+
     # Find user by email
     user = collection.find_one({"email": login_data.email})
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
-    
+
     # Check if user is active
     if not user.get("isActive", True):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive"
+            status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive"
         )
-    
+
     # Verify password
     hashed_password = user.get("hashedPassword", "")
     if not verify_password(login_data.password, hashed_password):
         # Increment failed login attempts
-        collection.update_one(
-            {"_id": user["_id"]},
-            {"$inc": {"failedLoginAttempts": 1}}
-        )
+        collection.update_one({"_id": user["_id"]}, {"$inc": {"failedLoginAttempts": 1}})
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
-    
+
     # Reset failed login attempts and update last login
     collection.update_one(
-        {"_id": user["_id"]},
-        {
-            "$set": {
-                "lastLogin": datetime.utcnow(),
-                "failedLoginAttempts": 0
-            }
-        }
+        {"_id": user["_id"]}, {"$set": {"lastLogin": datetime.utcnow(), "failedLoginAttempts": 0}}
     )
-    
-    # Ensure user's S3 folder exists (create if it doesn't)
+
     user_id = str(user["_id"])
+
+    # Generate JWT tokens (required for frontend auth)
     try:
-        # Import the S3 function from main module
-        # We'll handle this in the endpoint to avoid circular imports
-        pass
+        from app.utils.jwt import create_access_token, create_refresh_token
+
+        token_data = {"sub": user_id, "email": user.get("email", "")}
+        access_token = create_access_token(data=token_data)
+        refresh_token = create_refresh_token(data=token_data)
     except Exception as e:
-        logger.warning(f"Could not ensure S3 folder during login: {e}")
-    
+        logger.error(f"Failed to create JWT tokens for login: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate authentication tokens",
+        )
+
     logger.info(f"User logged in: {login_data.email}")
     return UserLoginResponse(
         success=True,
         user=user_doc_to_response(user),
-        message="Login successful"
+        message="Login successful",
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
     )
-
