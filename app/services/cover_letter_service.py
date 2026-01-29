@@ -897,15 +897,16 @@ Please incorporate these instructions while maintaining consistency with all oth
                             )
                             styled_html = raw_html
                         else:
-                            # Get print properties with defaults
+                            # Get print properties with defaults (use 11 to match user prefs default)
                             font_family = print_props.get("fontFamily", "Times New Roman")
-                            font_size = print_props.get("fontSize", 12)
-                            line_height = print_props.get("lineHeight", 1.6)
+                            font_size = print_props.get("fontSize", 11)
+                            line_height = print_props.get("lineHeight", 1.15)
 
-                            # Wrap HTML with CSS styling using inline styles
-                            # Escape any quotes in font family name
+                            # Wrap HTML with CSS so user's font size wins. LLM often outputs
+                            # inline font-size (e.g. 14pt/16pt); we force all descendants to
+                            # inherit the wrapper's size so settings like 11pt are respected.
                             font_family_escaped = font_family.replace("'", "\\'")
-                            styled_html = f"""<div style="font-family: '{font_family_escaped}', serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
+                            styled_html = f"""<div class="user-print-settings" style="font-family: '{font_family_escaped}', serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;"><style>.user-print-settings *{{font-size:inherit !important;}}</style>{raw_html}</div>"""
                             logger.info(
                                 f"Applied print settings to HTML: fontFamily={font_family}, fontSize={font_size}pt, lineHeight={line_height}"
                             )

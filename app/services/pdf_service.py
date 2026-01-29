@@ -1,6 +1,7 @@
 """
 PDF generation service
 """
+
 import logging
 import base64
 import re
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Try to import PDF generation libraries
 try:
     import markdown
+
     PDF_GENERATION_AVAILABLE = True
 except ImportError:
     PDF_GENERATION_AVAILABLE = False
@@ -20,6 +22,7 @@ except ImportError:
 
 try:
     from weasyprint import HTML
+
     WEASYPRINT_AVAILABLE = True
 except (ImportError, OSError) as e:
     WEASYPRINT_AVAILABLE = False
@@ -36,14 +39,14 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         print_properties: Dictionary containing print configuration:
             - margins: dict with top, right, bottom, left (in inches)
             - fontFamily: str (default: "Times New Roman")
-            - fontSize: float (default: 12)
-            - lineHeight: float (default: 1.6)
+            - fontSize: float (default: 11) – used as-is, no scaling
+            - lineHeight: float (default: 1.15)
             - pageSize: dict with width, height (in inches, default: 8.5 x 11)
             - useDefaultFonts: bool (default: False)
 
     Returns:
         Base64-encoded PDF data as a string (without data URI prefix)
-        
+
     Raises:
         ImportError: If required libraries are not installed
         Exception: If PDF generation fails
@@ -56,26 +59,26 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
     try:
         # Normalize markdown content: replace escaped newlines with actual newlines
         normalized_markdown = markdown_content.replace("\\n", "\n").replace("\\r", "\r")
-        
+
         # Normalize line endings: convert \r\n to \n, then remove standalone \r
         normalized_markdown = normalized_markdown.replace("\r\n", "\n").replace("\r", "\n")
-        
+
         # Convert markdown to HTML
         html_content = markdown.markdown(
             normalized_markdown, extensions=["extra", "codehilite", "tables", "nl2br"]
         )
-        
+
         # Strip unwanted \r and \n characters from HTML output
         # Remove carriage returns and normalize line feeds to spaces (HTML doesn't need them)
         html_content = html_content.replace("\r", "").replace("\n", " ")
         # Collapse multiple spaces to single space
-        html_content = re.sub(r' +', ' ', html_content)
+        html_content = re.sub(r" +", " ", html_content)
 
-        # Extract print properties with defaults
+        # Extract print properties with defaults (match user settings; use values as-is, no scaling)
         margins = print_properties.get("margins", {})
         font_family = print_properties.get("fontFamily", "Times New Roman")
-        font_size = print_properties.get("fontSize", 12)
-        line_height = print_properties.get("lineHeight", 1.6)
+        font_size = print_properties.get("fontSize", 11)
+        line_height = print_properties.get("lineHeight", 1.15)
         page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
         use_default_fonts = print_properties.get("useDefaultFonts", False)
 
@@ -187,12 +190,9 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         # Encode to base64
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-        logger.info(
-            f"Successfully generated PDF from Markdown ({len(pdf_bytes)} bytes)"
-        )
+        logger.info(f"Successfully generated PDF from Markdown ({len(pdf_bytes)} bytes)")
         return pdf_base64
 
     except Exception as e:
         logger.error(f"Error generating PDF from Markdown: {str(e)}")
         raise Exception(f"Failed to generate PDF: {str(e)}")
-
