@@ -39,8 +39,8 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         print_properties: Dictionary containing print configuration:
             - margins: dict with top, right, bottom, left (in inches)
             - fontFamily: str (default: "Times New Roman")
-            - fontSize: float (default: 11) – used as-is, no scaling
-            - lineHeight: float (default: 1.15)
+            - fontSize: float (default: 12)
+            - lineHeight: float (default: 1.6)
             - pageSize: dict with width, height (in inches, default: 8.5 x 11)
             - useDefaultFonts: bool (default: False)
 
@@ -74,11 +74,11 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         # Collapse multiple spaces to single space
         html_content = re.sub(r" +", " ", html_content)
 
-        # Extract print properties with defaults (match user settings; use values as-is, no scaling)
+        # Extract print properties with defaults
         margins = print_properties.get("margins", {})
         font_family = print_properties.get("fontFamily", "Times New Roman")
-        font_size = print_properties.get("fontSize", 11)
-        line_height = print_properties.get("lineHeight", 1.15)
+        font_size = print_properties.get("fontSize", 12)
+        line_height = print_properties.get("lineHeight", 1.6)
         page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
         use_default_fonts = print_properties.get("useDefaultFonts", False)
 
