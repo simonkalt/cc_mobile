@@ -36,9 +36,8 @@ except Exception as e:
     print(f"⚠️  Warning: Error loading .env file: {e}")
     print("Continuing with environment variables from system...")
 
-# Import MongoDB client from new structure
-from app.db.mongodb import connect_to_mongodb, get_collection, close_mongodb_connection, is_connected
-from app.core.config import settings
+# Import MongoDB client
+from mongodb_client import connect_to_mongodb, get_collection, close_mongodb_connection, is_connected
 
 # Collection name for users
 USERS_COLLECTION = "users"
