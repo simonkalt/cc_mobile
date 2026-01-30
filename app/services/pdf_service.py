@@ -5,7 +5,7 @@ PDF generation service
 import logging
 import base64
 import re
-from typing import Dict
+from typing import Dict, Optional
 
 from app.core.config import settings
 
@@ -195,4 +195,72 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
 
     except Exception as e:
         logger.error(f"Error generating PDF from Markdown: {str(e)}")
+        raise Exception(f"Failed to generate PDF: {str(e)}")
+
+
+def generate_pdf_from_html(
+    html_content: str,
+    page_options: Optional[Dict] = None,
+) -> str:
+    """
+    Generate a PDF from HTML content (e.g. frontend-modified Print Preview HTML).
+    Uses WeasyPrint. The HTML is wrapped in a minimal document with optional @page styling.
+
+    Args:
+        html_content: The HTML fragment or full document to convert (placed inside body).
+        page_options: Optional dict with:
+            - margins: dict with top, right, bottom, left (in inches)
+            - pageSize: dict with width, height (in inches, default 8.5 x 11)
+
+    Returns:
+        Base64-encoded PDF data as a string (without data URI prefix).
+
+    Raises:
+        ImportError: If weasyprint is not installed.
+        Exception: If PDF generation fails.
+    """
+    if not WEASYPRINT_AVAILABLE:
+        raise ImportError("weasyprint library is not installed. Cannot generate PDF.")
+
+    page_options = page_options or {}
+    margins = page_options.get("margins", {})
+    page_size = page_options.get("pageSize", {"width": 8.5, "height": 11.0})
+
+    margin_top = margins.get("top", 1.0)
+    margin_right = margins.get("right", 0.75)
+    margin_bottom = margins.get("bottom", 0.75)
+    margin_left = margins.get("left", 0.75)
+    width_in = page_size.get("width", 8.5)
+    height_in = page_size.get("height", 11.0)
+
+    # Wrap frontend HTML in a minimal document with @page for WeasyPrint
+    wrapper = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page {{
+            size: {width_in}in {height_in}in;
+            margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
+        }}
+        body {{
+            margin: 0;
+            padding: 0;
+        }}
+    </style>
+</head>
+<body>
+{html_content}
+</body>
+</html>
+"""
+
+    try:
+        pdf_bytes = HTML(string=wrapper).write_pdf()
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        logger.info(f"Successfully generated PDF from HTML ({len(pdf_bytes)} bytes)")
+        return pdf_base64
+    except Exception as e:
+        logger.error(f"Error generating PDF from HTML: {str(e)}")
         raise Exception(f"Failed to generate PDF: {str(e)}")

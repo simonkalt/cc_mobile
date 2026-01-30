@@ -32,3 +32,19 @@ class GeneratePDFRequest(BaseModel):
     printProperties: PrintProperties
     user_id: Optional[str] = None
     user_email: Optional[str] = None
+
+
+class PageOptions(BaseModel):
+    """Optional page layout for HTML-to-PDF (Print Preview). Omitted fields use defaults."""
+
+    margins: Optional[Margins] = None
+    pageSize: Optional[PageSize] = None
+
+
+class PrintPreviewPDFRequest(BaseModel):
+    """Request body for Print Preview: convert frontend-modified HTML to PDF."""
+
+    htmlContent: str
+    pageOptions: Optional[PageOptions] = None
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
