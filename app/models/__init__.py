@@ -32,7 +32,6 @@ from app.models.pdf import (
     Margins,
     PageSize,
     GeneratePDFRequest,
-    PageOptions,
     PrintPreviewPDFRequest,
 )
 
@@ -66,7 +65,6 @@ __all__ = [
     "Margins",
     "PageSize",
     "GeneratePDFRequest",
-    "PageOptions",
     "PrintPreviewPDFRequest",
     # Job models
     "JobURLAnalysisRequest",

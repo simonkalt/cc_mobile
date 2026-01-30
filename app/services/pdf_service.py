@@ -198,19 +198,21 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         raise Exception(f"Failed to generate PDF: {str(e)}")
 
 
-def generate_pdf_from_html(
-    html_content: str,
-    page_options: Optional[Dict] = None,
-) -> str:
+def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
     """
-    Generate a PDF from HTML content (e.g. frontend-modified Print Preview HTML).
-    Uses WeasyPrint. The HTML is wrapped in a minimal document with optional @page styling.
+    Generate a PDF from HTML content using user print preferences.
+    Uses WeasyPrint. Wraps the HTML in a document with @page (margins, page size)
+    and body styles (font family, font size, line height) when not useDefaultFonts.
 
     Args:
-        html_content: The HTML fragment or full document to convert (placed inside body).
-        page_options: Optional dict with:
+        html_content: The HTML fragment to convert (placed inside body).
+        print_properties: User print preferences (same shape as generate_pdf_from_markdown):
             - margins: dict with top, right, bottom, left (in inches)
+            - fontFamily: str (default: "Times New Roman")
+            - fontSize: float (default: 12)
+            - lineHeight: float (default: 1.6)
             - pageSize: dict with width, height (in inches, default 8.5 x 11)
+            - useDefaultFonts: bool (default: False). If True, only @page is applied; no font/line styling.
 
     Returns:
         Base64-encoded PDF data as a string (without data URI prefix).
@@ -222,9 +224,12 @@ def generate_pdf_from_html(
     if not WEASYPRINT_AVAILABLE:
         raise ImportError("weasyprint library is not installed. Cannot generate PDF.")
 
-    page_options = page_options or {}
-    margins = page_options.get("margins", {})
-    page_size = page_options.get("pageSize", {"width": 8.5, "height": 11.0})
+    margins = print_properties.get("margins", {})
+    font_family = print_properties.get("fontFamily", "Times New Roman")
+    font_size = print_properties.get("fontSize", 12)
+    line_height = print_properties.get("lineHeight", 1.6)
+    page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
+    use_default_fonts = print_properties.get("useDefaultFonts", False)
 
     margin_top = margins.get("top", 1.0)
     margin_right = margins.get("right", 0.75)
@@ -233,7 +238,11 @@ def generate_pdf_from_html(
     width_in = page_size.get("width", 8.5)
     height_in = page_size.get("height", 11.0)
 
-    # Wrap frontend HTML in a minimal document with @page for WeasyPrint
+    # Base document: @page for margins and page size (always applied)
+    body_style = "margin: 0; padding: 0;"
+    if not use_default_fonts:
+        body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+
     wrapper = f"""
 <!DOCTYPE html>
 <html>
@@ -245,8 +254,7 @@ def generate_pdf_from_html(
             margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
         }}
         body {{
-            margin: 0;
-            padding: 0;
+            {body_style}
         }}
     </style>
 </head>
@@ -259,7 +267,13 @@ def generate_pdf_from_html(
     try:
         pdf_bytes = HTML(string=wrapper).write_pdf()
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-        logger.info(f"Successfully generated PDF from HTML ({len(pdf_bytes)} bytes)")
+        logger.info(
+            "Successfully generated PDF from HTML (%s bytes, font=%s, size=%spt, lineHeight=%s)",
+            len(pdf_bytes),
+            font_family,
+            font_size,
+            line_height,
+        )
         return pdf_base64
     except Exception as e:
         logger.error(f"Error generating PDF from HTML: {str(e)}")

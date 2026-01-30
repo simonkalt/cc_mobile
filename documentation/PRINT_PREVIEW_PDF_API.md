@@ -1,12 +1,12 @@
 # Print Preview PDF API
 
-This endpoint converts **frontend-modified HTML** into a PDF for the Print Preview feature. The frontend sends its styled HTML; the backend wraps it in a minimal document with optional page layout and returns the PDF.
+This endpoint converts **frontend-modified HTML** into a PDF for the Print Preview feature. The backend uses the **user’s print preferences** (margins, font, page size, line height) and passes them to the PDF library (WeasyPrint) so the resulting document matches the user’s settings.
 
 ## Endpoint
 
 **POST** `/api/files/print-preview-pdf`
 
-Convert HTML to PDF and return base64-encoded PDF data.
+Convert HTML to PDF using user print preferences and return base64-encoded PDF data.
 
 ## Authentication
 
@@ -18,69 +18,104 @@ Authorization: Bearer <access_token>
 
 ## Request Body
 
-### Full Example (with page options)
+### Full Example (with user print preferences)
 
 ```json
 {
-  "htmlContent": "<div style=\"font-family: 'Calibri', serif; font-size: 11pt;\"><p>Dear Hiring Manager,</p><p>I am writing to apply for...</p></div>",
-  "pageOptions": {
+  "htmlContent": "<div><p>Dear Hiring Manager,</p><p>I am writing to apply for...</p></div>",
+  "printProperties": {
     "margins": {
       "top": 1.0,
       "right": 0.75,
       "bottom": 0.75,
       "left": 0.75
     },
+    "fontFamily": "Calibri",
+    "fontSize": 11,
+    "lineHeight": 1.15,
     "pageSize": {
       "width": 8.5,
       "height": 11.0
-    }
+    },
+    "useDefaultFonts": false
   },
   "user_id": "693326c07fcdaab8e81cdd2f",
   "user_email": "simonkalt@gmail.com"
 }
 ```
 
-### Minimal Example (HTML only, default page)
+### Minimal Example (required fields only)
 
 ```json
 {
-  "htmlContent": "<div><p>Cover letter content here.</p></div>"
+  "htmlContent": "<div><p>Cover letter content here.</p></div>",
+  "printProperties": {
+    "margins": {
+      "top": 1.0,
+      "right": 0.75,
+      "bottom": 0.25,
+      "left": 0.75
+    }
+  }
 }
 ```
 
-With no `pageOptions`, the backend uses default margins (1 in top, 0.75 in right/bottom/left) and page size 8.5 × 11 in.
+Other `printProperties` fields use backend defaults (see below) when omitted.
 
 ## Request Fields
 
-| Field         | Type   | Required | Description                                                                   |
-| ------------- | ------ | -------- | ----------------------------------------------------------------------------- |
-| `htmlContent` | string | ✅ Yes   | The HTML to convert to PDF (fragment or full markup). Placed inside `<body>`. |
-| `pageOptions` | object | ❌ No    | Optional page layout (margins, page size). Omitted = defaults.                |
-| `user_id`     | string | ❌ No    | User ID for logging (e.g. MongoDB ObjectId).                                  |
-| `user_email`  | string | ❌ No    | User email for logging.                                                       |
+| Field             | Type   | Required | Description                                                                       |
+| ----------------- | ------ | -------- | --------------------------------------------------------------------------------- |
+| `htmlContent`     | string | ✅ Yes   | The HTML to convert to PDF (fragment). Placed inside `<body>`.                    |
+| `printProperties` | object | ✅ Yes   | User print preferences (margins required; font, page size, line height optional). |
+| `user_id`         | string | ❌ No    | User ID for logging (e.g. MongoDB ObjectId).                                      |
+| `user_email`      | string | ❌ No    | User email for logging.                                                           |
 
-### `pageOptions` (optional)
+### `printProperties` (required)
 
-| Field      | Type   | Required | Default                                            | Description                        |
-| ---------- | ------ | -------- | -------------------------------------------------- | ---------------------------------- |
-| `margins`  | object | ❌ No    | top:1, right:0.75, bottom:0.75, left:0.75 (inches) | Margins in inches.                 |
-| `pageSize` | object | ❌ No    | width:8.5, height:11.0 (inches)                    | Page size in inches (e.g. Letter). |
+Same structure as **POST** `/api/files/generate-pdf`. These values are passed to the PDF library so the document uses the user’s settings.
 
-### `margins` (when provided)
+| Field             | Type    | Required | Default                        | Description                                                                          |
+| ----------------- | ------- | -------- | ------------------------------ | ------------------------------------------------------------------------------------ |
+| `margins`         | object  | ✅ Yes   | -                              | Margins in inches (top, right, bottom, left).                                        |
+| `fontFamily`      | string  | ❌ No    | `"Times New Roman"`            | Font family. Applied to the document unless `useDefaultFonts` is true.               |
+| `fontSize`        | number  | ❌ No    | `12`                           | Font size in points (pt). Applied unless `useDefaultFonts` is true.                  |
+| `lineHeight`      | number  | ❌ No    | `1.6`                          | Line height multiplier. Applied unless `useDefaultFonts` is true.                    |
+| `pageSize`        | object  | ❌ No    | `{ width: 8.5, height: 11.0 }` | Page size in inches (e.g. Letter). Passed to WeasyPrint `@page`.                     |
+| `useDefaultFonts` | boolean | ❌ No    | `false`                        | If `true`, only margins and page size are applied; no font/size/line-height on body. |
 
-| Field    | Type   | Description            |
-| -------- | ------ | ---------------------- |
-| `top`    | number | Top margin (inches)    |
-| `right`  | number | Right margin (inches)  |
-| `bottom` | number | Bottom margin (inches) |
-| `left`   | number | Left margin (inches)   |
+### `margins` (required when `printProperties` is present)
 
-### `pageSize` (when provided)
+| Field    | Type   | Required | Description             |
+| -------- | ------ | -------- | ----------------------- |
+| `top`    | number | ✅ Yes   | Top margin (inches).    |
+| `right`  | number | ✅ Yes   | Right margin (inches).  |
+| `bottom` | number | ✅ Yes   | Bottom margin (inches). |
+| `left`   | number | ✅ Yes   | Left margin (inches).   |
 
-| Field    | Type   | Description                       |
-| -------- | ------ | --------------------------------- |
-| `width`  | number | Page width in inches (e.g. 8.5)   |
-| `height` | number | Page height in inches (e.g. 11.0) |
+### `pageSize` (optional)
+
+| Field    | Type   | Required | Description                        |
+| -------- | ------ | -------- | ---------------------------------- |
+| `width`  | number | ✅ Yes\* | Page width in inches (e.g. 8.5).   |
+| `height` | number | ✅ Yes\* | Page height in inches (e.g. 11.0). |
+
+\*Required if `pageSize` is present.
+
+## How the PDF is built
+
+The backend uses **WeasyPrint** and applies user preferences as follows:
+
+1. **Always applied**
+   - **@page**: `size` from `printProperties.pageSize` (default 8.5 × 11 in), `margin` from `printProperties.margins`.
+
+2. **Applied when `useDefaultFonts` is false** (default)
+   - **body**: `font-family` from `printProperties.fontFamily`, `font-size` from `printProperties.fontSize`, `line-height` from `printProperties.lineHeight`, so the generated PDF matches the user’s font and line height settings.
+
+3. **When `useDefaultFonts` is true**
+   - Only `@page` (margins and page size) is applied; no font/size/line-height is set on the document body.
+
+Send the same **printProperties** you use in user settings (or from **POST** `/api/files/generate-pdf`) so the Print Preview PDF matches the rest of the app.
 
 ## Response
 
@@ -120,6 +155,20 @@ With no `pageOptions`, the backend uses default margins (1 in top, 0.75 in right
 }
 ```
 
+**Missing `printProperties` or `printProperties.margins`:**
+
+```json
+{
+  "detail": "printProperties is required"
+}
+```
+
+```json
+{
+  "detail": "printProperties.margins is required"
+}
+```
+
 ### 401 Unauthorized
 
 Missing or invalid `Authorization` header:
@@ -143,6 +192,7 @@ PDF generation failed (e.g. WeasyPrint not available or invalid HTML):
 ## Example: Fetch with Bearer token
 
 ```javascript
+// Use the same printProperties as in user settings (margins, font, page size, line height)
 const response = await fetch("/api/files/print-preview-pdf", {
   method: "POST",
   headers: {
@@ -151,9 +201,13 @@ const response = await fetch("/api/files/print-preview-pdf", {
   },
   body: JSON.stringify({
     htmlContent: myModifiedHtml,
-    pageOptions: {
+    printProperties: {
       margins: { top: 1, right: 0.75, bottom: 0.75, left: 0.75 },
+      fontFamily: "Calibri",
+      fontSize: 11,
+      lineHeight: 1.15,
       pageSize: { width: 8.5, height: 11.0 },
+      useDefaultFonts: false,
     },
   }),
 });
@@ -171,14 +225,17 @@ const { success, pdfBase64 } = await response.json();
 
 ## Notes for frontend
 
-1. **HTML you send**  
-   Send the exact HTML you use for Print Preview (including inline styles, fonts, font sizes). The backend does not change your styling; it only wraps the content in a document with `@page` (margins and size).
+1. **User print preferences**  
+   Send `printProperties` from the user’s settings (margins, font family, font size, page size, line height, useDefaultFonts). The backend passes these to WeasyPrint so the PDF matches the user’s choices.
 
-2. **Page options**  
-   Use `pageOptions` to match your app’s print settings (margins and page size). If omitted, backend defaults (above) are used.
+2. **Same shape as generate-pdf**  
+   `printProperties` has the same structure as **POST** `/api/files/generate-pdf`. You can reuse the same object from user preferences for both endpoints.
 
-3. **Encoding**  
-   Send the request with `Content-Type: application/json`. Ensure `htmlContent` is a valid JSON string (escape quotes and control characters as needed).
+3. **HTML you send**  
+   Send the HTML fragment you use for Print Preview. The backend wraps it in a document that applies `@page` (margins, page size) and, when `useDefaultFonts` is false, body font/size/line-height from `printProperties`.
 
-4. **Existing endpoint**  
-   The existing **POST** `/api/files/generate-pdf` still generates PDF from **Markdown** and `printProperties`. Use **POST** `/api/files/print-preview-pdf` when the source is your **modified HTML** for Print Preview.
+4. **Encoding**  
+   Use `Content-Type: application/json` and ensure `htmlContent` is a valid JSON string (escape quotes and control characters as needed).
+
+5. **Other endpoint**  
+   **POST** `/api/files/generate-pdf` generates PDF from **Markdown** and `printProperties`. Use **POST** `/api/files/print-preview-pdf` when the source is your **modified HTML** for Print Preview.

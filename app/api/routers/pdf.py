@@ -76,9 +76,9 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
 @router.post("/print-preview-pdf")
 async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
     """
-    Generate a PDF from frontend-modified HTML (Print Preview).
-    Send your styled HTML; the API wraps it in a minimal document with optional
-    page options and returns the PDF as base64.
+    Generate a PDF from frontend-modified HTML (Print Preview) using user print preferences.
+    Requires printProperties (margins, font, page size, line height). The document is built
+    with WeasyPrint using these settings so the PDF matches the user's settings.
     """
     logger.info(
         "Print Preview PDF request received - user_id=%s, user_email=%s",
@@ -88,25 +88,30 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
 
     if not request.htmlContent or not request.htmlContent.strip():
         raise HTTPException(status_code=400, detail="htmlContent is required and cannot be empty")
+    if not request.printProperties:
+        raise HTTPException(status_code=400, detail="printProperties is required")
+    if not request.printProperties.margins:
+        raise HTTPException(status_code=400, detail="printProperties.margins is required")
 
     try:
-        page_options = None
-        if request.pageOptions:
-            page_options = {}
-            if request.pageOptions.margins:
-                page_options["margins"] = {
-                    "top": request.pageOptions.margins.top,
-                    "right": request.pageOptions.margins.right,
-                    "bottom": request.pageOptions.margins.bottom,
-                    "left": request.pageOptions.margins.left,
-                }
-            if request.pageOptions.pageSize:
-                page_options["pageSize"] = {
-                    "width": request.pageOptions.pageSize.width,
-                    "height": request.pageOptions.pageSize.height,
-                }
+        print_props_dict = {
+            "margins": {
+                "top": request.printProperties.margins.top,
+                "right": request.printProperties.margins.right,
+                "bottom": request.printProperties.margins.bottom,
+                "left": request.printProperties.margins.left,
+            },
+            "fontFamily": request.printProperties.fontFamily,
+            "fontSize": request.printProperties.fontSize,
+            "lineHeight": request.printProperties.lineHeight,
+            "pageSize": {
+                "width": request.printProperties.pageSize.width,
+                "height": request.printProperties.pageSize.height,
+            },
+            "useDefaultFonts": request.printProperties.useDefaultFonts,
+        }
 
-        pdf_base64 = generate_pdf_from_html(request.htmlContent, page_options)
+        pdf_base64 = generate_pdf_from_html(request.htmlContent, print_props_dict)
 
         logger.info("Print Preview PDF generated successfully")
         return {
