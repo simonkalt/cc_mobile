@@ -1,6 +1,8 @@
 # Print Preview PDF API
 
-This endpoint converts **frontend-modified HTML** into a PDF for the Print Preview feature. The backend uses the **user’s print preferences** (margins, font, page size, line height) and passes them to the PDF library (WeasyPrint) so the resulting document matches the user’s settings.
+This endpoint converts **frontend-modified HTML** into a PDF for the Print Preview feature. The backend uses the **user’s print preferences** (margins, font, page size, line height) and passes them to the PDF engine so the resulting document matches the user’s settings.
+
+**PDF engine:** The service prefers **Playwright** (Chromium) for PDF generation because it applies margins via the browser’s print API, so all four sides (including the right margin) are reliable. If Playwright is not installed or fails, it falls back to **WeasyPrint**. To get reliable margins (and avoid right-side cutoff), install Playwright and Chromium (see below).
 
 ## Endpoint
 
@@ -239,3 +241,14 @@ const { success, pdfBase64 } = await response.json();
 
 5. **Other endpoint**  
    **POST** `/api/files/generate-pdf` generates PDF from **Markdown** and `printProperties`. Use **POST** `/api/files/print-preview-pdf` when the source is your **modified HTML** for Print Preview.
+
+## Installing Playwright (recommended for reliable margins)
+
+For correct margins (including the right side), install Playwright and Chromium on the server:
+
+```bash
+pip install playwright
+playwright install chromium
+```
+
+If Playwright is not available, the backend falls back to WeasyPrint, which can sometimes ignore the right margin.
