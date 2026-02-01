@@ -2,6 +2,7 @@
 .env
 .venv
 venv/
+debug/
 
 # Python cache files
 __pycache__/
@@ -19,6 +20,5 @@ dist/
 
 .oci/config
 .pem
-.pdf
 
 .cursor/mcp.json

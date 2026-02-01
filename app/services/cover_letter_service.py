@@ -904,8 +904,8 @@ Please incorporate these instructions while maintaining consistency with all oth
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
-        # Keep line breaks: strip \r, convert \n to <br /> so they render in print preview/PDF
-        raw_html = raw_html.replace("\r", "")
+        # Keep line breaks: collapse multiple newlines to one, then convert to single <br /> so we don't add excess space
+        raw_html = re.sub(r"[\r\n]+", "\n", raw_html)
         raw_html = raw_html.replace("\n", "<br />")
         raw_html = re.sub(r" +", " ", raw_html)
 
@@ -947,8 +947,8 @@ Please incorporate these instructions while maintaining consistency with all oth
             logger.warning(f"Could not apply print settings to HTML: {e}")
             # Continue with unstyled HTML if styling fails
 
-        # Final cleanup: strip \r, convert any remaining \n to <br /> so line breaks render
-        styled_html = styled_html.replace("\r", "")
+        # Final cleanup: collapse multiple newlines to one, then convert to single <br /> (avoid excess space)
+        styled_html = re.sub(r"[\r\n]+", "\n", styled_html)
         styled_html = styled_html.replace("\n", "<br />")
         styled_html = re.sub(r" +", " ", styled_html)
 

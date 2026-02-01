@@ -19,6 +19,27 @@ _SNIPPET_COLOR = "\033[94m"
 _SNIPPET_RESET = "\033[0m"
 
 
+def _normalize_line_breaks_in_html(html_content: str) -> str:
+    """
+    Ensure line breaks render in PDF: convert literal newlines in text content to <br />.
+    Only replaces \\n outside of HTML tags so we don't break attribute values or tag structure.
+    Collapses multiple newlines to one <br /> so we don't add excess vertical space.
+    """
+    if not html_content or ("\n" not in html_content and "\r" not in html_content):
+        return html_content
+    # Split on tags (keep tags in the list); odd-indexed parts are tags, even are text
+    parts = re.split(r"(<[^>]*>)", html_content)
+    result = []
+    for part in parts:
+        if part.startswith("<") and part.endswith(">"):
+            result.append(part)
+        else:
+            # Collapse any run of \\r/\\n to a single newline, then convert to one <br />
+            normalized = re.sub(r"[\r\n]+", "\n", part)
+            result.append(normalized.replace("\n", "<br />"))
+    return "".join(result)
+
+
 def _log_snippet_light_blue(html_snippet: str, max_chars: int = 4000) -> None:
     """Log HTML snippet in light blue; also print to stdout so it shows even if logging is broken."""
     content = (html_snippet or "(no HTML content)")[:max_chars]
@@ -299,7 +320,8 @@ body {{ {body_style} }}
 .print-content * {{ max-width: 100%; }}
 .print-content table {{ table-layout: fixed; width: 100% !important; }}
 .print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
-.print-content p {{ page-break-inside: avoid; }}
+.print-content p {{ page-break-inside: avoid; margin: 0 0 0.75em 0; }}
+.print-content br {{ display: block; margin-top: 0.25em; }}
 </style>
 </head>
 <body>
@@ -374,8 +396,10 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ {body_style} }}
         /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
-        /* Allow paragraphs to break across pages so we don't get big gaps or weird break spots */
-        .print-content p {{ margin: 0; padding: 0; }}
+        /* Paragraph spacing so <p> blocks don't run together; allow paragraphs to break across pages */
+        .print-content p {{ margin: 0 0 0.75em 0; padding: 0; }}
+        /* Ensure <br /> creates visible separation (some engines ignore default br spacing) */
+        .print-content br {{ display: block; margin-top: 0.25em; }}
         /* Keep heading with the next block (avoid break right after a heading) */
         .print-content h1, .print-content h2, .print-content h3 {{
             page-break-after: avoid;
@@ -465,6 +489,9 @@ def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
     """
     font_family = print_properties.get("fontFamily", "Times New Roman")
     font_size = print_properties.get("fontSize", 12)
+
+    # Ensure line breaks render in PDF: convert literal newlines in text content to <br />
+    html_content = _normalize_line_breaks_in_html(html_content)
 
     # Log HTML snippet immediately (before PDF gen) so it always appears even if generation fails
     _log_snippet_light_blue(html_content)
