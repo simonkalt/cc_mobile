@@ -675,6 +675,24 @@ def detect_site(url: str) -> str:
         return "generic"
 
 
+def extract_linkedin_job_id(url: str) -> Optional[str]:
+    """
+    Extract the job ID from a LinkedIn job URL.
+
+    Supports URLs like:
+        https://www.linkedin.com/jobs/view/4337608168
+        https://linkedin.com/jobs/view/4337608168?param=value
+
+    Returns:
+        The numeric job ID string (e.g. "4337608168") or None if not a LinkedIn job view URL.
+    """
+    if not url or "linkedin.com" not in url.lower():
+        return None
+    path = urlparse(url).path
+    match = re.search(r"/jobs/view/(\d+)", path, re.I)
+    return match.group(1) if match else None
+
+
 def detect_linkedin_login_wall(html: str) -> bool:
     """
     Detect if LinkedIn returned a sign-in/login page instead of job content.

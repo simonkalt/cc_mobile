@@ -904,8 +904,9 @@ Please incorporate these instructions while maintaining consistency with all oth
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
-        # Strip unwanted \r and \n characters from HTML
-        raw_html = raw_html.replace("\r", "").replace("\n", " ")
+        # Keep line breaks: strip \r, convert \n to <br /> so they render in print preview/PDF
+        raw_html = raw_html.replace("\r", "")
+        raw_html = raw_html.replace("\n", "<br />")
         raw_html = re.sub(r" +", " ", raw_html)
 
         # Apply user's print settings to HTML
@@ -946,8 +947,9 @@ Please incorporate these instructions while maintaining consistency with all oth
             logger.warning(f"Could not apply print settings to HTML: {e}")
             # Continue with unstyled HTML if styling fails
 
-        # Final cleanup: strip any remaining \r or \n from HTML before returning
-        styled_html = styled_html.replace("\r", "").replace("\n", " ")
+        # Final cleanup: strip \r, convert any remaining \n to <br /> so line breaks render
+        styled_html = styled_html.replace("\r", "")
+        styled_html = styled_html.replace("\n", "<br />")
         styled_html = re.sub(r" +", " ", styled_html)
 
         return {"markdown": markdown_content, "html": styled_html}
@@ -956,8 +958,8 @@ Please incorporate these instructions while maintaining consistency with all oth
         logger.error(f"Failed to parse JSON response: {e}")
         logger.error(f"Response length: {len(r)} characters")
         error_html = f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
-        # Clean HTML of unwanted characters
-        error_html = error_html.replace("\r", "").replace("\n", " ")
+        # Clean HTML: strip \r, preserve line breaks as <br />
+        error_html = error_html.replace("\r", "").replace("\n", "<br />")
         error_html = re.sub(r" +", " ", error_html)
 
         return {
@@ -967,7 +969,7 @@ Please incorporate these instructions while maintaining consistency with all oth
     except Exception as e:
         logger.error(f"Error in get_job_info: {str(e)}")
         error_html = f"<p>Error: {str(e)}</p>"
-        # Clean HTML of unwanted characters
-        error_html = error_html.replace("\r", "").replace("\n", " ")
+        # Clean HTML: strip \r, preserve line breaks as <br />
+        error_html = error_html.replace("\r", "").replace("\n", "<br />")
         error_html = re.sub(r" +", " ", error_html)
         return {"markdown": f"Error: {str(e)}", "html": error_html}
