@@ -5,6 +5,7 @@ PDF generation service
 import logging
 import base64
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -13,18 +14,35 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ANSI: light blue for snippet (94 = bright blue)
+_SNIPPET_COLOR = "\033[94m"
+_SNIPPET_RESET = "\033[0m"
 
-def _save_debug_pdf(pdf_bytes: bytes, source: str) -> None:
+
+def _log_snippet_light_blue(html_snippet: str, max_chars: int = 4000) -> None:
+    """Log HTML snippet in light blue; also print to stdout so it shows even if logging is broken."""
+    content = (html_snippet or "(no HTML content)")[:max_chars]
+    msg = f"{_SNIPPET_COLOR}[Print Preview HTML snippet]\n{content}{_SNIPPET_RESET}"
+    logger.warning("%s", msg)
+    # Unconditional print so you always see it in the terminal (search for PRINT_PREVIEW_HTML_SNIPPET)
+    print(
+        f"\n{_SNIPPET_COLOR}PRINT_PREVIEW_HTML_SNIPPET\n{content}{_SNIPPET_RESET}\n",
+        flush=True,
+        file=sys.stderr,
+    )
+
+
+def _save_debug_pdf(pdf_bytes: bytes, source: str, html_snippet: Optional[str] = None) -> None:
     """For testing: save a copy of the generated PDF in the project debug folder."""
+    project_root = Path(__file__).resolve().parent.parent.parent
+    debug_dir = project_root / "debug"
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
     try:
-        project_root = Path(__file__).resolve().parent.parent.parent
-        debug_dir = project_root / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        filename = f"{source}_{timestamp}.pdf"
-        path = debug_dir / filename
+        path = debug_dir / f"{source}_{timestamp}.pdf"
         path.write_bytes(pdf_bytes)
-        logger.info("Debug copy saved: %s", path)
+        logger.info("Debug copy saved: %s", path.resolve())
     except Exception as e:
         logger.warning("Could not save debug PDF copy: %s", e)
 
@@ -237,8 +255,10 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
 
 def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> bytes:
     """
-    Generate PDF using Playwright (Chromium). Margins are applied via the PDF API
-    so all four sides (including right) are reliable. No @page in HTML to avoid conflicts.
+    Generate PDF using Playwright (Chromium). Margins are applied via the
+    page.pdf(margin={...}) API so Chromium applies them at the PDF layer on
+    every page (avoids @page margin bugs at page breaks). Page size from CSS
+    @page with margin: 0 so only size is taken from CSS.
     """
     margins = print_properties.get("margins", {})
     font_family = print_properties.get("fontFamily", "Times New Roman")
@@ -247,8 +267,15 @@ def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> b
     page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
     use_default_fonts = print_properties.get("useDefaultFonts", False)
 
-    # Body styling only; margins come from page.pdf(margin=...)
-    body_style = "margin: 0; padding: 0; box-sizing: border-box; overflow-wrap: break-word;"
+    margin_top = margins.get("top", 1.0)
+    margin_right = margins.get("right", 0.75)
+    margin_bottom = margins.get("bottom", 0.75)
+    margin_left = margins.get("left", 0.75)
+    width_in = page_size.get("width", 8.5)
+    height_in = page_size.get("height", 11.0)
+
+    # @page: size only; margin 0 so Chromium applies margins via API (reliable at page breaks)
+    body_style = "margin: 0; padding: 0; box-sizing: border-box;"
     if not use_default_fonts:
         body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
 
@@ -256,38 +283,43 @@ def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> b
 <html>
 <head><meta charset="UTF-8">
 <style>
+@page {{
+  size: {width_in}in {height_in}in;
+  margin: 0;
+}}
 *, *::before, *::after {{ box-sizing: border-box; }}
 body {{ {body_style} }}
+.print-content {{
+  max-width: 100%;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}}
+.print-content * {{ max-width: 100%; }}
+.print-content table {{ table-layout: fixed; width: 100% !important; }}
+.print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
+.print-content p {{ page-break-inside: avoid; }}
 </style>
 </head>
 <body>
-{html_content}
+<div class="print-content">{html_content}</div>
 </body>
 </html>"""
 
-    # Playwright margin: pass as strings with "in" so Chromium applies them to all sides
-    margin_top = margins.get("top", 1.0)
-    margin_right = margins.get("right", 0.75)
-    margin_bottom = margins.get("bottom", 0.75)
-    margin_left = margins.get("left", 0.75)
-    pdf_margin = {
-        "top": f"{margin_top}in",
-        "right": f"{margin_right}in",
-        "bottom": f"{margin_bottom}in",
-        "left": f"{margin_left}in",
+    # Margins via API (applied by Chromium on every page); size from CSS
+    pdf_options = {
+        "prefer_css_page_size": True,
+        "margin": {
+            "top": f"{margin_top}in",
+            "right": f"{margin_right}in",
+            "bottom": f"{margin_bottom}in",
+            "left": f"{margin_left}in",
+        },
     }
-
-    width_in = page_size.get("width", 8.5)
-    height_in = page_size.get("height", 11.0)
-    # Use format="Letter" for 8.5x11, else explicit width/height
-    if abs(width_in - 8.5) < 0.01 and abs(height_in - 11.0) < 0.01:
-        pdf_options = {"format": "Letter", "margin": pdf_margin}
-    else:
-        pdf_options = {
-            "width": f"{width_in}in",
-            "height": f"{height_in}in",
-            "margin": pdf_margin,
-        }
+    if not (abs(width_in - 8.5) < 0.01 and abs(height_in - 11.0) < 0.01):
+        pdf_options["width"] = f"{width_in}in"
+        pdf_options["height"] = f"{height_in}in"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -299,10 +331,120 @@ body {{ {body_style} }}
     return pdf_bytes
 
 
+def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> bytes:
+    """
+    Generate PDF from HTML using WeasyPrint. Uses @page with explicit size and
+    margins so WeasyPrint handles page breaks correctly on every page. Page-break
+    CSS (orphans, widows, page-break-inside/after) is applied per WeasyPrint docs.
+    Use when PRINT_PREVIEW_USE_WEASYPRINT_ONLY is True or as fallback when Playwright fails.
+    """
+    margins = print_properties.get("margins", {})
+    font_family = print_properties.get("fontFamily", "Times New Roman")
+    font_size = print_properties.get("fontSize", 12)
+    line_height = print_properties.get("lineHeight", 1.6)
+    page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
+    use_default_fonts = print_properties.get("useDefaultFonts", False)
+
+    margin_top = margins.get("top", 1.0)
+    margin_right = margins.get("right", 0.75)
+    margin_bottom = margins.get("bottom", 0.75)
+    margin_left = margins.get("left", 0.75)
+    width_in = page_size.get("width", 8.5)
+    height_in = page_size.get("height", 11.0)
+
+    # Body: no padding (margins are in @page). Orphans/widows 1 so breaks are more natural (2 can force weird spots).
+    body_style = (
+        "margin: 0; padding: 0; box-sizing: border-box; max-width: 100%; "
+        "orphans: 1; widows: 1; hyphens: none;"
+    )
+    if not use_default_fonts:
+        body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+
+    wrapper = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        /* Critical: @page with size and margins so WeasyPrint handles breaks on every page */
+        @page {{
+            size: {width_in}in {height_in}in;
+            margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
+        }}
+        *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{ {body_style} }}
+        /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
+        /* Allow paragraphs to break across pages so we don't get big gaps or weird break spots */
+        .print-content p {{ margin: 0; padding: 0; }}
+        /* Keep heading with the next block (avoid break right after a heading) */
+        .print-content h1, .print-content h2, .print-content h3 {{
+            page-break-after: avoid;
+            margin: 0;
+            padding: 0;
+        }}
+        /* Do NOT use page-break-inside: avoid on .letter-section: it forces the whole body
+           onto the next page when the first section is just header/company, causing a
+           break right after the company name. Let content flow naturally; paragraphs
+           and headings still control breaks. */
+        /* Optional: frontend can add <div class="page-break"></div> to force a new page */
+        .print-content .page-break {{ page-break-after: always; }}
+        .print-content {{
+            max-width: 100%;
+            width: 100%;
+            overflow-x: hidden;
+            /* Prefer breaking at word boundaries; only break long words if needed */
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            word-break: normal;
+            hyphens: none;
+        }}
+        .print-content * {{ max-width: 100%; }}
+        .print-content table {{ table-layout: fixed; width: 100% !important; }}
+        .print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
+    </style>
+</head>
+<body>
+<div class="print-content">{html_content}</div>
+</body>
+</html>
+"""
+    return HTML(string=wrapper).write_pdf()
+
+
+def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
+    """
+    Generate PDF from raw HTML with minimal wrapper only: no @page, no .print-content.
+    Uses print_properties font size so WeasyPrint default (e.g. 16px) doesn't make text too large.
+    Use when PRINT_PREVIEW_RAW_HTML is True.
+    """
+    font_family = print_properties.get("fontFamily", "Times New Roman")
+    font_size = print_properties.get("fontSize", 12)
+    line_height = print_properties.get("lineHeight", 1.6)
+    use_default_fonts = print_properties.get("useDefaultFonts", False)
+    body_css = "margin: 0; padding: 0;"
+    if not use_default_fonts:
+        body_css += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height};'
+    minimal = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  body {{ {body_css} }}
+  p, div, h1, h2, h3, ul, ol, li {{ margin: 0; padding: 0; }}
+</style>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
+    return HTML(string=minimal).write_pdf()
+
+
 def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
     """
     Generate a PDF from HTML content using user print preferences.
-    Prefers Playwright (Chromium) for reliable margins; falls back to WeasyPrint if unavailable.
+    When PRINT_PREVIEW_USE_WEASYPRINT_ONLY is True, uses only WeasyPrint.
+    Otherwise prefers Playwright (Chromium), falling back to WeasyPrint if unavailable or on error.
 
     Args:
         html_content: The HTML fragment to convert (placed inside body).
@@ -318,28 +460,47 @@ def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
         Base64-encoded PDF data as a string (without data URI prefix).
 
     Raises:
-        ImportError: If neither playwright nor weasyprint is available.
+        ImportError: If neither playwright nor weasyprint is available (when not WeasyPrint-only).
         Exception: If PDF generation fails.
     """
-    margins = print_properties.get("margins", {})
     font_family = print_properties.get("fontFamily", "Times New Roman")
     font_size = print_properties.get("fontSize", 12)
-    line_height = print_properties.get("lineHeight", 1.6)
-    page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
-    use_default_fonts = print_properties.get("useDefaultFonts", False)
 
-    margin_top = margins.get("top", 1.0)
-    margin_right = margins.get("right", 0.75)
-    margin_bottom = margins.get("bottom", 0.75)
-    margin_left = margins.get("left", 0.75)
-    width_in = page_size.get("width", 8.5)
-    height_in = page_size.get("height", 11.0)
+    # Log HTML snippet immediately (before PDF gen) so it always appears even if generation fails
+    _log_snippet_light_blue(html_content)
 
-    # Prefer Playwright for reliable margins (right side in particular)
+    # Raw HTML: no alteration (minimal wrapper only) so you can see what the raw parameter produces
+    if settings.PRINT_PREVIEW_RAW_HTML:
+        if not WEASYPRINT_AVAILABLE:
+            raise ImportError("PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is not available.")
+        pdf_bytes = _generate_pdf_raw_html(html_content, print_properties)
+        _save_debug_pdf(pdf_bytes, "print_preview_pdf_raw", html_snippet=html_content)
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        logger.info("PDF from HTML (raw, no server styling) (%s bytes)", len(pdf_bytes))
+        return pdf_base64
+
+    # WeasyPrint-only: skip Playwright (e.g. when Playwright margins are wrong at page breaks)
+    if settings.PRINT_PREVIEW_USE_WEASYPRINT_ONLY:
+        if not WEASYPRINT_AVAILABLE:
+            raise ImportError(
+                "PRINT_PREVIEW_USE_WEASYPRINT_ONLY is True but WeasyPrint is not available."
+            )
+        pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
+        _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        logger.info(
+            "PDF from HTML via WeasyPrint only (%s bytes, font=%s, size=%spt)",
+            len(pdf_bytes),
+            font_family,
+            font_size,
+        )
+        return pdf_base64
+
+    # Prefer Playwright, fall back to WeasyPrint
     if PLAYWRIGHT_AVAILABLE and sync_playwright:
         try:
             pdf_bytes = _generate_pdf_via_playwright(html_content, print_properties)
-            _save_debug_pdf(pdf_bytes, "print_preview_pdf")
+            _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
             pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
             logger.info(
                 "PDF from HTML via Playwright (%s bytes, font=%s, size=%spt)",
@@ -357,34 +518,9 @@ def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
             "Install playwright and run 'playwright install chromium' for reliable PDF margins."
         )
 
-    # WeasyPrint fallback: body padding for margins (WeasyPrint can ignore @page margin-right)
-    body_style = (
-        f"margin: 0; padding: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in; "
-        "box-sizing: border-box; overflow-wrap: break-word; max-width: 100%;"
-    )
-    if not use_default_fonts:
-        body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
-
-    wrapper = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        @page {{ size: {width_in}in {height_in}in; margin: 0; }}
-        *, *::before, *::after {{ box-sizing: border-box; }}
-        body {{ {body_style} }}
-    </style>
-</head>
-<body>
-{html_content}
-</body>
-</html>
-"""
-
     try:
-        pdf_bytes = HTML(string=wrapper).write_pdf()
-        _save_debug_pdf(pdf_bytes, "print_preview_pdf")
+        pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
+        _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         logger.info(
             "PDF from HTML via WeasyPrint (%s bytes, font=%s, size=%spt)",

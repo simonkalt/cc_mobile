@@ -836,11 +836,9 @@ Please incorporate these instructions while maintaining consistency with all oth
             json_r = json.loads(json_str)
         except json.JSONDecodeError as e:
             # If parsing fails, try to fix common issues
-            # Remove any trailing incomplete JSON
             logger.warning(f"Initial JSON parse failed: {e}, attempting to fix...")
 
-            # Try to find and extract a valid JSON object
-            # Look for the last complete JSON object
+            # Fix 1: Look for the last complete JSON object (balanced braces)
             brace_count = 0
             last_valid_end = -1
             for i, char in enumerate(json_str):
@@ -853,13 +851,37 @@ Please incorporate these instructions while maintaining consistency with all oth
                         break
 
             if last_valid_end > 0:
-                json_str = json_str[: last_valid_end + 1]
                 try:
-                    json_r = json.loads(json_str)
-                    logger.info("Successfully fixed truncated JSON")
+                    json_r = json.loads(json_str[: last_valid_end + 1])
+                    logger.info("Successfully fixed truncated JSON (balanced braces)")
                 except json.JSONDecodeError:
-                    raise e
+                    json_r = None
             else:
+                json_r = None
+
+            # Fix 2: If still no parse (e.g. unterminated string), recover "markdown" from start
+            if json_r is None and ("Unterminated string" in str(e) or "Expecting" in str(e)):
+                markdown_match = re.search(r'"markdown"\s*:\s*"', json_str)
+                if markdown_match:
+                    value_start = markdown_match.end()
+                    raw_markdown = json_str[value_start:]
+                    # Escape for JSON: backslash and quote first, then newlines
+                    escaped = (
+                        raw_markdown.replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    try:
+                        fixed_str = '{"markdown": "' + escaped + '", "html": ""}'
+                        json_r = json.loads(fixed_str)
+                        logger.info(
+                            "Recovered from unterminated string: using markdown content, html empty"
+                        )
+                    except json.JSONDecodeError:
+                        pass
+
+            if json_r is None:
                 raise e
 
         # Clean up the markdown field - remove "markdown " prefix if Gemini added it
@@ -868,8 +890,19 @@ Please incorporate these instructions while maintaining consistency with all oth
             markdown_content = markdown_content[9:]  # Remove "markdown " (9 characters)
             logger.info("Removed 'markdown ' prefix from Gemini response")
 
-        # Get raw HTML from LLM response
+        # Get raw HTML from LLM response (may be empty if we recovered from truncated JSON)
         raw_html = json_r.get("html", "")
+        if not raw_html and markdown_content:
+            try:
+                import markdown
+
+                raw_html = markdown.markdown(
+                    markdown_content,
+                    extensions=["extra", "nl2br"],
+                )
+                logger.info("Converted recovered markdown to HTML for display")
+            except Exception as md_err:
+                logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
         # Strip unwanted \r and \n characters from HTML
         raw_html = raw_html.replace("\r", "").replace("\n", " ")

@@ -112,6 +112,16 @@ class Settings:
         os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")
     )  # 30 days default
 
+    # Print Preview PDF: use only WeasyPrint (skip Playwright) when True.
+    # Set to "true" if Playwright margins are wrong at page breaks.
+    PRINT_PREVIEW_USE_WEASYPRINT_ONLY: bool = (
+        os.getenv("PRINT_PREVIEW_USE_WEASYPRINT_ONLY", "false").lower() == "true"
+    )
+
+    # Print Preview PDF: when True, do not alter incoming HTML (minimal wrapper only).
+    # Use to see what the raw htmlContent produces with no server-side CSS or .print-content.
+    PRINT_PREVIEW_RAW_HTML: bool = os.getenv("PRINT_PREVIEW_RAW_HTML", "false").lower() == "true"
+
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     PERSONALITY_PROFILES_PATH: Path = (

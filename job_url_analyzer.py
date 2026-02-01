@@ -675,6 +675,56 @@ def detect_site(url: str) -> str:
         return "generic"
 
 
+def detect_linkedin_login_wall(html: str) -> bool:
+    """
+    Detect if LinkedIn returned a sign-in/login page instead of job content.
+
+    When the backend fetches a LinkedIn job URL with requests.get(), LinkedIn
+    typically returns a login wall or minimal SPA shell (no job body). The user
+    sees company and "About the job" in their browser because they're logged in;
+    our server sees "Sign in to LinkedIn" or empty content.
+
+    Returns:
+        True if the HTML looks like a LinkedIn login wall (no job content).
+    """
+    if not html or "linkedin.com" not in html.lower():
+        return False
+    html_lower = html.lower()
+    # Strong indicators of login wall
+    login_indicators = [
+        "sign in to linkedin",
+        "sign in to view",
+        "log in to linkedin",
+        "join linkedin",
+        "authwall",
+        "login wall",
+        "to view this job",
+        "to see this job",
+    ]
+    has_login_prompt = any(indicator in html_lower for indicator in login_indicators)
+    # Job content indicators (what we need to extract)
+    job_indicators = [
+        "about the job",
+        "job description",
+        "job-details",
+        "jobs-description",
+        "jobs-unified-top-card__company-name",
+        "job-details-jobs-unified-top-card",
+    ]
+    has_job_content = any(indicator in html_lower for indicator in job_indicators)
+    # If we see login prompt and no job content, it's a login wall
+    if has_login_prompt and not has_job_content:
+        logger.info("LinkedIn login wall detected: page shows sign-in prompt and no job content")
+        return True
+    # Also treat very small HTML as likely shell/redirect (no job body)
+    if len(html) < 8000 and not has_job_content:
+        logger.info(
+            "LinkedIn page has little content and no job indicators - likely login wall or SPA shell"
+        )
+        return True
+    return False
+
+
 def detect_captcha(html: str) -> bool:
     """
     Detect if HTML content contains CAPTCHA or human verification
@@ -1515,7 +1565,33 @@ async def analyze_job_url(
     else:
         html, error, _ = fetch_html(url)
 
-    # Step 2: Always use GPT model to extract all fields
+    # Step 2: For LinkedIn URLs, detect login wall (server gets sign-in page, not job content)
+    if html and not error and ad_source == "linkedin" and not html_content:
+        if detect_linkedin_login_wall(html):
+            logger.warning(
+                f"LinkedIn login wall for {url}: server received sign-in page, not job content"
+            )
+            return {
+                "success": False,
+                "url": url,
+                "message": (
+                    "LinkedIn shows the job only when you're signed in. Our server can't sign in, so we received a sign-in page instead of the job. "
+                    "Options: (1) Paste the job description and company name below, or (2) In the app, open the job in a browser while logged in and use 'Share page' / send HTML if supported."
+                ),
+                "company": "Not specified",
+                "job_title": "Not specified",
+                "ad_source": ad_source,
+                "full_description": "Not specified",
+                "hiring_manager": "",
+                "extractionMethod": "linkedin-login-wall",
+            }
+        # Log what we got for debugging
+        html_lower = html.lower()
+        logger.info(
+            f"LinkedIn fetch: html_len={len(html)}, has_about_the_job={'about the job' in html_lower}, has_sign_in={'sign in' in html_lower}"
+        )
+
+    # Step 3: Always use GPT model to extract all fields
     if html and not error:
         result = extract_with_chatgpt(html, openai_client)
         result.ad_source = ad_source

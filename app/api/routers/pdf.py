@@ -80,10 +80,12 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
     Requires printProperties (margins, font, page size, line height). The document is built
     with WeasyPrint using these settings so the PDF matches the user's settings.
     """
-    logger.info(
-        "Print Preview PDF request received - user_id=%s, user_email=%s",
+    # Use warning so it shows even if log level is WARNING; search for PRINT_PREVIEW_REQUEST
+    logger.warning(
+        "PRINT_PREVIEW_REQUEST - user_id=%s, user_email=%s, html_content_len=%s",
         request.user_id,
         request.user_email,
+        len(request.htmlContent or ""),
     )
 
     if not request.htmlContent or not request.htmlContent.strip():
