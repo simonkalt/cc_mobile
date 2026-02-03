@@ -105,6 +105,37 @@ def step3_linkedin_api_token_and_fetch(url: str) -> None:
     print()
 
 
+def step4_linkedin_auth_url(user_id: str) -> None:
+    """Step 4: Build LinkedIn 3-legged OAuth authorization URL (user connects LinkedIn)."""
+    from app.core.config import settings
+    from app.services.linkedin_job_api import build_authorization_url
+
+    print("\n--- Step 4: LinkedIn 3-legged auth URL ---")
+    client_id = getattr(settings, "LINKEDIN_CLIENT_ID", None) or ""
+    redirect_uri = getattr(settings, "LINKEDIN_REDIRECT_URI", None) or ""
+    scope = (getattr(settings, "LINKEDIN_SCOPE", None) or "").strip()
+    if not client_id or not redirect_uri:
+        print("Result: FAIL – set LINKEDIN_CLIENT_ID and LINKEDIN_REDIRECT_URI in .env")
+        print()
+        return
+    if not scope:
+        print(
+            "Result: FAIL – set LINKEDIN_SCOPE in .env (exact scope from Developer Portal → Auth tab)"
+        )
+        print()
+        return
+    url = build_authorization_url(
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        state=user_id,
+        scope=scope,
+    )
+    print("Open this URL in a browser to connect LinkedIn (state = user_id):")
+    print(url)
+    print("Result: OK – use this URL in app or browser; after auth, callback will store token.")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Test LinkedIn job extraction steps (run from project root)."
@@ -112,8 +143,8 @@ def main() -> None:
     parser.add_argument(
         "--step",
         type=int,
-        choices=[1, 2, 3],
-        help="Step to run (1=extract job ID, 2=config, 3=token+fetch). More steps added as we build.",
+        choices=[1, 2, 3, 4],
+        help="Step to run (1=extract job ID, 2=config, 3=2-legged token+fetch, 4=3-legged auth URL).",
     )
     parser.add_argument(
         "--url",
@@ -145,6 +176,12 @@ def main() -> None:
                 url = "https://www.linkedin.com/jobs/view/4337608168"
                 print(f"Using default: {url}")
             step3_linkedin_api_token_and_fetch(url)
+        elif args.step == 4:
+            user_id = input("Enter user_id (for state in callback): ").strip()
+            if not user_id:
+                user_id = "test-user-id"
+                print(f"Using default: {user_id}")
+            step4_linkedin_auth_url(user_id)
         return
 
     # Interactive menu
@@ -154,12 +191,12 @@ def main() -> None:
     print("Steps:")
     print("  1 – Extract LinkedIn job ID from URL")
     print("  2 – Verify LinkedIn API config (LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET)")
-    print("  3 – Get access token and fetch job by ID (from URL)")
-    print("  (more steps added as we build)")
+    print("  3 – 2-legged: get app token and fetch job by ID (from URL)")
+    print("  4 – 3-legged: build auth URL to connect LinkedIn (jobLibrary)")
     print("  0 – Exit")
     print()
 
-    choice = input("Select step (0–3): ").strip()
+    choice = input("Select step (0–4): ").strip()
     if choice == "0":
         return
     if choice == "1":
@@ -178,6 +215,13 @@ def main() -> None:
             url = "https://www.linkedin.com/jobs/view/4337608168"
             print(f"Using default: {url}")
         step3_linkedin_api_token_and_fetch(url)
+        return
+    if choice == "4":
+        user_id = input("Enter user_id (or Enter for default): ").strip()
+        if not user_id:
+            user_id = "test-user-id"
+            print(f"Using default: {user_id}")
+        step4_linkedin_auth_url(user_id)
         return
     print("Unknown step.")
 

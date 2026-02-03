@@ -1543,6 +1543,45 @@ For more information: https://platform.openai.com/docs/guides/error-codes/api-er
     return result
 
 
+def _map_job_library_to_result(lib_data: Dict, url: str) -> Optional[JobExtractionResult]:
+    """
+    Map LinkedIn jobLibrary FINDER response to JobExtractionResult.
+    Handles common shapes: { "elements": [ { job } ] } or single job object.
+    """
+    if not lib_data:
+        return None
+    job = None
+    if isinstance(lib_data, dict):
+        if "elements" in lib_data and lib_data["elements"]:
+            job = lib_data["elements"][0]
+        elif lib_data.get("title") or lib_data.get("jobTitle") or lib_data.get("company"):
+            job = lib_data
+    if not job or not isinstance(job, dict):
+        return None
+    result = JobExtractionResult()
+    result.method = "linkedin-joblibrary"
+    result.ad_source = "linkedin"
+    result.job_title = job.get("title") or job.get("jobTitle") or job.get("name")
+    if not result.job_title and isinstance(job.get("position"), dict):
+        result.job_title = job["position"].get("title") or job["position"].get("name")
+    if isinstance(result.job_title, dict):
+        result.job_title = result.job_title.get("title") or result.job_title.get("name")
+    result.company = None
+    co = job.get("company") or job.get("hiringOrganization") or job.get("companyName")
+    if isinstance(co, dict):
+        result.company = co.get("name") or co.get("legalName")
+    elif isinstance(co, str):
+        result.company = co
+    result.job_description = (
+        job.get("description") or job.get("jobDescription") or job.get("fullDescription")
+    )
+    result.hiring_manager = job.get("hiringManager") or job.get("recruiter") or ""
+    if isinstance(result.hiring_manager, dict):
+        result.hiring_manager = result.hiring_manager.get("name") or ""
+    result.is_complete = result.has_minimum_data()
+    return result
+
+
 async def analyze_job_url(
     url: str,
     user_id: Optional[str] = None,
@@ -1575,6 +1614,33 @@ async def analyze_job_url(
 
     # Detect ad_source from URL
     ad_source = detect_site(url)
+
+    # Step 0: For LinkedIn URLs, try 3-legged jobLibrary API if user has connected LinkedIn
+    if ad_source == "linkedin" and user_id and not html_content:
+        job_id = extract_linkedin_job_id(url)
+        if job_id:
+            try:
+                from app.services.user_service import get_linkedin_token
+                from app.services.linkedin_job_api import fetch_job_from_library
+
+                token_data = get_linkedin_token(user_id)
+                if token_data and token_data.get("access_token"):
+                    access_token = token_data["access_token"]
+                    lib_data = fetch_job_from_library(access_token, job_id)
+                    if lib_data:
+                        result = _map_job_library_to_result(lib_data, url)
+                        if result and result.has_minimum_data():
+                            response_data = result.to_dict()
+                            response_data["url"] = url
+                            response_data["success"] = True
+                            logger.info(
+                                "LinkedIn jobLibrary extraction succeeded for job_id=%s", job_id
+                            )
+                            return response_data
+            except Exception as e:
+                logger.debug(
+                    "LinkedIn jobLibrary path failed, falling back to scrape/ChatGPT: %s", e
+                )
 
     # Step 1: Fetch HTML from URL (or use provided HTML)
     if html_content:

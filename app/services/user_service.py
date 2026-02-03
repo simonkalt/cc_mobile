@@ -5,7 +5,7 @@ User service - business logic for user operations
 import logging
 import time
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 from bson import ObjectId
 from pymongo import ReturnDocument
 from fastapi import HTTPException, status
@@ -59,15 +59,23 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     app_settings = preferences.get("appSettings", {})
     personality_profiles = app_settings.get("personalityProfiles", [])
 
-    # If no personality profiles provided or empty, create default profile
+    # If no personality profiles provided or empty, create two defaults (server-side only)
     if not personality_profiles or len(personality_profiles) == 0:
+        base_ts = int(time.time() * 1000)
+        professional_desc = "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
         default_profile = {
-            "id": str(int(time.time() * 1000)),  # Current timestamp in milliseconds
+            "id": str(base_ts),
             "name": "Professional",
-            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional.",
+            "description": professional_desc,
         }
-        personality_profiles = [default_profile]
-        logger.info(f"Created default personality profile for new user: {user_data.email}")
+        default_profile_creative = {
+            "id": str(base_ts + 1),
+            "name": "Professional (Creative Layout)",
+            "description": professional_desc
+            + " Create a colorful and eye catching letter that includes multiple font styles, sizes, and colors.",
+        }
+        personality_profiles = [default_profile, default_profile_creative]
+        logger.info(f"Created default personality profiles for new user: {user_data.email}")
 
     # Ensure appSettings exists in preferences
     if "appSettings" not in preferences:
@@ -212,16 +220,24 @@ def create_user_from_registration_data(
     app_settings = preferences.get("appSettings", {})
     personality_profiles = app_settings.get("personalityProfiles", [])
 
-    # If no personality profiles provided or empty, create default profile
+    # If no personality profiles provided or empty, create two defaults (server-side only)
     if not personality_profiles or len(personality_profiles) == 0:
+        base_ts = int(time.time() * 1000)
+        professional_desc = "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
         default_profile = {
-            "id": str(int(time.time() * 1000)),
+            "id": str(base_ts),
             "name": "Professional",
-            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional.",
+            "description": professional_desc,
         }
-        personality_profiles = [default_profile]
+        default_profile_creative = {
+            "id": str(base_ts + 1),
+            "name": "Professional (Creative Layout)",
+            "description": professional_desc
+            + " Create a colorful and eye catching letter that includes multiple font styles, sizes, and colors.",
+        }
+        personality_profiles = [default_profile, default_profile_creative]
         logger.info(
-            f"Created default personality profile for new user: {registration_data['email']}"
+            f"Created default personality profiles for new user: {registration_data['email']}"
         )
 
     # Ensure appSettings exists in preferences
@@ -871,3 +887,52 @@ def decrement_generation_credits(user_id: str) -> bool:
     except Exception as e:
         logger.error(f"Error decrementing generation credits: {e}")
         return False
+
+
+def set_linkedin_token(user_id: str, token_data: Dict) -> bool:
+    """
+    Store LinkedIn OAuth token for a user (3-legged flow).
+    Sets preferences.linkedin = { access_token, expires_at, refresh_token?, scope? }.
+    """
+    if not is_connected():
+        logger.warning("MongoDB not connected; cannot set LinkedIn token")
+        return False
+    collection = get_collection(USERS_COLLECTION)
+    if not collection:
+        return False
+    try:
+        user_id_obj = ObjectId(user_id)
+    except Exception:
+        logger.warning("Invalid user_id for set_linkedin_token: %s", user_id)
+        return False
+    user = collection.find_one({"_id": user_id_obj})
+    if not user:
+        logger.warning("User not found for set_linkedin_token: %s", user_id)
+        return False
+    preferences = user.get("preferences") or {}
+    if not isinstance(preferences, dict):
+        preferences = {}
+    preferences["linkedin"] = token_data
+    result = collection.update_one(
+        {"_id": user_id_obj},
+        {"$set": {"preferences": preferences, "dateUpdated": datetime.utcnow()}},
+    )
+    if result.modified_count:
+        logger.info("LinkedIn token stored for user_id=%s", user_id)
+    return result.matched_count > 0
+
+
+def get_linkedin_token(user_id: str) -> Optional[Dict]:
+    """
+    Get stored LinkedIn OAuth token for a user (3-legged flow).
+    Returns preferences.linkedin dict or None if not set.
+    """
+    try:
+        user = get_user_by_id(user_id)
+        prefs = user.preferences or {}
+        linkedin = prefs.get("linkedin")
+        if isinstance(linkedin, dict) and linkedin.get("access_token"):
+            return linkedin
+    except Exception:
+        pass
+    return None

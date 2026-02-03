@@ -63,9 +63,16 @@ class Settings:
     # Google Places API
     GOOGLE_PLACES_API_KEY: Optional[str] = os.getenv("GOOGLE_PLACES_API_KEY")
 
-    # LinkedIn API (job extraction via OAuth2 client credentials)
+    # LinkedIn API (job extraction: 3-legged OAuth + jobLibrary FINDER)
     LINKEDIN_CLIENT_ID: Optional[str] = os.getenv("LINKEDIN_CLIENT_ID")
     LINKEDIN_CLIENT_SECRET: Optional[str] = os.getenv("LINKEDIN_CLIENT_SECRET")
+    # Callback URL registered in LinkedIn Developer Portal (Auth tab). E.g. https://yourapi.com/api/linkedin/callback
+    LINKEDIN_REDIRECT_URI: Optional[str] = os.getenv("LINKEDIN_REDIRECT_URI")
+    # Scope for 3-legged OAuth. MUST be the exact string shown in Developer Portal → Your app → Auth tab.
+    # Scopes are product-specific (e.g. jobLibrary has its own scope). invalid_scope_error = wrong value here.
+    LINKEDIN_SCOPE: Optional[str] = os.getenv("LINKEDIN_SCOPE")
+    # Optional: where to send user after successful LinkedIn connect (e.g. myapp://linkedin/connected)
+    LINKEDIN_SUCCESS_REDIRECT: Optional[str] = os.getenv("LINKEDIN_SUCCESS_REDIRECT")
 
     # Twilio Configuration
     TWILIO_ACCOUNT_SID: Optional[str] = os.getenv("TWILIO_ACCOUNT_SID")
