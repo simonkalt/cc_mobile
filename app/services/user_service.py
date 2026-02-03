@@ -59,8 +59,9 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     app_settings = preferences.get("appSettings", {})
     personality_profiles = app_settings.get("personalityProfiles", [])
 
-    # If no personality profiles provided or empty, create two defaults (server-side only)
-    if not personality_profiles or len(personality_profiles) == 0:
+    # If no personality profiles or fewer than two, create both defaults (server-side only)
+    # Client often sends one profile ("Professional"); we always want both defaults for new users.
+    if not personality_profiles or len(personality_profiles) < 2:
         base_ts = int(time.time() * 1000)
         professional_desc = "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
         default_profile = {
@@ -220,8 +221,8 @@ def create_user_from_registration_data(
     app_settings = preferences.get("appSettings", {})
     personality_profiles = app_settings.get("personalityProfiles", [])
 
-    # If no personality profiles provided or empty, create two defaults (server-side only)
-    if not personality_profiles or len(personality_profiles) == 0:
+    # If no personality profiles or fewer than two, create both defaults (server-side only)
+    if not personality_profiles or len(personality_profiles) < 2:
         base_ts = int(time.time() * 1000)
         professional_desc = "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
         default_profile = {
