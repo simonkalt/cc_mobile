@@ -41,7 +41,11 @@ def normalize_personality_profile(profile: dict) -> Optional[dict]:
         )
         return None
 
-    normalized = {"id": profile_id, "name": profile_name, "description": profile.get("description", "")}
+    normalized = {
+        "id": profile_id,
+        "name": profile_name,
+        "description": profile.get("description", ""),
+    }
     logger.debug(f"Normalized profile: {normalized}")
     return normalized
 
@@ -99,31 +103,31 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         UserResponse object
     """
     user_id = str(user_doc.get("_id", "unknown"))
-    
+
     # Normalize preferences to ensure personalityProfiles have correct structure
     # Use shallow copy instead of deep copy for better performance
     # Only deep copy if we actually need to modify nested structures
     preferences = user_doc.get("preferences")
-    
+
     if preferences and isinstance(preferences, dict):
         # Only deep copy if we need to modify nested structures (appSettings)
         # Use shallow copy first, then deep copy only appSettings if it exists
         preferences = preferences.copy()  # Shallow copy is faster
         if "appSettings" in preferences:
             preferences["appSettings"] = copy.deepcopy(preferences["appSettings"])
-        
+
         # Ensure appSettings exists
         if "appSettings" not in preferences:
             logger.warning(f"User {user_id}: appSettings missing from preferences. Creating it.")
             preferences["appSettings"] = {}
-        
+
         app_settings = preferences.get("appSettings", {})
-        
+
         if isinstance(app_settings, dict):
             # Always ensure personalityProfiles exists and is normalized
             # Get existing profiles or default to empty list
             existing_profiles = app_settings.get("personalityProfiles")
-            
+
             if existing_profiles is None:
                 logger.debug(
                     f"User {user_id}: personalityProfiles is None in database. "
@@ -136,19 +140,21 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
                     f"Converting to list."
                 )
                 existing_profiles = []
-            
+
             # Normalize personalityProfiles to ensure structure is {"id", "name", "description"} only
             # This will return an empty list if profiles is None or invalid
             normalized_profiles = normalize_personality_profiles(existing_profiles)
-            
+
             # Always set personalityProfiles (even if empty) to ensure it's present in response
             app_settings["personalityProfiles"] = normalized_profiles
-            
+
             # Ensure selectedModel defaults to last_llm_used if not set
             # This ensures the user's last used model is their default
             if not app_settings.get("selectedModel") and user_doc.get("last_llm_used"):
                 app_settings["selectedModel"] = user_doc.get("last_llm_used")
-                logger.debug(f"User {user_id}: Set selectedModel to last_llm_used: {user_doc.get('last_llm_used')}")
+                logger.debug(
+                    f"User {user_id}: Set selectedModel to last_llm_used: {user_doc.get('last_llm_used')}"
+                )
         else:
             logger.warning(
                 f"User {user_id}: appSettings is not a dict (type: {type(app_settings)}). "
@@ -169,9 +175,7 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         app_settings_init = {"personalityProfiles": []}
         if user_doc.get("last_llm_used"):
             app_settings_init["selectedModel"] = user_doc.get("last_llm_used")
-        preferences = {
-            "appSettings": app_settings_init
-        }
+        preferences = {"appSettings": app_settings_init}
 
     return UserResponse(
         id=str(user_doc["_id"]),
@@ -198,4 +202,6 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         subscriptionCurrentPeriodEnd=user_doc.get("subscriptionCurrentPeriodEnd"),
         lastPaymentDate=user_doc.get("lastPaymentDate"),
         stripeCustomerId=user_doc.get("stripeCustomerId"),
+        SMSOpt=user_doc.get("SMSOpt"),
+        SMSOptDate=user_doc.get("SMSOptDate"),
     )

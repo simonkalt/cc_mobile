@@ -129,6 +129,25 @@ def verify_token(token: str, token_type: str = "access") -> Dict[str, Any]:
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    # Reject empty or obviously invalid token format (JWT has 3 base64 segments separated by dots)
+    if not token or not isinstance(token, str):
+        if logger:
+            logger.error("JWT verification error: token missing or not a string")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization token is missing. Send header: Authorization: Bearer <access_token>",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = token.strip()
+    if not token or token.count(".") != 2:
+        if logger:
+            logger.error("JWT verification error: Not enough segments")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format. Use the access token from login in header: Authorization: Bearer <access_token>",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
 

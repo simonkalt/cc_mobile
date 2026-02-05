@@ -5,7 +5,7 @@ User service - business logic for user operations
 import logging
 import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 from bson import ObjectId
 from pymongo import ReturnDocument
 from fastapi import HTTPException, status
@@ -160,6 +160,8 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "stripeCustomerId": None,
         "generation_credits": 10,  # Default to 10 free generation credits for new users
         "max_credits": 10,  # Fixed maximum credits for free tier
+        "SMSOpt": None,
+        "SMSOptDate": None,
     }
 
     try:
@@ -323,6 +325,8 @@ def create_user_from_registration_data(
         "stripeCustomerId": None,
         "generation_credits": 10,  # Default to 10 free generation credits for new users
         "max_credits": 10,  # Fixed maximum credits for free tier
+        "SMSOpt": None,
+        "SMSOptDate": None,
     }
 
     try:
@@ -624,6 +628,42 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update user: {str(e)}",
         )
+
+
+def set_sms_opt(user_id: str, sms_opt: Literal["IN", "OUT"]) -> UserResponse:
+    """Set SMS opt-in or opt-out for the user. Persists SMSOpt and SMSOptDate."""
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
+
+    try:
+        user_id_obj = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID format"
+        )
+
+    now = datetime.utcnow()
+    updated_user = collection.find_one_and_update(
+        {"_id": user_id_obj},
+        {"$set": {"SMSOpt": sms_opt, "SMSOptDate": now, "dateUpdated": now}},
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    logger.info(f"SMS opt set to {sms_opt} for user {user_id}")
+    return user_doc_to_response(updated_user)
 
 
 def delete_user(user_id: str) -> Dict:

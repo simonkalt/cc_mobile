@@ -14,6 +14,7 @@ from app.models.user import (
     UserLoginResponse,
     RefreshTokenRequest,
     RefreshTokenResponse,
+    SMSOptRequest,
 )
 from app.core.auth import get_current_user
 from app.utils.jwt import create_access_token, verify_token
@@ -24,6 +25,7 @@ from app.services.user_service import (
     update_user,
     delete_user,
     login_user,
+    set_sms_opt,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,6 +152,17 @@ async def refresh_token_endpoint(request: RefreshTokenRequest):
 async def get_current_user_endpoint(current_user: UserResponse = Depends(get_current_user)):
     """Get current authenticated user"""
     return current_user
+
+
+@router.put("/me/sms-opt", response_model=UserResponse)
+async def set_sms_opt_endpoint(
+    body: SMSOptRequest, current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Set SMS opt-in or opt-out for the current user.
+    Persists SMSOpt ('IN' or 'OUT') and SMSOptDate (timestamp) to the database.
+    """
+    return set_sms_opt(current_user.id, body.SMSOpt)
 
 
 @router.get(

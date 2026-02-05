@@ -1,8 +1,9 @@
 """
 User-related Pydantic models
 """
+
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 
 
@@ -102,6 +103,9 @@ class UserResponse(BaseModel):
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
     lastPaymentDate: Optional[datetime] = None
     stripeCustomerId: Optional[str] = None
+    # SMS marketing/notifications opt-in
+    SMSOpt: Optional[Literal["IN", "OUT"]] = None
+    SMSOptDate: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -116,6 +120,12 @@ class UserLoginResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class SMSOptRequest(BaseModel):
+    """Request body for SMS opt-in/opt-out. SMSOpt must be 'IN' or 'OUT'."""
+
+    SMSOpt: Literal["IN", "OUT"]
+
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
@@ -123,4 +133,3 @@ class RefreshTokenRequest(BaseModel):
 class RefreshTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-
