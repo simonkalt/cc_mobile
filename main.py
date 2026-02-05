@@ -9,7 +9,7 @@ try:
 except ImportError:
     AUTH_AVAILABLE = False
     get_current_user = None  # Will be set later if available
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError, EmailStr, Field
@@ -241,6 +241,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 # OAuth callback endpoint for Zoho Mail API setup - defined early to ensure it's registered
 @app.get("/oauth/callback")
 async def oauth_callback(request: Request):
@@ -251,7 +252,7 @@ async def oauth_callback(request: Request):
     code = request.query_params.get("code")
     error = request.query_params.get("error")
     error_description = request.query_params.get("error_description")
-    
+
     if error:
         logger.warning(f"OAuth callback error: {error} - {error_description}")
         return JSONResponse(
@@ -260,10 +261,10 @@ async def oauth_callback(request: Request):
                 "success": False,
                 "error": error,
                 "error_description": error_description or "No description provided",
-                "message": "OAuth authorization failed. Please try the authorization process again."
-            }
+                "message": "OAuth authorization failed. Please try the authorization process again.",
+            },
         )
-    
+
     if not code:
         logger.warning("OAuth callback received without authorization code")
         return JSONResponse(
@@ -272,10 +273,10 @@ async def oauth_callback(request: Request):
                 "success": False,
                 "error": "missing_code",
                 "error_description": "The authorization code was not found in the callback URL.",
-                "message": "No authorization code received. Please try the authorization process again."
-            }
+                "message": "No authorization code received. Please try the authorization process again.",
+            },
         )
-    
+
     # Success - return the authorization code
     logger.info(f"OAuth callback received - Authorization code: {code[:20]}...")
     return JSONResponse(
@@ -284,9 +285,10 @@ async def oauth_callback(request: Request):
             "success": True,
             "code": code,
             "message": "Authorization code received successfully. Use this code to generate your refresh token.",
-            "next_step": "Exchange this authorization code for a refresh token using the Zoho OAuth token endpoint."
-        }
+            "next_step": "Exchange this authorization code for a refresh token using the Zoho OAuth token endpoint.",
+        },
     )
+
 
 # Mount static files for website and documents
 # Get the project root directory - try multiple methods for compatibility
@@ -402,6 +404,7 @@ logger.info("ATTEMPTING TO IMPORT SUBSCRIPTIONS ROUTER...")
 logger.info("=" * 80)
 try:
     from app.api.routers import subscriptions
+
     print(f"✓ Successfully imported subscriptions module")
     logger.info(f"✓ Successfully imported subscriptions module: {subscriptions}")
     print(f"✓ Subscriptions router object exists: {hasattr(subscriptions, 'router')}")
@@ -410,17 +413,17 @@ try:
     logger.info(f"✓ Subscriptions router prefix: {subscriptions.router.prefix}")
     print(f"✓ Subscriptions router routes count: {len(subscriptions.router.routes)}")
     logger.info(f"✓ Subscriptions router routes count: {len(subscriptions.router.routes)}")
-    
+
     # Log all routes in the subscriptions router
     print("Routes in subscriptions router:")
     logger.info("Routes in subscriptions router:")
     for route in subscriptions.router.routes:
-        if hasattr(route, 'path'):
+        if hasattr(route, "path"):
             path = route.path
-            methods = getattr(route, 'methods', set())
+            methods = getattr(route, "methods", set())
             print(f"  - Route: {path} (methods: {methods})")
             logger.info(f"  - Route: {path} (methods: {methods})")
-    
+
     app.include_router(subscriptions.router)
     print("✓ Successfully registered subscriptions router")
     logger.info("✓ Successfully registered subscriptions router")
@@ -430,18 +433,21 @@ except ImportError as e:
     print(f"❌ FAILED TO IMPORT SUBSCRIPTIONS ROUTER: {e}")
     logger.error(f"❌ Failed to import subscriptions router: {e}", exc_info=True)
     import traceback
+
     print(traceback.format_exc())
     logger.error(f"Import traceback: {traceback.format_exc()}")
 except AttributeError as e:
     print(f"❌ SUBSCRIPTIONS ROUTER MISSING 'router' ATTRIBUTE: {e}")
     logger.error(f"❌ Subscriptions router missing 'router' attribute: {e}", exc_info=True)
     import traceback
+
     print(traceback.format_exc())
     logger.error(f"AttributeError traceback: {traceback.format_exc()}")
 except Exception as e:
     print(f"❌ FAILED TO REGISTER SUBSCRIPTIONS ROUTER: {e}")
     logger.error(f"❌ Failed to register subscriptions router: {e}", exc_info=True)
     import traceback
+
     print(traceback.format_exc())
     logger.error(f"Exception traceback: {traceback.format_exc()}")
 print("=" * 80)
@@ -1179,10 +1185,17 @@ except ImportError:
 # The original function definition (~690 lines) has been moved to app/services/cover_letter_service.py
 
 
-# Define a simple root endpoint to check if the server is running
+# Serve webpage at root (/) so port 443 / root URL shows website/index.html
 @app.get("/")
 def read_root():
-    return {"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    index_path = os.path.join(project_root, "website", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    # Fallback if website/index.html is missing
+    return JSONResponse(
+        content={"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
+    )
 
 
 @app.get("/api/health")
