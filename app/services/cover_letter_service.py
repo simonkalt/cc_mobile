@@ -39,50 +39,6 @@ from app.services.user_service import (
 logger = logging.getLogger(__name__)
 
 
-# Placeholder used to normalize <br>; must not appear in normal content
-_BR_PLACEHOLDER = "\u200b__BR__\u200b"
-
-
-def normalize_cover_letter_html(html_content: str) -> str:
-    """
-    Post-process LLM-returned HTML so line breaks are consistent and not oversized.
-    Applied once after we receive the HTML; both the returned response and PDF use this.
-    - Converts adjacent </p><p> into single <br /> so we don't get double-spaced lines from paragraph margins.
-    - Replaces all <br> variants with a placeholder, collapses runs to one, then canonical <br />.
-    """
-    if not html_content or not html_content.strip():
-        return html_content
-    # Adjacent <p> tags create paragraph margins (blank line between every line). Merge to single <br />; keep outer <p></p> so we don't create orphan tags and break HTML rendering.
-    html_content = re.sub(
-        r"</p>\s*<p(\s[^>]*)?>",
-        "<br />",
-        html_content,
-        flags=re.IGNORECASE,
-    )
-    # Replace any <br> variant with placeholder; \s includes newlines
-    html_content = re.sub(
-        r"<br\s*/?\s*>|</?\s*br\s*>",
-        _BR_PLACEHOLDER,
-        html_content,
-        flags=re.IGNORECASE,
-    )
-    # Collapse one or more placeholders (with optional whitespace between) to one placeholder
-    html_content = re.sub(
-        r"(\s*" + re.escape(_BR_PLACEHOLDER) + r"\s*)+",
-        _BR_PLACEHOLDER,
-        html_content,
-    )
-    html_content = html_content.replace(_BR_PLACEHOLDER, "<br />")
-    # Ensure a line break before "Sincerely," so the closing never runs into the body
-    html_content = re.sub(
-        r"([.>])\s*Sincerely\s*,",
-        r"\1<br />Sincerely,",
-        html_content,
-        flags=re.IGNORECASE,
-    )
-    return html_content
-
-
 # Try to import LLM libraries
 try:
     from openai import OpenAI
@@ -947,9 +903,6 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info("Converted recovered markdown to HTML for display")
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
-
-        # Normalize <br> so we never have extra line breaks (LLM sometimes adds one too many)
-        raw_html = normalize_cover_letter_html(raw_html)
 
         # Keep line breaks: collapse multiple newlines to one, then convert to single <br /> so we don't add excess space
         raw_html = re.sub(r"[\r\n]+", "\n", raw_html)
