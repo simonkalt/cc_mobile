@@ -47,14 +47,22 @@ def normalize_cover_letter_html(html_content: str) -> str:
     """
     Post-process LLM-returned HTML so line breaks are consistent and not oversized.
     Applied once after we receive the HTML; both the returned response and PDF use this.
-    - Replaces all <br> variants (e.g. <br>, <br/>, <br />, </br>) with a placeholder.
-    - Collapses runs of placeholder + any whitespace to one placeholder so we never get
-      double/multiple breaks (including when newlines sit next to <br>).
-    - Replaces placeholder with canonical <br /> so downstream and PDF stay in sync.
+    - Converts adjacent </p><p> into single <br /> so we don't get double-spaced lines from paragraph margins.
+    - Replaces all <br> variants with a placeholder, collapses runs to one, then canonical <br />.
     """
     if not html_content or not html_content.strip():
         return html_content
-    # Replace any <br> variant (self-closing or pair) with placeholder; \s includes newlines
+    # Adjacent <p> tags create paragraph margins (blank line between every line). Merge to single break.
+    html_content = re.sub(
+        r"</p>\s*<p(\s[^>]*)?>",
+        "<br />",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    # Remove leading <p> and trailing </p> left after merging (optional attributes on opening tag)
+    html_content = re.sub(r"^\s*<p(\s[^>]*)?>\s*", "", html_content, flags=re.IGNORECASE)
+    html_content = re.sub(r"\s*</p>\s*$", "", html_content, flags=re.IGNORECASE)
+    # Replace any <br> variant with placeholder; \s includes newlines
     html_content = re.sub(
         r"<br\s*/?\s*>|</?\s*br\s*>",
         _BR_PLACEHOLDER,
