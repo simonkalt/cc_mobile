@@ -445,12 +445,12 @@ Apply this personality throughout the entire cover letter. This instruction take
                         if font_family and font_family.lower() == "default":
                             font_instruction = """
 === HTML FORMATTING INSTRUCTION ===
-When generating HTML output, ensure all text uses a minimum base font-size of 13pt. Headers should be larger, etc., so 13pt is the smallest font-size on the document. This method should be applied to the main content and all paragraphs.
-Use inline styles like: style="font-size: 13pt;" on your HTML elements to ensure proper text sizing.
+When generating HTML output, ensure all text uses a minimum base font-size of 12pt. Headers should be larger, etc., so 12pt is the smallest font-size on the document. This method should be applied to the main content and all paragraphs.
+Use inline styles like: style="font-size: 12pt;" on your HTML elements to ensure proper text sizing.
 === END HTML FORMATTING INSTRUCTION ===
 """
                             logger.info(
-                                "Added font-size: 13pt instruction to LLM prompt (fontFamily is 'default')"
+                                "Added font-size: 12pt instruction to LLM prompt (fontFamily is 'default')"
                             )
     except Exception as e:
         logger.warning(f"Could not retrieve font settings for LLM prompting: {e}")
@@ -524,7 +524,6 @@ Use inline styles like: style="font-size: 13pt;" on your HTML elements to ensure
         logger.info(
             f"Additional instructions override detection: starts_with_override={starts_with_override}, contains_explicit_override={contains_explicit_override}, is_override={is_override}"
         )
-        logger.info(f"First 200 chars of instructions: {additional_instructions[:200]}")
 
         if is_override:
             # User explicitly requested override - use override language
