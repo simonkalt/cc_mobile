@@ -22,7 +22,13 @@ pip install cycler kiwisolver "matplotlib>=3.6.0,<4.0.0"
 
 # 4. Install the remaining non-conflicting packages from the minimalist list
 echo "Step 4: Installing remaining packages from requirements.txt..."
-pip install -r requirements.txt && playwright install chromium
+pip install -r requirements.txt
+
+# 5. Install Playwright Chromium into project dir so Render runtime finds it (same path as app expects)
+echo "Step 5: Installing Playwright Chromium..."
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$(pwd)/playwright-browsers}"
+mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+python -m playwright install chromium
 
 # Example build command in Render settings:
 chmod 600 oci_api_key.pem

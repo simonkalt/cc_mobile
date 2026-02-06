@@ -3,6 +3,7 @@
 .venv
 venv/
 debug/
+playwright-browsers/
 
 # Python cache files
 __pycache__/

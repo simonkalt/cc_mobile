@@ -4,6 +4,7 @@ PDF generation service
 
 import logging
 import base64
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,14 @@ from typing import Dict, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Use project-local browser path so Render (and other hosts) find Chromium installed at build time.
+# Must be set before importing playwright.
+if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+    _pdf_service_root = Path(__file__).resolve().parent
+    _project_root = _pdf_service_root.parent.parent
+    _playwright_browsers = _project_root / "playwright-browsers"
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_playwright_browsers)
 
 
 def _normalize_html_for_pdf(html_content: str) -> str:
@@ -173,9 +182,6 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         line_height = print_properties.get("lineHeight", 1.6)
         page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
         use_default_fonts = print_properties.get("useDefaultFonts", False)
-        pdf_size = _pdf_font_size(
-            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
-        )
 
         # Use @page margin: 0 and body padding for margins so all four sides are reliably inset
         # (WeasyPrint can ignore @page margin-right in some cases; body padding always applies)
@@ -197,7 +203,7 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
                 }}
                 body {{
                     font-family: "{font_family}", serif;
-                    font-size: {pdf_size}pt;
+                    font-size: {font_size}pt;
                     line-height: {line_height};
                     margin: 0;
                     padding: {mt}in {mr}in {mb}in {ml}in;

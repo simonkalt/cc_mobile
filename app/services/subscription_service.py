@@ -84,11 +84,11 @@ if STRIPE_AVAILABLE:
         logger.info(
             f"Stripe API key configured ({key_type} mode), API version: {STRIPE_API_VERSION}"
         )
-        # Verify the key format (Stripe keys start with sk_test_ or sk_live_)
-        if stripe_api_key.startswith("sk_live_"):
+        # Verify the key format (sk_ = secret, rk_ = restricted; _live_ or _test_)
+        if stripe_api_key.startswith("sk_live_") or stripe_api_key.startswith("rk_live_"):
             logger.info("Using Stripe PRODUCTION API key")
-        elif stripe_api_key.startswith("sk_test_"):
-            logger.warning("Using Stripe TEST API key - ensure this is for development only")
+        elif stripe_api_key.startswith("sk_test_") or stripe_api_key.startswith("rk_test_"):
+            logger.info("Using Stripe TEST API key (or restricted test key)")
         else:
             logger.warning(
                 f"Stripe API key format unexpected (starts with: {stripe_api_key[:7]}...)"
