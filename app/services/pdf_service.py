@@ -14,6 +14,26 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _normalize_html_for_pdf(html_content: str) -> str:
+    """
+    Normalize HTML for PDF so spacing is consistent regardless of editor output.
+    Rich editors (e.g. react-native-pell-rich-editor) often use <p> per line, which
+    adds paragraph margins and makes the PDF look double-spaced. We merge adjacent
+    </p><p> into a single <br /> here so the PDF has single-line spacing while the
+    same HTML can still look correct in the editor.
+    """
+    if not html_content:
+        return html_content
+    # Merge adjacent paragraphs so we don't get 0.75em margin between every line in PDF
+    html_content = re.sub(
+        r"</p>\s*<p(\s[^>]*)?>",
+        "<br />",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    return _collapse_br_for_pdf(html_content)
+
+
 def _collapse_br_for_pdf(html_content: str) -> str:
     """
     Prevent oversized line breaks in PDF: collapse redundant <br> and newlines so we
@@ -318,7 +338,7 @@ body {{ {body_style} }}
 .print-content * {{ max-width: 100%; }}
 .print-content table {{ table-layout: fixed; width: 100% !important; }}
 .print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
-.print-content p {{ page-break-inside: avoid; margin: 0 0 0.75em 0; }}
+.print-content p {{ page-break-inside: avoid; margin: 0 0 0.2em 0; }}
 .print-content br {{ display: block; margin-top: 0.12em; }}
 </style>
 </head>
@@ -398,8 +418,8 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{ {body_style} }}
         /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
-        /* Paragraph spacing so <p> blocks don't run together; allow paragraphs to break across pages */
-        .print-content p {{ margin: 0 0 0.75em 0; padding: 0; }}
+        /* Minimal p margin so any remaining <p> from rich editor don't add extra line height in PDF */
+        .print-content p {{ margin: 0 0 0.2em 0; padding: 0; }}
         /* Single <br /> = one line break; keep margin small so PDF matches on-screen spacing */
         .print-content br {{ display: block; margin-top: 0.12em; }}
         /* Keep heading with the next block (avoid break right after a heading) */
@@ -491,8 +511,8 @@ async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> s
     font_family = print_properties.get("fontFamily", "Times New Roman")
     font_size = print_properties.get("fontSize", 12)
 
-    # Collapse redundant <br /> and newlines so PDF doesn't get double spacing, then normalize \n to <br />
-    html_content = _collapse_br_for_pdf(html_content)
+    # Normalize for PDF: merge </p><p> to <br /> (editor-friendly HTML → compact PDF), collapse redundant <br />, then \n → <br />
+    html_content = _normalize_html_for_pdf(html_content)
     html_content = _normalize_line_breaks_in_html(html_content)
 
     # Raw HTML: no alteration (minimal wrapper only) so you can see what the raw parameter produces
