@@ -38,39 +38,20 @@ from app.services.user_service import (
 
 logger = logging.getLogger(__name__)
 
-# Placeholder for normalizing <br>; must not appear in normal content
-_BR_PLACEHOLDER = "\u200b__BR__\u200b"
-
 
 def normalize_cover_letter_html(html_content: str) -> str:
     """
-    Normalize LLM-returned HTML so the rich text display is single-line spacing (no double height).
-    - Merge adjacent </p><p> into one <br /> so paragraph margins don't double-space the editor.
-    - Collapse all <br> variants and runs to a single <br />.
-    - Ensure a line break before "Sincerely,". Keeps outer <p></p> to avoid orphan tags.
+    Normalize LLM HTML: remove <p> and </p>, replace with <br /> so paragraphs are
+    separated by line breaks (</p><p> becomes <br /><br /> = one blank line). Do not
+    collapse multiple <br /> so paragraph spacing is preserved.
     """
     if not html_content or not html_content.strip():
         return html_content
-    # Adjacent <p> tags create double spacing in the editor; merge to single <br />
-    html_content = re.sub(
-        r"</p>\s*<p(\s[^>]*)?>",
-        "<br />",
-        html_content,
-        flags=re.IGNORECASE,
-    )
-    # Replace any <br> variant with placeholder, collapse runs, then canonical <br />
-    html_content = re.sub(
-        r"<br\s*/?\s*>|</?\s*br\s*>",
-        _BR_PLACEHOLDER,
-        html_content,
-        flags=re.IGNORECASE,
-    )
-    html_content = re.sub(
-        r"(\s*" + re.escape(_BR_PLACEHOLDER) + r"\s*)+",
-        _BR_PLACEHOLDER,
-        html_content,
-    )
-    html_content = html_content.replace(_BR_PLACEHOLDER, "<br />")
+    # Remove </p> and <p...>, replace with <br /> so we get <br /><br /> between paragraphs
+    html_content = re.sub(r"</p>\s*", "<br />", html_content, flags=re.IGNORECASE)
+    html_content = re.sub(r"<p(\s[^>]*)?>\s*", "<br />", html_content, flags=re.IGNORECASE)
+    # Normalize <br> variants to <br /> (do not collapse runs — keep paragraph spacing)
+    html_content = re.sub(r"<br\s*/?\s*>|</?\s*br\s*>", "<br />", html_content, flags=re.IGNORECASE)
     # Ensure break before "Sincerely,"
     html_content = re.sub(
         r"([.>])\s*Sincerely\s*,",
