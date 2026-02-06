@@ -5,7 +5,6 @@ PDF generation service
 import logging
 import base64
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -13,10 +12,6 @@ from typing import Dict, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-# ANSI: light blue for snippet (94 = bright blue)
-_SNIPPET_COLOR = "\033[94m"
-_SNIPPET_RESET = "\033[0m"
 
 
 def _normalize_line_breaks_in_html(html_content: str) -> str:
@@ -38,19 +33,6 @@ def _normalize_line_breaks_in_html(html_content: str) -> str:
             normalized = re.sub(r"[\r\n]+", "\n", part)
             result.append(normalized.replace("\n", "<br />"))
     return "".join(result)
-
-
-def _log_snippet_light_blue(html_snippet: str, max_chars: int = 4000) -> None:
-    """Log HTML snippet in light blue; also print to stdout so it shows even if logging is broken."""
-    content = (html_snippet or "(no HTML content)")[:max_chars]
-    msg = f"{_SNIPPET_COLOR}[Print Preview HTML snippet]\n{content}{_SNIPPET_RESET}"
-    logger.warning("%s", msg)
-    # Unconditional print so you always see it in the terminal (search for PRINT_PREVIEW_HTML_SNIPPET)
-    print(
-        f"\n{_SNIPPET_COLOR}PRINT_PREVIEW_HTML_SNIPPET\n{content}{_SNIPPET_RESET}\n",
-        flush=True,
-        file=sys.stderr,
-    )
 
 
 def _save_debug_pdf(pdf_bytes: bytes, source: str, html_snippet: Optional[str] = None) -> None:
@@ -86,12 +68,12 @@ except (ImportError, OSError) as e:
     logger.warning(f"weasyprint not available. PDF generation will not work. Error: {str(e)}")
 
 try:
-    from playwright.sync_api import sync_playwright
+    from playwright.async_api import async_playwright
 
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
-    sync_playwright = None
+    async_playwright = None
     logger.info(
         "playwright not installed. PDF will use WeasyPrint (install playwright for more reliable margins)."
     )
@@ -212,7 +194,6 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
                     background-color: #f4f4f4;
                     padding: 10px;
                     border-radius: 3px;
-                    overflow-x: auto;
                     page-break-inside: avoid;
                 }}
                 pre code {{
@@ -274,12 +255,10 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         raise Exception(f"Failed to generate PDF: {str(e)}")
 
 
-def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> bytes:
+async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> bytes:
     """
-    Generate PDF using Playwright (Chromium). Margins are applied via the
-    page.pdf(margin={...}) API so Chromium applies them at the PDF layer on
-    every page (avoids @page margin bugs at page breaks). Page size from CSS
-    @page with margin: 0 so only size is taken from CSS.
+    Generate PDF using Playwright (Chromium) Async API. Safe to call from asyncio.
+    Margins are applied via page.pdf(margin={...}) so Chromium applies them on every page.
     """
     margins = print_properties.get("margins", {})
     font_family = print_properties.get("fontFamily", "Times New Roman")
@@ -295,7 +274,6 @@ def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> b
     width_in = page_size.get("width", 8.5)
     height_in = page_size.get("height", 11.0)
 
-    # @page: size only; margin 0 so Chromium applies margins via API (reliable at page breaks)
     body_style = "margin: 0; padding: 0; box-sizing: border-box;"
     if not use_default_fonts:
         body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
@@ -329,7 +307,6 @@ body {{ {body_style} }}
 </body>
 </html>"""
 
-    # Margins via API (applied by Chromium on every page); size from CSS
     pdf_options = {
         "prefer_css_page_size": True,
         "margin": {
@@ -343,12 +320,12 @@ body {{ {body_style} }}
         pdf_options["width"] = f"{width_in}in"
         pdf_options["height"] = f"{height_in}in"
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.set_content(html_doc, wait_until="networkidle")
-        pdf_bytes = page.pdf(**pdf_options)
-        browser.close()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.set_content(html_doc, wait_until="networkidle")
+        pdf_bytes = await page.pdf(**pdf_options)
+        await browser.close()
 
     return pdf_bytes
 
@@ -415,8 +392,7 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         .print-content {{
             max-width: 100%;
             width: 100%;
-            overflow-x: hidden;
-            /* Prefer breaking at word boundaries; only break long words if needed */
+            /* WeasyPrint does not support overflow-x; use overflow-wrap for long words */
             overflow-wrap: break-word;
             word-wrap: break-word;
             word-break: normal;
@@ -464,7 +440,7 @@ def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
     return HTML(string=minimal).write_pdf()
 
 
-def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
+async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
     """
     Generate a PDF from HTML content using user print preferences.
     When PRINT_PREVIEW_USE_WEASYPRINT_ONLY is True, uses only WeasyPrint.
@@ -493,9 +469,6 @@ def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
     # Ensure line breaks render in PDF: convert literal newlines in text content to <br />
     html_content = _normalize_line_breaks_in_html(html_content)
 
-    # Log HTML snippet immediately (before PDF gen) so it always appears even if generation fails
-    _log_snippet_light_blue(html_content)
-
     # Raw HTML: no alteration (minimal wrapper only) so you can see what the raw parameter produces
     if settings.PRINT_PREVIEW_RAW_HTML:
         if not WEASYPRINT_AVAILABLE:
@@ -523,10 +496,10 @@ def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
         )
         return pdf_base64
 
-    # Prefer Playwright, fall back to WeasyPrint
-    if PLAYWRIGHT_AVAILABLE and sync_playwright:
+    # Prefer Playwright (async API), fall back to WeasyPrint
+    if PLAYWRIGHT_AVAILABLE and async_playwright:
         try:
-            pdf_bytes = _generate_pdf_via_playwright(html_content, print_properties)
+            pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
             _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
             pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
             logger.info(

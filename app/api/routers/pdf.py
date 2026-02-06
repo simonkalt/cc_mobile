@@ -113,7 +113,7 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
             "useDefaultFonts": request.printProperties.useDefaultFonts,
         }
 
-        pdf_base64 = generate_pdf_from_html(request.htmlContent, print_props_dict)
+        pdf_base64 = await generate_pdf_from_html(request.htmlContent, print_props_dict)
 
         logger.info("Print Preview PDF generated successfully")
         return {
