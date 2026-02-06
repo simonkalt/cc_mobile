@@ -24,6 +24,7 @@ uvicorn
 email-validator
 markdown
 weasyprint
+# Print preview PDF; after pip install run: playwright install chromium
 playwright>=1.40.0
 html5lib>=1.1
 beautifulsoup4>=4.12.0

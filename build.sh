@@ -22,7 +22,7 @@ pip install cycler kiwisolver "matplotlib>=3.6.0,<4.0.0"
 
 # 4. Install the remaining non-conflicting packages from the minimalist list
 echo "Step 4: Installing remaining packages from requirements.txt..."
-pip install -r requirements.txt
+pip install -r requirements.txt && playwright install chromium
 
 # Example build command in Render settings:
 chmod 600 oci_api_key.pem
