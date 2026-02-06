@@ -87,6 +87,14 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
         request.user_email,
         len(request.htmlContent or ""),
     )
+    if request.printProperties and request.printProperties.margins:
+        logger.info(
+            "Print margins from request (in): top=%s, right=%s, bottom=%s, left=%s",
+            request.printProperties.margins.top,
+            request.printProperties.margins.right,
+            request.printProperties.margins.bottom,
+            request.printProperties.margins.left,
+        )
 
     if not request.htmlContent or not request.htmlContent.strip():
         raise HTTPException(status_code=400, detail="htmlContent is required and cannot be empty")

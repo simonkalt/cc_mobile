@@ -334,13 +334,21 @@ async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict
         else:
             body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
 
+    # Apply user margins in @page so Chromium respects them (API margin can be ignored when prefer_css_page_size is True)
+    logger.info(
+        "Playwright PDF margins (in): top=%s, right=%s, bottom=%s, left=%s",
+        margin_top,
+        margin_right,
+        margin_bottom,
+        margin_left,
+    )
     html_doc = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8">
 <style>
 @page {{
   size: {width_in}in {height_in}in;
-  margin: 0;
+  margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
 }}
 *, *::before, *::after {{ box-sizing: border-box; }}
 body {{ {body_style} }}
@@ -363,14 +371,10 @@ body {{ {body_style} }}
 </body>
 </html>"""
 
+    # Margins applied via @page in HTML above; prefer_css_page_size so Chromium uses CSS for size and margin
     pdf_options = {
         "prefer_css_page_size": True,
-        "margin": {
-            "top": f"{margin_top}in",
-            "right": f"{margin_right}in",
-            "bottom": f"{margin_bottom}in",
-            "left": f"{margin_left}in",
-        },
+        "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"},
     }
     if not (abs(width_in - 8.5) < 0.01 and abs(height_in - 11.0) < 0.01):
         pdf_options["width"] = f"{width_in}in"
