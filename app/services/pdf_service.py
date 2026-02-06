@@ -371,7 +371,14 @@ body {{ {body_style} }}
         pdf_options["height"] = f"{height_in}in"
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        )
         page = await browser.new_page()
         await page.set_content(html_doc, wait_until="networkidle")
         pdf_bytes = await page.pdf(**pdf_options)
