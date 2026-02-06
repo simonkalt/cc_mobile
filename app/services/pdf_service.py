@@ -13,6 +13,15 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Preview PDF font is rendered ~2pt larger than desired; reduce by 2pt (min 8pt)
+PDF_FONT_SIZE_OFFSET_PT = -2
+PDF_FONT_SIZE_MIN_PT = 8
+
+
+def _pdf_font_size(user_size: float) -> float:
+    """Return font size for PDF body (user size minus offset, with minimum)."""
+    return max(PDF_FONT_SIZE_MIN_PT, user_size + PDF_FONT_SIZE_OFFSET_PT)
+
 
 def _normalize_html_for_pdf(html_content: str) -> str:
     """
@@ -173,6 +182,9 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         line_height = print_properties.get("lineHeight", 1.6)
         page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
         use_default_fonts = print_properties.get("useDefaultFonts", False)
+        pdf_size = _pdf_font_size(
+            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
+        )
 
         # Use @page margin: 0 and body padding for margins so all four sides are reliably inset
         # (WeasyPrint can ignore @page margin-right in some cases; body padding always applies)
@@ -194,7 +206,7 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
                 }}
                 body {{
                     font-family: "{font_family}", serif;
-                    font-size: {font_size}pt;
+                    font-size: {pdf_size}pt;
                     line-height: {line_height};
                     margin: 0;
                     padding: {mt}in {mr}in {mb}in {ml}in;
@@ -318,13 +330,15 @@ async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict
 
     body_style = "margin: 0; padding: 0; box-sizing: border-box;"
     if not use_default_fonts:
-        # When fontFamily is "default", use 12pt and Arial so default size is applied in PDF
+        pdf_size = _pdf_font_size(
+            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
+        )
         if font_family and str(font_family).strip().lower() == "default":
-            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
-                line_height
+            body_style += " font-family: Arial, sans-serif; font-size: {0}pt; line-height: {1}; color: #000;".format(
+                pdf_size, line_height
             )
         else:
-            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+            body_style += f' font-family: "{font_family}", serif; font-size: {pdf_size}pt; line-height: {line_height}; color: #000;'
 
     html_doc = f"""<!DOCTYPE html>
 <html>
@@ -405,12 +419,15 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         "orphans: 1; widows: 1; hyphens: none;"
     )
     if not use_default_fonts:
+        pdf_size = _pdf_font_size(
+            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
+        )
         if font_family and str(font_family).strip().lower() == "default":
-            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
-                line_height
+            body_style += " font-family: Arial, sans-serif; font-size: {0}pt; line-height: {1}; color: #000;".format(
+                pdf_size, line_height
             )
         else:
-            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+            body_style += f' font-family: "{font_family}", serif; font-size: {pdf_size}pt; line-height: {line_height}; color: #000;'
 
     wrapper = f"""
 <!DOCTYPE html>
@@ -476,7 +493,10 @@ def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
     use_default_fonts = print_properties.get("useDefaultFonts", False)
     body_css = "margin: 0; padding: 0;"
     if not use_default_fonts:
-        body_css += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height};'
+        pdf_size = _pdf_font_size(
+            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
+        )
+        body_css += f' font-family: "{font_family}", serif; font-size: {pdf_size}pt; line-height: {line_height};'
     minimal = f"""<!DOCTYPE html>
 <html>
 <head>
