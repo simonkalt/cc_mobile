@@ -52,16 +52,13 @@ def normalize_cover_letter_html(html_content: str) -> str:
     """
     if not html_content or not html_content.strip():
         return html_content
-    # Adjacent <p> tags create paragraph margins (blank line between every line). Merge to single break.
+    # Adjacent <p> tags create paragraph margins (blank line between every line). Merge to single <br />; keep outer <p></p> so we don't create orphan tags and break HTML rendering.
     html_content = re.sub(
         r"</p>\s*<p(\s[^>]*)?>",
         "<br />",
         html_content,
         flags=re.IGNORECASE,
     )
-    # Remove leading <p> and trailing </p> left after merging (optional attributes on opening tag)
-    html_content = re.sub(r"^\s*<p(\s[^>]*)?>\s*", "", html_content, flags=re.IGNORECASE)
-    html_content = re.sub(r"\s*</p>\s*$", "", html_content, flags=re.IGNORECASE)
     # Replace any <br> variant with placeholder; \s includes newlines
     html_content = re.sub(
         r"<br\s*/?\s*>|</?\s*br\s*>",
