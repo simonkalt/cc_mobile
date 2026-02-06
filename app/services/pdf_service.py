@@ -31,7 +31,15 @@ def _normalize_html_for_pdf(html_content: str) -> str:
         html_content,
         flags=re.IGNORECASE,
     )
-    return _collapse_br_for_pdf(html_content)
+    html_content = _collapse_br_for_pdf(html_content)
+    # Ensure there is always a line break before "Sincerely," so the closing never runs into the body
+    html_content = re.sub(
+        r"([.>])\s*Sincerely\s*,",
+        r"\1<br />Sincerely,",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    return html_content
 
 
 def _collapse_br_for_pdf(html_content: str) -> str:

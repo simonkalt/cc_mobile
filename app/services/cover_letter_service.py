@@ -72,7 +72,15 @@ def normalize_cover_letter_html(html_content: str) -> str:
         _BR_PLACEHOLDER,
         html_content,
     )
-    return html_content.replace(_BR_PLACEHOLDER, "<br />")
+    html_content = html_content.replace(_BR_PLACEHOLDER, "<br />")
+    # Ensure a line break before "Sincerely," so the closing never runs into the body
+    html_content = re.sub(
+        r"([.>])\s*Sincerely\s*,",
+        r"\1<br />Sincerely,",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    return html_content
 
 
 # Try to import LLM libraries
