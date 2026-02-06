@@ -39,21 +39,35 @@ from app.services.user_service import (
 logger = logging.getLogger(__name__)
 
 
+# Placeholder used to normalize <br>; must not appear in normal content
+_BR_PLACEHOLDER = "\u200b__BR__\u200b"
+
+
 def normalize_cover_letter_html(html_content: str) -> str:
     """
     Post-process LLM-returned HTML so line breaks are consistent and not oversized.
     Applied once after we receive the HTML; both the returned response and PDF use this.
-    - Collapses whitespace (including newlines) around <br> variants to a single <br />.
-    - Collapses multiple consecutive <br /> to one so we never get double/multiple breaks.
-    - Uses canonical <br /> so downstream and PDF stay in sync.
+    - Replaces all <br> variants (e.g. <br>, <br/>, <br />, </br>) with a placeholder.
+    - Collapses runs of placeholder + any whitespace to one placeholder so we never get
+      double/multiple breaks (including when newlines sit next to <br>).
+    - Replaces placeholder with canonical <br /> so downstream and PDF stay in sync.
     """
     if not html_content or not html_content.strip():
         return html_content
-    # Collapse any whitespace around <br> variants to a single <br />
-    html_content = re.sub(r"\s*<br\s*/?\s*>\s*", "<br />", html_content, flags=re.IGNORECASE)
-    # Collapse multiple consecutive <br /> to one
-    html_content = re.sub(r"(<br\s*/?\s*>)+", "<br />", html_content, flags=re.IGNORECASE)
-    return html_content
+    # Replace any <br> variant (self-closing or pair) with placeholder; \s includes newlines
+    html_content = re.sub(
+        r"<br\s*/?\s*>|</?\s*br\s*>",
+        _BR_PLACEHOLDER,
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    # Collapse one or more placeholders (with optional whitespace between) to one placeholder
+    html_content = re.sub(
+        r"(\s*" + re.escape(_BR_PLACEHOLDER) + r"\s*)+",
+        _BR_PLACEHOLDER,
+        html_content,
+    )
+    return html_content.replace(_BR_PLACEHOLDER, "<br />")
 
 
 # Try to import LLM libraries
@@ -943,21 +957,28 @@ Please incorporate these instructions while maintaining consistency with all oth
                     if isinstance(print_props, dict) and print_props:
                         # Check if user wants to use default fonts from LLM HTML
                         use_default_fonts = print_props.get("useDefaultFonts", False)
+                        font_family = print_props.get("fontFamily", "Times New Roman")
+                        font_size = print_props.get("fontSize", 12)
+                        line_height = print_props.get("lineHeight", 1.6)
+                        is_default_font = (
+                            font_family and str(font_family).strip().lower() == "default"
+                        )
 
-                        if use_default_fonts:
-                            # Don't apply font styling - let LLM HTML dictate formatting
+                        if is_default_font:
+                            # "Default" font: always apply 12pt wrapper so size is guaranteed (LLM may omit inline size)
+                            font_size_pt = 12
+                            styled_html = f"""<div style="font-family: Arial, sans-serif; font-size: {font_size_pt}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
+                            logger.info(
+                                "Applied default font wrapper: font-size=12pt (fontFamily is 'default')"
+                            )
+                        elif use_default_fonts:
+                            # User chose a named font + useDefaultFonts: use raw LLM HTML
                             logger.info(
                                 "useDefaultFonts is True - skipping font styling, using raw LLM HTML"
                             )
                             styled_html = raw_html
                         else:
-                            # Get print properties with defaults
-                            font_family = print_props.get("fontFamily", "Times New Roman")
-                            font_size = print_props.get("fontSize", 12)
-                            line_height = print_props.get("lineHeight", 1.6)
-
-                            # Wrap HTML with CSS styling using inline styles
-                            # Escape any quotes in font family name
+                            # Apply user's chosen font/size/line-height
                             font_family_escaped = font_family.replace("'", "\\'")
                             styled_html = f"""<div style="font-family: '{font_family_escaped}', serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
                             logger.info(

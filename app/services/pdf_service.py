@@ -290,7 +290,13 @@ async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict
 
     body_style = "margin: 0; padding: 0; box-sizing: border-box;"
     if not use_default_fonts:
-        body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+        # When fontFamily is "default", use 12pt and Arial so default size is applied in PDF
+        if font_family and str(font_family).strip().lower() == "default":
+            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
+                line_height
+            )
+        else:
+            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
 
     html_doc = f"""<!DOCTYPE html>
 <html>
@@ -371,7 +377,12 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         "orphans: 1; widows: 1; hyphens: none;"
     )
     if not use_default_fonts:
-        body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+        if font_family and str(font_family).strip().lower() == "default":
+            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
+                line_height
+            )
+        else:
+            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
 
     wrapper = f"""
 <!DOCTYPE html>
