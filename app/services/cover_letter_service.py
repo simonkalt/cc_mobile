@@ -38,6 +38,24 @@ from app.services.user_service import (
 
 logger = logging.getLogger(__name__)
 
+
+def normalize_cover_letter_html(html_content: str) -> str:
+    """
+    Post-process LLM-returned HTML so line breaks are consistent and not oversized.
+    Applied once after we receive the HTML; both the returned response and PDF use this.
+    - Collapses whitespace (including newlines) around <br> variants to a single <br />.
+    - Collapses multiple consecutive <br /> to one so we never get double/multiple breaks.
+    - Uses canonical <br /> so downstream and PDF stay in sync.
+    """
+    if not html_content or not html_content.strip():
+        return html_content
+    # Collapse any whitespace around <br> variants to a single <br />
+    html_content = re.sub(r"\s*<br\s*/?\s*>\s*", "<br />", html_content, flags=re.IGNORECASE)
+    # Collapse multiple consecutive <br /> to one
+    html_content = re.sub(r"(<br\s*/?\s*>)+", "<br />", html_content, flags=re.IGNORECASE)
+    return html_content
+
+
 # Try to import LLM libraries
 try:
     from openai import OpenAI
@@ -902,6 +920,9 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info("Converted recovered markdown to HTML for display")
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
+
+        # Normalize <br> so we never have extra line breaks (LLM sometimes adds one too many)
+        raw_html = normalize_cover_letter_html(raw_html)
 
         # Keep line breaks: collapse multiple newlines to one, then convert to single <br /> so we don't add excess space
         raw_html = re.sub(r"[\r\n]+", "\n", raw_html)
