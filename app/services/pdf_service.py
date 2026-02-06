@@ -14,6 +14,20 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _collapse_br_for_pdf(html_content: str) -> str:
+    """
+    Prevent oversized line breaks in PDF: collapse redundant <br> and newlines so we
+    don't end up with double breaks (e.g. <br /> + newline converted to another <br />).
+    """
+    if not html_content:
+        return html_content
+    # Collapse any whitespace (including newlines) around <br> variants to a single <br />
+    html_content = re.sub(r"\s*<br\s*/?\s*>\s*", "<br />", html_content, flags=re.IGNORECASE)
+    # Collapse multiple consecutive <br /> to a single one
+    html_content = re.sub(r"(<br\s*/?\s*>)+", "<br />", html_content, flags=re.IGNORECASE)
+    return html_content
+
+
 def _normalize_line_breaks_in_html(html_content: str) -> str:
     """
     Ensure line breaks render in PDF: convert literal newlines in text content to <br />.
@@ -299,7 +313,7 @@ body {{ {body_style} }}
 .print-content table {{ table-layout: fixed; width: 100% !important; }}
 .print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
 .print-content p {{ page-break-inside: avoid; margin: 0 0 0.75em 0; }}
-.print-content br {{ display: block; margin-top: 0.25em; }}
+.print-content br {{ display: block; margin-top: 0.12em; }}
 </style>
 </head>
 <body>
@@ -375,8 +389,8 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
         /* Paragraph spacing so <p> blocks don't run together; allow paragraphs to break across pages */
         .print-content p {{ margin: 0 0 0.75em 0; padding: 0; }}
-        /* Ensure <br /> creates visible separation (some engines ignore default br spacing) */
-        .print-content br {{ display: block; margin-top: 0.25em; }}
+        /* Single <br /> = one line break; keep margin small so PDF matches on-screen spacing */
+        .print-content br {{ display: block; margin-top: 0.12em; }}
         /* Keep heading with the next block (avoid break right after a heading) */
         .print-content h1, .print-content h2, .print-content h3 {{
             page-break-after: avoid;
@@ -466,7 +480,8 @@ async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> s
     font_family = print_properties.get("fontFamily", "Times New Roman")
     font_size = print_properties.get("fontSize", 12)
 
-    # Ensure line breaks render in PDF: convert literal newlines in text content to <br />
+    # Collapse redundant <br /> and newlines so PDF doesn't get double spacing, then normalize \n to <br />
+    html_content = _collapse_br_for_pdf(html_content)
     html_content = _normalize_line_breaks_in_html(html_content)
 
     # Raw HTML: no alteration (minimal wrapper only) so you can see what the raw parameter produces
