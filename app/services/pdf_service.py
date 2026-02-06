@@ -13,15 +13,6 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Preview PDF font is rendered ~2pt larger than desired; reduce by 2pt (min 8pt)
-PDF_FONT_SIZE_OFFSET_PT = -2
-PDF_FONT_SIZE_MIN_PT = 8
-
-
-def _pdf_font_size(user_size: float) -> float:
-    """Return font size for PDF body (user size minus offset, with minimum)."""
-    return max(PDF_FONT_SIZE_MIN_PT, user_size + PDF_FONT_SIZE_OFFSET_PT)
-
 
 def _normalize_html_for_pdf(html_content: str) -> str:
     """
@@ -330,15 +321,12 @@ async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict
 
     body_style = "margin: 0; padding: 0; box-sizing: border-box;"
     if not use_default_fonts:
-        pdf_size = _pdf_font_size(
-            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
-        )
         if font_family and str(font_family).strip().lower() == "default":
-            body_style += " font-family: Arial, sans-serif; font-size: {0}pt; line-height: {1}; color: #000;".format(
-                pdf_size, line_height
+            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
+                line_height
             )
         else:
-            body_style += f' font-family: "{font_family}", serif; font-size: {pdf_size}pt; line-height: {line_height}; color: #000;'
+            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
 
     html_doc = f"""<!DOCTYPE html>
 <html>
@@ -419,15 +407,12 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         "orphans: 1; widows: 1; hyphens: none;"
     )
     if not use_default_fonts:
-        pdf_size = _pdf_font_size(
-            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
-        )
         if font_family and str(font_family).strip().lower() == "default":
-            body_style += " font-family: Arial, sans-serif; font-size: {0}pt; line-height: {1}; color: #000;".format(
-                pdf_size, line_height
+            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
+                line_height
             )
         else:
-            body_style += f' font-family: "{font_family}", serif; font-size: {pdf_size}pt; line-height: {line_height}; color: #000;'
+            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
 
     wrapper = f"""
 <!DOCTYPE html>
@@ -493,10 +478,7 @@ def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
     use_default_fonts = print_properties.get("useDefaultFonts", False)
     body_css = "margin: 0; padding: 0;"
     if not use_default_fonts:
-        pdf_size = _pdf_font_size(
-            12 if (font_family and str(font_family).strip().lower() == "default") else font_size
-        )
-        body_css += f' font-family: "{font_family}", serif; font-size: {pdf_size}pt; line-height: {line_height};'
+        body_css += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height};'
     minimal = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -516,25 +498,19 @@ def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
 async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
     """
     Generate a PDF from HTML content using user print preferences.
-    When PRINT_PREVIEW_USE_WEASYPRINT_ONLY is True, uses only WeasyPrint.
-    Otherwise prefers Playwright (Chromium), falling back to WeasyPrint if unavailable or on error.
+    Uses Playwright (Chromium) only for now; WeasyPrint is disabled for print preview.
+    Set PRINT_PREVIEW_USE_WEASYPRINT_ONLY later to switch to WeasyPrint exclusively.
 
     Args:
         html_content: The HTML fragment to convert (placed inside body).
-        print_properties: User print preferences (same shape as generate_pdf_from_markdown):
-            - margins: dict with top, right, bottom, left (in inches)
-            - fontFamily: str (default: "Times New Roman")
-            - fontSize: float (default: 12)
-            - lineHeight: float (default: 1.6)
-            - pageSize: dict with width, height (in inches, default 8.5 x 11)
-            - useDefaultFonts: bool (default: False). If True, no font/line styling on body.
+        print_properties: User print preferences (same shape as generate_pdf_from_markdown).
 
     Returns:
         Base64-encoded PDF data as a string (without data URI prefix).
 
     Raises:
-        ImportError: If neither playwright nor weasyprint is available (when not WeasyPrint-only).
-        Exception: If PDF generation fails.
+        ImportError: If playwright is not available.
+        Exception: If PDF generation fails (no WeasyPrint fallback).
     """
     font_family = print_properties.get("fontFamily", "Times New Roman")
     font_size = print_properties.get("fontSize", 12)
@@ -543,66 +519,32 @@ async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> s
     html_content = _normalize_html_for_pdf(html_content)
     html_content = _normalize_line_breaks_in_html(html_content)
 
-    # Raw HTML: no alteration (minimal wrapper only) so you can see what the raw parameter produces
+    # Raw HTML: minimal wrapper (requires WeasyPrint; if disabled, use Playwright path instead)
     if settings.PRINT_PREVIEW_RAW_HTML:
         if not WEASYPRINT_AVAILABLE:
-            raise ImportError("PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is not available.")
+            raise ImportError(
+                "PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is disabled for print preview."
+            )
         pdf_bytes = _generate_pdf_raw_html(html_content, print_properties)
         _save_debug_pdf(pdf_bytes, "print_preview_pdf_raw", html_snippet=html_content)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         logger.info("PDF from HTML (raw, no server styling) (%s bytes)", len(pdf_bytes))
         return pdf_base64
 
-    # WeasyPrint-only: skip Playwright (e.g. when Playwright margins are wrong at page breaks)
-    if settings.PRINT_PREVIEW_USE_WEASYPRINT_ONLY:
-        if not WEASYPRINT_AVAILABLE:
-            raise ImportError(
-                "PRINT_PREVIEW_USE_WEASYPRINT_ONLY is True but WeasyPrint is not available."
-            )
-        pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
-        _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
-        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-        logger.info(
-            "PDF from HTML via WeasyPrint only (%s bytes, font=%s, size=%spt)",
-            len(pdf_bytes),
-            font_family,
-            font_size,
-        )
-        return pdf_base64
-
-    # Prefer Playwright (async API), fall back to WeasyPrint
-    if PLAYWRIGHT_AVAILABLE and async_playwright:
-        try:
-            pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
-            _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
-            pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-            logger.info(
-                "PDF from HTML via Playwright (%s bytes, font=%s, size=%spt)",
-                len(pdf_bytes),
-                font_family,
-                font_size,
-            )
-            return pdf_base64
-        except Exception as e:
-            logger.warning("Playwright PDF failed, falling back to WeasyPrint: %s", e)
-
-    if not WEASYPRINT_AVAILABLE:
+    # Playwright only for print preview (WeasyPrint disabled for now)
+    if not PLAYWRIGHT_AVAILABLE or not async_playwright:
         raise ImportError(
-            "Neither playwright nor weasyprint is available. "
-            "Install playwright and run 'playwright install chromium' for reliable PDF margins."
+            "Playwright is required for print preview PDF. "
+            "Install with: pip install playwright && playwright install chromium"
         )
 
-    try:
-        pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
-        _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
-        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-        logger.info(
-            "PDF from HTML via WeasyPrint (%s bytes, font=%s, size=%spt)",
-            len(pdf_bytes),
-            font_family,
-            font_size,
-        )
-        return pdf_base64
-    except Exception as e:
-        logger.error("Error generating PDF from HTML: %s", e)
-        raise Exception(f"Failed to generate PDF: {str(e)}")
+    pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
+    _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    logger.info(
+        "PDF from HTML via Playwright (%s bytes, font=%s, size=%spt)",
+        len(pdf_bytes),
+        font_family,
+        font_size,
+    )
+    return pdf_base64
