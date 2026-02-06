@@ -38,6 +38,48 @@ from app.services.user_service import (
 
 logger = logging.getLogger(__name__)
 
+# Placeholder for normalizing <br>; must not appear in normal content
+_BR_PLACEHOLDER = "\u200b__BR__\u200b"
+
+
+def normalize_cover_letter_html(html_content: str) -> str:
+    """
+    Normalize LLM-returned HTML so the rich text display is single-line spacing (no double height).
+    - Merge adjacent </p><p> into one <br /> so paragraph margins don't double-space the editor.
+    - Collapse all <br> variants and runs to a single <br />.
+    - Ensure a line break before "Sincerely,". Keeps outer <p></p> to avoid orphan tags.
+    """
+    if not html_content or not html_content.strip():
+        return html_content
+    # Adjacent <p> tags create double spacing in the editor; merge to single <br />
+    html_content = re.sub(
+        r"</p>\s*<p(\s[^>]*)?>",
+        "<br />",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    # Replace any <br> variant with placeholder, collapse runs, then canonical <br />
+    html_content = re.sub(
+        r"<br\s*/?\s*>|</?\s*br\s*>",
+        _BR_PLACEHOLDER,
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    html_content = re.sub(
+        r"(\s*" + re.escape(_BR_PLACEHOLDER) + r"\s*)+",
+        _BR_PLACEHOLDER,
+        html_content,
+    )
+    html_content = html_content.replace(_BR_PLACEHOLDER, "<br />")
+    # Ensure break before "Sincerely,"
+    html_content = re.sub(
+        r"([.>])\s*Sincerely\s*,",
+        r"\1<br />Sincerely,",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    return html_content
+
 
 # Try to import LLM libraries
 try:
@@ -903,6 +945,9 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info("Converted recovered markdown to HTML for display")
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
+
+        # Normalize so rich text display isn't double height (merge </p><p>, collapse <br />)
+        raw_html = normalize_cover_letter_html(raw_html)
 
         # Keep line breaks: collapse multiple newlines to one, then convert to single <br /> so we don't add excess space
         raw_html = re.sub(r"[\r\n]+", "\n", raw_html)
