@@ -39,29 +39,6 @@ from app.services.user_service import (
 logger = logging.getLogger(__name__)
 
 
-def normalize_cover_letter_html(html_content: str) -> str:
-    """
-    Normalize LLM HTML: remove <p> and </p>, replace with <br /> so paragraphs are
-    separated by line breaks (</p><p> becomes <br /><br /> = one blank line). Do not
-    collapse multiple <br /> so paragraph spacing is preserved.
-    """
-    if not html_content or not html_content.strip():
-        return html_content
-    # Remove </p> and <p...>, replace with <br /> so we get <br /><br /> between paragraphs
-    html_content = re.sub(r"</p>\s*", "<br />", html_content, flags=re.IGNORECASE)
-    html_content = re.sub(r"<p(\s[^>]*)?>\s*", "<br />", html_content, flags=re.IGNORECASE)
-    # Normalize <br> variants to <br /> (do not collapse runs — keep paragraph spacing)
-    html_content = re.sub(r"<br\s*/?\s*>|</?\s*br\s*>", "<br />", html_content, flags=re.IGNORECASE)
-    # Ensure break before "Sincerely,"
-    html_content = re.sub(
-        r"([.>])\s*Sincerely\s*,",
-        r"\1<br />Sincerely,",
-        html_content,
-        flags=re.IGNORECASE,
-    )
-    return html_content
-
-
 # Try to import LLM libraries
 try:
     from openai import OpenAI
@@ -927,13 +904,8 @@ Please incorporate these instructions while maintaining consistency with all oth
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
-        # Normalize so rich text display isn't double height (merge </p><p>, collapse <br />)
-        raw_html = normalize_cover_letter_html(raw_html or "")
-
-        # Keep line breaks: collapse multiple newlines to one, then convert to single <br /> so we don't add excess space
-        raw_html = re.sub(r"[\r\n]+", "\n", raw_html)
-        raw_html = raw_html.replace("\n", "<br />")
-        raw_html = re.sub(r" +", " ", raw_html)
+        # No HTML treatment — pass through LLM response as-is for true document view
+        raw_html = raw_html or ""
 
         # Apply user's print settings to HTML
         # Reuse the user object that was already retrieved earlier for personality profiles
