@@ -22,6 +22,7 @@ except ImportError:
     COLORAMA_AVAILABLE = False
 
 from app.core.config import settings
+from app.utils.html_normalizer import html_p_to_br
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
 from app.utils.llm_utils import (
@@ -904,10 +905,8 @@ Please incorporate these instructions while maintaining consistency with all oth
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
-        # Keep line breaks: collapse multiple newlines to one, then convert to single <br /> so we don't add excess space
-        raw_html = re.sub(r"[\r\n]+", "\n", raw_html)
-        raw_html = raw_html.replace("\n", "<br />")
-        raw_html = re.sub(r" +", " ", raw_html)
+        # Only treatment for client: replace <p>/</p> with <br />
+        raw_html = html_p_to_br(raw_html or "")
 
         # Apply user's print settings to HTML
         # Reuse the user object that was already retrieved earlier for personality profiles
@@ -952,12 +951,6 @@ Please incorporate these instructions while maintaining consistency with all oth
                             )
         except Exception as e:
             logger.warning(f"Could not apply print settings to HTML: {e}")
-            # Continue with unstyled HTML if styling fails
-
-        # Final cleanup: collapse multiple newlines to one, then convert to single <br /> (avoid excess space)
-        styled_html = re.sub(r"[\r\n]+", "\n", styled_html)
-        styled_html = styled_html.replace("\n", "<br />")
-        styled_html = re.sub(r" +", " ", styled_html)
 
         return {"markdown": markdown_content, "html": styled_html}
 

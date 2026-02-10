@@ -14,6 +14,15 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+try:
+    import colorama
+    colorama.init(autoreset=True)
+    def _yellow(msg: str) -> str:
+        return f"{colorama.Fore.YELLOW}{msg}{colorama.Style.RESET_ALL}"
+except ImportError:
+    def _yellow(msg: str) -> str:
+        return msg
+
 # Use project-local browser path so Render (and other hosts) find Chromium installed at build time.
 # Must be set before importing playwright.
 if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
@@ -65,11 +74,38 @@ def _collapse_br_for_pdf(html_content: str) -> str:
     return html_content
 
 
+def _strip_newlines_adjacent_to_br(html_content: str) -> str:
+    """
+    Remove newlines that are immediately adjacent to <br /> so that when we later
+    convert \\n to <br /> we don't create double line breaks (one from existing
+    <br /> and one from the newline).
+    """
+    if not html_content:
+        return html_content
+    # After <br />: remove following newlines (so "\n" after br doesn't become extra <br />)
+    html_content = re.sub(
+        r"(<br\s*/?\s*>)\s*[\r\n]+\s*",
+        r"\1",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    # Before <br />: remove preceding newlines
+    html_content = re.sub(
+        r"\s*[\r\n]+\s*(<br\s*/?\s*>)",
+        r"\1",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+    return html_content
+
+
 def _normalize_line_breaks_in_html(html_content: str) -> str:
     """
     Ensure line breaks render in PDF: convert literal newlines in text content to <br />.
     Only replaces \\n outside of HTML tags so we don't break attribute values or tag structure.
-    Collapses multiple newlines to one <br /> so we don't add excess vertical space.
+    - Single newline (\\n) → one <br /> (single line break).
+    - Double (or more) newlines (\\n\\n) → two <br /> (blank line) so intentional
+      blank lines are preserved.
     """
     if not html_content or ("\n" not in html_content and "\r" not in html_content):
         return html_content
@@ -80,8 +116,10 @@ def _normalize_line_breaks_in_html(html_content: str) -> str:
         if part.startswith("<") and part.endswith(">"):
             result.append(part)
         else:
-            # Collapse any run of \\r/\\n to a single newline, then convert to one <br />
+            # Normalize \\r\\n to \\n, then: two-or-more newlines → blank line (two br), single → one br
             normalized = re.sub(r"[\r\n]+", "\n", part)
+            # Replace \n\n+ with two br (blank line), then remaining single \n with one br
+            normalized = re.sub(r"\n\n+", "<br /><br />", normalized)
             result.append(normalized.replace("\n", "<br />"))
     return "".join(result)
 
@@ -298,7 +336,7 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         # Encode to base64
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
-        logger.info(f"Successfully generated PDF from Markdown ({len(pdf_bytes)} bytes)")
+        logger.info(_yellow("PDF writer: WeasyPrint (from markdown) (%s bytes)"), len(pdf_bytes))
         return pdf_base64
 
     except Exception as e:
@@ -351,6 +389,8 @@ async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict
   margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
 }}
 *, *::before, *::after {{ box-sizing: border-box; }}
+/* Force zero margin/padding on all content so only @page margin applies (no "letter within a letter") */
+.print-content * {{ margin: 0 !important; padding: 0 !important; }}
 body {{ {body_style} }}
 .print-content {{
   max-width: 100%;
@@ -362,8 +402,9 @@ body {{ {body_style} }}
 .print-content * {{ max-width: 100%; }}
 .print-content table {{ table-layout: fixed; width: 100% !important; }}
 .print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
-.print-content p {{ page-break-inside: avoid; margin: 0 0 0.2em 0; }}
-.print-content br {{ display: block; margin-top: 0.12em; }}
+.print-content p {{ page-break-inside: avoid; margin: 0 0 0.2em 0 !important; }}
+.print-content br {{ display: block; margin-top: 0.12em !important; }}
+.print-content ul, .print-content ol {{ padding-left: 1.2em !important; }}
 </style>
 </head>
 <body>
@@ -443,17 +484,20 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
             margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
         }}
         *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        /* Force zero margin/padding on all content so only @page margin applies (no "letter within a letter") */
+        .print-content * {{ margin: 0 !important; padding: 0 !important; }}
         body {{ {body_style} }}
         /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
         /* Minimal p margin so any remaining <p> from rich editor don't add extra line height in PDF */
-        .print-content p {{ margin: 0 0 0.2em 0; padding: 0; }}
+        .print-content p {{ margin: 0 0 0.2em 0 !important; padding: 0 !important; }}
         /* Single <br /> = one line break; keep margin small so PDF matches on-screen spacing */
-        .print-content br {{ display: block; margin-top: 0.12em; }}
+        .print-content br {{ display: block; margin-top: 0.12em !important; }}
+        .print-content ul, .print-content ol {{ padding-left: 1.2em !important; }}
         /* Keep heading with the next block (avoid break right after a heading) */
         .print-content h1, .print-content h2, .print-content h3 {{
             page-break-after: avoid;
-            margin: 0;
-            padding: 0;
+            margin: 0 !important;
+            padding: 0 !important;
         }}
         /* Do NOT use page-break-inside: avoid on .letter-section: it forces the whole body
            onto the next page when the first section is just header/company, causing a
@@ -515,8 +559,7 @@ def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
 async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
     """
     Generate a PDF from HTML content using user print preferences.
-    Uses Playwright (Chromium) only for now; WeasyPrint is disabled for print preview.
-    Set PRINT_PREVIEW_USE_WEASYPRINT_ONLY later to switch to WeasyPrint exclusively.
+    Uses WeasyPrint when available (no Playwright/Chromium required); falls back to Playwright if WeasyPrint is not installed.
 
     Args:
         html_content: The HTML fragment to convert (placed inside body).
@@ -526,42 +569,60 @@ async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> s
         Base64-encoded PDF data as a string (without data URI prefix).
 
     Raises:
-        ImportError: If playwright is not available.
-        Exception: If PDF generation fails (no WeasyPrint fallback).
+        ImportError: If neither WeasyPrint nor Playwright is available.
     """
     font_family = print_properties.get("fontFamily", "Times New Roman")
     font_size = print_properties.get("fontSize", 12)
 
-    # Normalize for PDF: merge </p><p> to <br /> (editor-friendly HTML → compact PDF), collapse redundant <br />, then \n → <br />
+    # Normalize for PDF: merge </p><p> to <br />, collapse redundant <br />, strip \n adjacent to <br /> (avoid double breaks), then \n → <br /> (single \n = one br, \n\n = blank line)
     html_content = _normalize_html_for_pdf(html_content)
+    html_content = _strip_newlines_adjacent_to_br(html_content)
     html_content = _normalize_line_breaks_in_html(html_content)
 
-    # Raw HTML: minimal wrapper (requires WeasyPrint; if disabled, use Playwright path instead)
+    # Raw HTML: minimal wrapper (WeasyPrint only)
     if settings.PRINT_PREVIEW_RAW_HTML:
         if not WEASYPRINT_AVAILABLE:
             raise ImportError(
-                "PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is disabled for print preview."
+                "PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is not available."
             )
         pdf_bytes = _generate_pdf_raw_html(html_content, print_properties)
         _save_debug_pdf(pdf_bytes, "print_preview_pdf_raw", html_snippet=html_content)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-        logger.info("PDF from HTML (raw, no server styling) (%s bytes)", len(pdf_bytes))
+        logger.info(_yellow("PDF writer: WeasyPrint (raw HTML) (%s bytes)"), len(pdf_bytes))
         return pdf_base64
 
-    # Playwright only for print preview (WeasyPrint disabled for now)
-    if not PLAYWRIGHT_AVAILABLE or not async_playwright:
-        raise ImportError(
-            "Playwright is required for print preview PDF. "
-            "Install with: pip install playwright && playwright install chromium"
-        )
+    # Prefer Playwright when available (better fidelity); fall back to WeasyPrint
+    if PLAYWRIGHT_AVAILABLE and async_playwright:
+        try:
+            pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
+            _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
+            pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+            logger.info(
+                _yellow("PDF writer: Playwright (%s bytes, font=%s, size=%spt)"),
+                len(pdf_bytes),
+                font_family,
+                font_size,
+            )
+            return pdf_base64
+        except Exception as e:
+            logger.warning("Playwright print preview failed (%s), falling back to WeasyPrint", e)
+            if not WEASYPRINT_AVAILABLE:
+                raise
 
-    pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
-    _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
-    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-    logger.info(
-        "PDF from HTML via Playwright (%s bytes, font=%s, size=%spt)",
-        len(pdf_bytes),
-        font_family,
-        font_size,
+    # WeasyPrint fallback (no Chromium required; works in WSL, Render, constrained envs)
+    if WEASYPRINT_AVAILABLE:
+        pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
+        _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+        logger.info(
+            _yellow("PDF writer: WeasyPrint (%s bytes, font=%s, size=%spt)"),
+            len(pdf_bytes),
+            font_family,
+            font_size,
+        )
+        return pdf_base64
+
+    raise ImportError(
+        "Print preview PDF requires Playwright or WeasyPrint. "
+        "Install Playwright: pip install playwright && playwright install chromium (preferred), or WeasyPrint: pip install weasyprint"
     )
-    return pdf_base64

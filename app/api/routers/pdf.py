@@ -76,16 +76,26 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
 @router.post("/print-preview-pdf")
 async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
     """
-    Generate a PDF from frontend-modified HTML (Print Preview) using user print preferences.
-    Requires printProperties (margins, font, page size, line height). The document is built
-    with WeasyPrint using these settings so the PDF matches the user's settings.
+    Generate a PDF for Print Preview. HTML is source of truth: send htmlContent.
+    markdownContent is accepted for backward compatibility (converted to PDF via markdown pipeline).
     """
-    # Use warning so it shows even if log level is WARNING; search for PRINT_PREVIEW_REQUEST
-    logger.warning(
-        "PRINT_PREVIEW_REQUEST - user_id=%s, user_email=%s, html_content_len=%s",
+    has_html = request.htmlContent and request.htmlContent.strip()
+    has_markdown = request.markdownContent and request.markdownContent.strip()
+    if not has_html and not has_markdown:
+        raise HTTPException(
+            status_code=400,
+            detail="Either htmlContent or markdownContent is required and cannot be empty",
+        )
+    if not request.printProperties:
+        raise HTTPException(status_code=400, detail="printProperties is required")
+    if not request.printProperties.margins:
+        raise HTTPException(status_code=400, detail="printProperties.margins is required")
+
+    logger.info(
+        "PRINT_PREVIEW_REQUEST - user_id=%s, user_email=%s, source=%s",
         request.user_id,
         request.user_email,
-        len(request.htmlContent or ""),
+        "html" if has_html else "markdown",
     )
     if request.printProperties and request.printProperties.margins:
         logger.info(
@@ -96,32 +106,28 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
             request.printProperties.margins.left,
         )
 
-    if not request.htmlContent or not request.htmlContent.strip():
-        raise HTTPException(status_code=400, detail="htmlContent is required and cannot be empty")
-    if not request.printProperties:
-        raise HTTPException(status_code=400, detail="printProperties is required")
-    if not request.printProperties.margins:
-        raise HTTPException(status_code=400, detail="printProperties.margins is required")
+    print_props_dict = {
+        "margins": {
+            "top": request.printProperties.margins.top,
+            "right": request.printProperties.margins.right,
+            "bottom": request.printProperties.margins.bottom,
+            "left": request.printProperties.margins.left,
+        },
+        "fontFamily": request.printProperties.fontFamily,
+        "fontSize": request.printProperties.fontSize,
+        "lineHeight": request.printProperties.lineHeight,
+        "pageSize": {
+            "width": request.printProperties.pageSize.width,
+            "height": request.printProperties.pageSize.height,
+        },
+        "useDefaultFonts": request.printProperties.useDefaultFonts,
+    }
 
     try:
-        print_props_dict = {
-            "margins": {
-                "top": request.printProperties.margins.top,
-                "right": request.printProperties.margins.right,
-                "bottom": request.printProperties.margins.bottom,
-                "left": request.printProperties.margins.left,
-            },
-            "fontFamily": request.printProperties.fontFamily,
-            "fontSize": request.printProperties.fontSize,
-            "lineHeight": request.printProperties.lineHeight,
-            "pageSize": {
-                "width": request.printProperties.pageSize.width,
-                "height": request.printProperties.pageSize.height,
-            },
-            "useDefaultFonts": request.printProperties.useDefaultFonts,
-        }
-
-        pdf_base64 = await generate_pdf_from_html(request.htmlContent, print_props_dict)
+        if has_html:
+            pdf_base64 = await generate_pdf_from_html(request.htmlContent, print_props_dict)
+        else:
+            pdf_base64 = generate_pdf_from_markdown(request.markdownContent, print_props_dict)
 
         logger.info("Print Preview PDF generated successfully")
         return {

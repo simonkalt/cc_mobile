@@ -35,9 +35,10 @@ class GeneratePDFRequest(BaseModel):
 
 
 class PrintPreviewPDFRequest(BaseModel):
-    """Request body for Print Preview: convert frontend-modified HTML to PDF using user print preferences."""
+    """Request body for Print Preview. HTML is source of truth: send htmlContent. markdownContent accepted for backward compatibility."""
 
-    htmlContent: str
+    htmlContent: Optional[str] = None
+    markdownContent: Optional[str] = None
     printProperties: (
         PrintProperties  # User settings: margins, font (if not default), page size, line height
     )
