@@ -22,6 +22,8 @@ except ImportError:
     COLORAMA_AVAILABLE = False
 
 from app.core.config import settings
+from app.utils.html_normalizer import html_p_to_br, collapse_br_pairs, double_break_after_groups
+from app.utils.template_loader import get_template_for_profile
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
 from app.utils.llm_utils import (
@@ -364,6 +366,7 @@ def get_job_info(
         # Try to find matching profile by name (case-insensitive) or ID
         # Normalize profiles to ensure structure is {"id", "name", "description"} only
         profile_found = False
+        matched_profile_name = ""
         for profile in custom_profiles:
             if isinstance(profile, dict):
                 # Normalize structure: extract only id, name, description
@@ -374,6 +377,7 @@ def get_job_info(
                 # Match by name (case-insensitive) or ID
                 if tone.lower() == profile_name or tone == profile_id:
                     selected_profile = profile_desc
+                    matched_profile_name = profile.get("name", tone)
                     logger.info(
                         f"Using custom personality profile: '{profile.get('name')}' (ID: {profile_id})"
                     )
@@ -419,7 +423,7 @@ def get_job_info(
     )
 
     # Build personality instruction - make it prominent and direct
-    personality_instruction = f"""
+    critical_instructions = f"""
 === PERSONALITY PROFILE INSTRUCTION - CRITICAL ===
 YOU MUST FOLLOW THIS PERSONALITY PROFILE EXACTLY:
 {selected_profile}
@@ -428,33 +432,29 @@ Apply this personality throughout the entire cover letter. This instruction take
 === END PERSONALITY PROFILE INSTRUCTION ===
 """
     logger.info(
-        f"Personality instruction prepared ({len(personality_instruction)} chars): {selected_profile[:100]}..."
+        f"Personality instruction prepared ({len(critical_instructions)} chars): {selected_profile[:100]}..."
     )
 
-    # Get font settings for LLM prompting (if user is available)
-    font_instruction = ""
-    try:
-        if user:
-            user_prefs = user.preferences if user.preferences else {}
-            if isinstance(user_prefs, dict):
-                app_settings = user_prefs.get("appSettings", {})
-                if isinstance(app_settings, dict):
-                    print_props = app_settings.get("printProperties", {})
-                    if isinstance(print_props, dict):
-                        font_family = print_props.get("fontFamily", "")
-                        # If fontFamily is "default", add font-size instruction to LLM
-                        if font_family and font_family.lower() == "default":
-                            font_instruction = """
-=== HTML FORMATTING INSTRUCTION ===
-When generating HTML output, ensure all text uses a minimum base font-size of 12pt. Headers should be larger, etc., so 12pt is the smallest font-size on the document. This method should be applied to the main content and all paragraphs.
-Use inline styles like: style="font-size: 12pt;" on your HTML elements to ensure proper text sizing.
-=== END HTML FORMATTING INSTRUCTION ===
+    # Build template structure instruction - align letter layout with template
+    template_content = get_template_for_profile(matched_profile_name or tone)
+    template_instruction = ""
+    if template_content:
+        template_instruction = f"""
+=== TEMPLATE STRUCTURE - EXACT LINE BREAKS REQUIRED ===
+Your cover letter MUST follow this structure. Preserve every line break exactly as shown.
+- Use <br /> in your HTML output for each line break in the template.
+- Single blank line in template = one <br /> between blocks.
+- Double blank line in template = <br /><br /> between blocks.
+- The order, placement, and phrasing cues (Re:, salutation, closing) must match the template.
+
+TEMPLATE:
+{template_content}
+
+Placeholders: <<date>>, <<name>>, <<phone>>, <<email>>, <<hiring manager>>, <<company name>>, <<position title>>, <<salutation>>, <<body>>, <<signature>> — replace with actual resume/job data. The <<body>> section is the main letter content you generate.
+=== END TEMPLATE STRUCTURE ===
 """
-                            logger.info(
-                                "Added font-size: 12pt instruction to LLM prompt (fontFamily is 'default')"
-                            )
-    except Exception as e:
-        logger.warning(f"Could not retrieve font settings for LLM prompting: {e}")
+        logger.info("Template structure instruction added to prompt")
+    critical_instructions = critical_instructions + template_instruction
 
     # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
@@ -563,13 +563,34 @@ Please incorporate these instructions while maintaining consistency with all oth
             #     f"Additional instructions provided ({len(additional_instructions)} chars) - ENHANCEMENT MODE (will supplement other instructions)"
             # )
 
+    # Debug: capture prompts for analysis (tmp/debug_prompts.json)
+    try:
+        _service_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _debug_path = os.path.join(_tmp_dir, "debug_prompts.json")
+        _debug_payload = {
+            "personality_tone_text": selected_profile,
+            "template_content": template_content or None,
+            "matched_profile_name": matched_profile_name or tone,
+            "job_description": jd,
+            "resume_text": resume_content,
+            "additional_instructions_text": (additional_instructions or "").strip(),
+        }
+        with open(_debug_path, "w", encoding="utf-8") as _f:
+            json.dump(_debug_payload, _f, indent=2, ensure_ascii=False)
+        logger.info(f"Wrote debug prompts to {_debug_path}")
+    except Exception as _e:
+        logger.warning(f"Could not write debug_prompts.json: {_e}")
+
     r = ""
 
     try:
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
-            # Include personality instruction prominently at the start, and font instruction if applicable
-            msg = f"{system_message}{personality_instruction}{font_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            # Include personality instruction prominently at the start
+            msg = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             if additional_instructions_text:
                 if "OVERRIDE" in additional_instructions_text:
                     logger.debug(
@@ -604,12 +625,9 @@ Please incorporate these instructions while maintaining consistency with all oth
                 {"role": "system", "content": system_message},
                 {
                     "role": "user",
-                    "content": personality_instruction.strip(),
+                    "content": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
             ]
-            # Add font instruction if applicable
-            if font_instruction:
-                messages.append({"role": "user", "content": font_instruction.strip()})
             messages.extend(
                 [
                     {"role": "user", "content": message},
@@ -656,12 +674,9 @@ Please incorporate these instructions while maintaining consistency with all oth
                 {"role": "system", "content": system_message},
                 {
                     "role": "user",
-                    "content": personality_instruction.strip(),
+                    "content": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
             ]
-            # Add font instruction if applicable
-            if font_instruction:
-                messages_list.append({"role": "user", "content": font_instruction.strip()})
             messages_list.extend(
                 [
                     {"role": "user", "content": message},
@@ -695,8 +710,8 @@ Please incorporate these instructions while maintaining consistency with all oth
             r = result["choices"][0]["message"]["content"]
 
         elif llm == "OCI" or llm == "oci-generative-ai":
-            # Include personality instruction prominently at the start, and font instruction if applicable
-            full_prompt = f"{system_message}{personality_instruction}{font_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            # Include personality instruction prominently at the start
+            full_prompt = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
 
@@ -715,12 +730,9 @@ Please incorporate these instructions while maintaining consistency with all oth
                 {"role": "system", "content": system_message},
                 {
                     "role": "user",
-                    "content": personality_instruction.strip(),
+                    "content": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
             ]
-            # Add font instruction if applicable
-            if font_instruction:
-                messages.append({"role": "user", "content": font_instruction.strip()})
             messages.append({"role": "user", "content": message_llama})
             # Append additional instructions last
             if additional_instructions_text:
@@ -743,12 +755,9 @@ Please incorporate these instructions while maintaining consistency with all oth
             content_list = [
                 {
                     "type": "text",
-                    "text": personality_instruction.strip(),
+                    "text": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
             ]
-            # Add font instruction if applicable
-            if font_instruction:
-                content_list.append({"type": "text", "text": font_instruction.strip()})
             content_list.extend(
                 [
                     {"type": "text", "text": message},
@@ -904,8 +913,13 @@ Please incorporate these instructions while maintaining consistency with all oth
             except Exception as md_err:
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
-        # No HTML treatment — pass through LLM response as-is for true document view
         raw_html = raw_html or ""
+        # Convert <p>/</p> to <br /> so spacing is single line break (shift-enter), not paragraph (enter)
+        raw_html = html_p_to_br(raw_html)
+        # Collapse pairs of <br /> into one (6→3, 2→1); do not collapse all runs into one
+        raw_html = collapse_br_pairs(raw_html)
+        # Double line break only after groups (address, salutation, name, company); single break within groups
+        raw_html = double_break_after_groups(raw_html)
 
         # Apply user's print settings to HTML
         # Reuse the user object that was already retrieved earlier for personality profiles

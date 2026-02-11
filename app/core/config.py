@@ -135,9 +135,14 @@ class Settings:
 
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
+    # Set USE_SYSTEM_PROMPT_FILE=true to load prompt from system_prompt.json; when false, use built-in default
+    USE_SYSTEM_PROMPT_FILE: bool = (
+        os.getenv("USE_SYSTEM_PROMPT_FILE", "false").lower() == "true"
+    )
     PERSONALITY_PROFILES_PATH: Path = (
         Path(__file__).parent.parent.parent / "personality_profiles.json"
     )
+    TEMPLATES_DIR: Path = Path(__file__).parent.parent.parent / "templates"
 
 
 # Global settings instance

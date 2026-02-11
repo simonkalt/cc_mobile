@@ -20,6 +20,131 @@ def html_p_to_br(html_content: str) -> str:
     return html_content
 
 
+def collapse_br_pairs(html_content: str) -> str:
+    """
+    Normalize all <br> variants to <br />, then collapse only pairs of <br /> into one.
+    So 6 consecutive <br /> → 3, 4 → 2, 2 → 1, 1 stays 1. Does not collapse all runs into one.
+    """
+    if not html_content or not html_content.strip():
+        return html_content
+    html_content = re.sub(r"<br\s*/?\s*>|</?\s*br\s*>", "<br />", html_content, flags=re.IGNORECASE)
+    # One pass: every non-overlapping pair becomes one
+    html_content = re.sub(r"(<br />\s*){2}", "<br />", html_content)
+    return html_content
+
+
+def _strip_html_for_classification(text: str) -> str:
+    """Strip tags for line classification only."""
+    return re.sub(r"<[^>]+>", "", text).strip()
+
+
+def _is_address_line(plain: str) -> bool:
+    if "@" in plain:
+        return True
+    if re.search(r"\d{3}[-.\s]?\d{3}[-.\s]?\d{4}", plain):
+        return True
+    if re.search(r",\s*[A-Za-z]{2}\s+\d{5}(-\d{4})?\s*$", plain):
+        return True
+    return False
+
+
+def _is_salutation_line(plain: str) -> bool:
+    return bool(re.match(r"^Dear\s+.+,?\s*$", plain, re.IGNORECASE))
+
+
+def _is_date_line(plain: str) -> bool:
+    months = r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+    if re.search(months + r"\s+\d{1,2},?\s+20\d{2}", plain, re.IGNORECASE):
+        return True
+    if re.search(r"20\d{2}", plain) and len(plain) < 30:
+        return True
+    return False
+
+
+def _is_sincerely_line(plain: str) -> bool:
+    return re.match(r"^Sincerely,?\s*$", plain, re.IGNORECASE) is not None
+
+
+def double_break_after_groups(html_content: str) -> str:
+    """
+    Ensure exactly two <br /> after each logical group only. Groups are:
+    address (email, phone, street), salutation (Dear Name), name (applicant name),
+    company (company name and hiring manager). Order may vary in LLM output.
+    Within a group use single <br />; after a group use <br /><br />.
+    """
+    if not html_content or not html_content.strip():
+        return html_content
+    html_content = re.sub(r"<br\s*/?\s*>|</?\s*br\s*>", "<br />", html_content, flags=re.IGNORECASE)
+    lines = [s.strip() for s in html_content.split("<br />")]
+    if not lines:
+        return html_content
+
+    # Classify each line by content (use stripped text for rules)
+    n = len(lines)
+    group = [None] * n  # 'address' | 'company' | 'salutation' | 'body' | 'name'
+
+    for i in range(n):
+        plain = _strip_html_for_classification(lines[i])
+        if not plain:
+            group[i] = "body"
+            continue
+        if _is_salutation_line(plain):
+            group[i] = "salutation"
+        elif _is_sincerely_line(plain):
+            group[i] = "body"
+        elif _is_address_line(plain):
+            group[i] = "address"
+        elif _is_date_line(plain):
+            group[i] = "body"
+        else:
+            group[i] = "body"
+
+    # Name = line(s) immediately after Sincerely,
+    for i in range(n - 1):
+        plain = _strip_html_for_classification(lines[i])
+        if _is_sincerely_line(plain):
+            group[i + 1] = "name"
+            break
+
+    # Company = short lines before Dear that aren't address/date (up to 2 lines)
+    dear_idx = None
+    for i in range(n):
+        if group[i] == "salutation":
+            dear_idx = i
+            break
+    if dear_idx is not None and dear_idx >= 1:
+        count = 0
+        for i in range(dear_idx - 1, -1, -1):
+            if group[i] != "body":
+                break
+            plain = _strip_html_for_classification(lines[i])
+            if plain and len(plain) < 120 and not _is_date_line(plain):
+                group[i] = "company"
+                count += 1
+                if count >= 2:
+                    break
+
+    # Build output: single <br /> within group, <br /><br /> after group
+    out = []
+    for i in range(n):
+        if not lines[i] and not out:
+            continue
+        out.append(lines[i] if lines[i] else "")
+        if i == n - 1:
+            break
+        next_plain = _strip_html_for_classification(lines[i + 1])
+        if not next_plain:
+            out.append("<br />")
+            continue
+        # Double break only when next line starts a different group
+        if group[i + 1] is not None and group[i] is not None and group[i + 1] != group[i]:
+            out.append("<br /><br />")
+        else:
+            out.append("<br />")
+
+    return "".join(out)
+
+
 def normalize_cover_letter_html(html_content: str) -> str:
     """
     Normalize cover letter HTML to a single format suitable for WebView and PDF.

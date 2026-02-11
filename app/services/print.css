@@ -31,8 +31,10 @@ li {
   margin-bottom: 0.6em;
 }
 
-/* Relaxed line-height and orphan/widow so WeasyPrint doesn't force odd breaks */
+/* Zero paragraph spacing; relaxed line-height and orphan/widow so WeasyPrint doesn't force odd breaks */
 p {
+  margin: 0;
+  padding: 0;
   line-height: 1.3;
   orphans: auto;
   widows: auto;

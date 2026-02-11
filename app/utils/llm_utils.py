@@ -60,17 +60,21 @@ except ImportError:
 
 def load_system_prompt() -> str:
     """
-    Load system prompt from JSON config file
+    Load system prompt from JSON config file (when USE_SYSTEM_PROMPT_FILE=true),
+    otherwise return built-in default.
     
     Returns:
         System prompt string
     """
+    if not settings.USE_SYSTEM_PROMPT_FILE:
+        return _default_system_prompt()
+    
     config_path = settings.SYSTEM_PROMPT_PATH
     
     try:
         if not config_path.exists():
             logger.warning(f"System prompt file not found: {config_path}. Using default.")
-            return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
+            return _default_system_prompt()
         
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
@@ -78,7 +82,7 @@ def load_system_prompt() -> str:
         system_prompt = config.get("system_prompt", "")
         if not system_prompt:
             logger.warning(f"System prompt not found in {config_path}. Using default.")
-            return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
+            return _default_system_prompt()
 
         logger.info(
             f"Loaded system prompt from {config_path} ({len(system_prompt)} characters)"
@@ -86,13 +90,26 @@ def load_system_prompt() -> str:
         return system_prompt
     except FileNotFoundError:
         logger.warning(f"System prompt file not found: {config_path}. Using default.")
-        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
+        return _default_system_prompt()
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing system prompt JSON: {e}. Using default.")
-        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
+        return _default_system_prompt()
     except Exception as e:
         logger.error(f"Error loading system prompt: {e}. Using default.")
-        return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
+        return _default_system_prompt()
+
+
+def _default_system_prompt() -> str:
+    """Default system prompt when JSON is missing or invalid. Uses only the single allowed page-formatting paragraph."""
+    return (
+        "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. "
+        "Return a two-field JSON object: 'markdown' (one line) and 'html' (one line). HTML must match markdown in text. "
+        "HEADER LAYOUT (required): First group: your address (one line) then your phone (one line). Second group: hiring manager (one line) then company (one line). After that, two line breaks before the date/Re:/Dear. Use <br /> for line breaks in HTML. "
+        "PAGE AND HTML FORMATTING (the only formatting rule for layout and output): All attempts to fit the resulting letter to one 8 1/2 x 11\" page must be made. "
+        "Consider all of these factors: page size, font sizes, margins, important job alignments when calculating what and how much text to put on the page. "
+        "If content suffers due to lack of job and resume alignment, you may continue to a 2nd page. "
+        "Use the most standard HTML possible that is most compatible with most viewers, browsers, and converters."
+    )
 
 
 def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:

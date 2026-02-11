@@ -270,7 +270,8 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
                     margin: 0.5em 0;
                 }}
                 p {{
-                    margin: 0.5em 0;
+                    margin: 0;
+                    padding: 0;
                 }}
                 code {{
                     background-color: #f4f4f4;
@@ -402,7 +403,7 @@ body {{ {body_style} }}
 .print-content * {{ max-width: 100%; }}
 .print-content table {{ table-layout: fixed; width: 100% !important; }}
 .print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
-.print-content p {{ page-break-inside: avoid; margin: 0 0 0.2em 0 !important; }}
+.print-content p {{ page-break-inside: avoid; margin: 0 !important; padding: 0 !important; }}
 .print-content br {{ display: block; margin-top: 0.12em !important; }}
 .print-content ul, .print-content ol {{ padding-left: 1.2em !important; }}
 </style>
@@ -488,8 +489,8 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         .print-content * {{ margin: 0 !important; padding: 0 !important; }}
         body {{ {body_style} }}
         /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
-        /* Minimal p margin so any remaining <p> from rich editor don't add extra line height in PDF */
-        .print-content p {{ margin: 0 0 0.2em 0 !important; padding: 0 !important; }}
+        /* Zero paragraph spacing so any remaining <p> from rich editor don't add extra line height */
+        .print-content p {{ margin: 0 !important; padding: 0 !important; }}
         /* Single <br /> = one line break; keep margin small so PDF matches on-screen spacing */
         .print-content br {{ display: block; margin-top: 0.12em !important; }}
         .print-content ul, .print-content ol {{ padding-left: 1.2em !important; }}

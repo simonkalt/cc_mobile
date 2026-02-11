@@ -2,13 +2,12 @@
 Configuration API routes
 """
 import logging
-import json
-from pathlib import Path
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from app.core.auth import get_current_user
 from app.models.user import UserResponse
 from app.core.config import settings
+from app.utils.llm_utils import load_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +28,8 @@ def get_google_places_key():
 def get_system_prompt():
     """JSON API endpoint to get the current system prompt"""
     try:
-        # Load system prompt from file
-        if settings.SYSTEM_PROMPT_PATH.exists():
-            with open(settings.SYSTEM_PROMPT_PATH, 'r', encoding='utf-8') as f:
-                system_prompt_data = json.load(f)
-                system_message = system_prompt_data.get("system_prompt", "")
-                return {"system_prompt": system_message}
-        else:
-            logger.warning(f"System prompt file not found at {settings.SYSTEM_PROMPT_PATH}")
-            return {"system_prompt": ""}
+        system_message = load_system_prompt()
+        return {"system_prompt": system_message}
     except Exception as e:
         logger.error(f"Error loading system prompt: {e}")
         return {"system_prompt": ""}
