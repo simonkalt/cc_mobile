@@ -6,14 +6,51 @@ import logging
 from fastapi import APIRouter, HTTPException, status, Depends
 from app.core.auth import get_current_user
 from app.models.user import UserResponse
-from app.models.pdf import GeneratePDFRequest, PrintPreviewPDFRequest
+from app.models.pdf import GeneratePDFRequest, PrintPreviewPDFRequest, PrintTemplateRequest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["pdf"], dependencies=[Depends(get_current_user)])
 
 # Import PDF generation service
-from app.services.pdf_service import generate_pdf_from_markdown, generate_pdf_from_html
+from app.services.pdf_service import (
+    generate_pdf_from_markdown,
+    generate_pdf_from_html,
+    get_print_template,
+)
+
+
+@router.post("/print-template")
+async def print_template_endpoint(request: PrintTemplateRequest):
+    """
+    Return the exact HTML/CSS wrapper used for PDF generation (single source of truth).
+
+    - **With htmlContent**: Normalizes content (same as PDF pipeline), injects into template,
+      returns full document. Use for "Match PDF" or "Print Preview" view—render the returned
+      HTML and it will match the PDF.
+    - **Without htmlContent**: Returns template with {{LETTER_CONTENT}} placeholder for
+      frontend to inject content.
+
+    Use the same printProperties as for POST /api/files/print-preview-pdf.
+    """
+    print_props_dict = {
+        "margins": {
+            "top": request.printProperties.margins.top,
+            "right": request.printProperties.margins.right,
+            "bottom": request.printProperties.margins.bottom,
+            "left": request.printProperties.margins.left,
+        },
+        "fontFamily": request.printProperties.fontFamily,
+        "fontSize": request.printProperties.fontSize,
+        "lineHeight": request.printProperties.lineHeight,
+        "pageSize": {
+            "width": request.printProperties.pageSize.width,
+            "height": request.printProperties.pageSize.height,
+        },
+        "useDefaultFonts": request.printProperties.useDefaultFonts,
+    }
+    result = get_print_template(print_props_dict, request.htmlContent)
+    return result
 
 
 @router.post("/generate-pdf")

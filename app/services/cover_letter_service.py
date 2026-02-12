@@ -123,7 +123,13 @@ def get_job_info(
         is_plain_text: If True, skip all file processing (S3, local files, base64) and treat resume as plain text
     """
     # Get today's date if not provided
-    today_date = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
+    today_date_iso = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
+    # Convert to long form (February 12, 2026) for LLM so it uses it directly; fallback to ISO if parse fails
+    try:
+        dt = datetime.datetime.strptime(today_date_iso, "%Y-%m-%d")
+        today_date = dt.strftime("%B %d, %Y")
+    except ValueError:
+        today_date = today_date_iso
 
     # Check if resume is a file path, S3 key, or base64 data
     resume_content = resume
@@ -455,6 +461,31 @@ Placeholders: <<date>>, <<name>>, <<phone>>, <<email>>, <<hiring manager>>, <<co
 """
         logger.info("Template structure instruction added to prompt")
     critical_instructions = critical_instructions + template_instruction
+
+    # Typography baseline: when user selects a non-default font, pass as baseline for body; LLM may vary for lists/tables
+    if user and user.preferences:
+        app_settings = (user.preferences or {}).get("appSettings", {})
+        if isinstance(app_settings, dict):
+            print_props = app_settings.get("printProperties", {})
+            if isinstance(print_props, dict) and print_props:
+                use_default_fonts = print_props.get("useDefaultFonts", False)
+                font_family = print_props.get("fontFamily", "Times New Roman")
+                font_size = print_props.get("fontSize", 12)
+                line_height = print_props.get("lineHeight", 1.6)
+                is_default_font = (
+                    font_family and str(font_family).strip().lower() == "default"
+                )
+                if not is_default_font and not use_default_fonts:
+                    typography_instruction = f"""
+=== TYPOGRAPHY BASELINE ===
+Use font-family '{font_family}', font-size {font_size}pt, and line-height {line_height} as the baseline for main body text.
+You may creatively vary font size, color, and style for lists, tables, headings, and key phrases using inline HTML (e.g. <span style='font-size:14pt'>, <span style='color:#c00000'>). The baseline applies to the main letter content; lists and tables can use different sizes for visual hierarchy.
+=== END TYPOGRAPHY BASELINE ===
+"""
+                    critical_instructions = critical_instructions + typography_instruction
+                    logger.info(
+                        f"Added typography baseline to prompt: fontFamily={font_family}, fontSize={font_size}pt"
+                    )
 
     # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
@@ -914,6 +945,11 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
         raw_html = raw_html or ""
+        # Fix document date: if LLM echoed short form (YYYY-MM-DD), replace with long form
+        if today_date_iso and today_date and today_date != today_date_iso:
+            raw_html = raw_html.replace(today_date_iso, today_date)
+        if markdown_content and today_date_iso and today_date != today_date_iso:
+            markdown_content = markdown_content.replace(today_date_iso, today_date)
         # Convert <p>/</p> to <br /> so spacing is single line break (shift-enter), not paragraph (enter)
         raw_html = html_p_to_br(raw_html)
         # Collapse pairs of <br /> into one (6→3, 2→1); do not collapse all runs into one
@@ -942,19 +978,13 @@ Please incorporate these instructions while maintaining consistency with all oth
                             font_family and str(font_family).strip().lower() == "default"
                         )
 
-                        if is_default_font:
-                            # "Default" font: always apply 12pt wrapper so size is guaranteed (LLM may omit inline size)
-                            font_size_pt = 12
-                            styled_html = f"""<div style="font-family: Arial, sans-serif; font-size: {font_size_pt}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
-                            logger.info(
-                                "Applied default font wrapper: font-size=12pt (fontFamily is 'default')"
-                            )
-                        elif use_default_fonts:
-                            # User chose a named font + useDefaultFonts: use raw LLM HTML
-                            logger.info(
-                                "useDefaultFonts is True - skipping font styling, using raw LLM HTML"
-                            )
+                        if is_default_font or use_default_fonts:
+                            # "Default" font or useDefaultFonts: use raw LLM HTML (preserve colors, fonts, sizes)
+                            # No wrapper - let LLM inline styles (bold, italic, color, font-size) show through
                             styled_html = raw_html
+                            logger.info(
+                                "Skipping font wrapper: fontFamily is 'default' or useDefaultFonts is True - using raw LLM HTML"
+                            )
                         else:
                             # Apply user's chosen font/size/line-height
                             font_family_escaped = font_family.replace("'", "\\'")

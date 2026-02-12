@@ -2,6 +2,8 @@
 
 This endpoint converts **frontend-modified HTML** into a PDF for the Print Preview feature. The backend uses the **user’s print preferences** (margins, font, page size, line height) and passes them to the PDF engine so the resulting document matches the user’s settings.
 
+**Single source of truth:** Use **POST** `/api/files/print-template` to get the exact HTML/CSS used for PDF. Render that HTML in a WebView for a "Match PDF" or "Print Preview" view that matches the PDF exactly. See [PRINT_TEMPLATE_SINGLE_SOURCE_OF_TRUTH.md](./PRINT_TEMPLATE_SINGLE_SOURCE_OF_TRUTH.md).
+
 **PDF engine:** By default the service prefers **Playwright** (Chromium) and falls back to **WeasyPrint** if Playwright is unavailable or fails. If Playwright margins are wrong at page breaks, set **`PRINT_PREVIEW_USE_WEASYPRINT_ONLY=true`** to use **only WeasyPrint** for Print Preview (see [Using WeasyPrint only](#using-weasyprint-only)). When not using WeasyPrint-only, the browser’s print API is used for margins.
 
 ## Endpoint

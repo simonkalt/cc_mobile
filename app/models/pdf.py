@@ -44,3 +44,10 @@ class PrintPreviewPDFRequest(BaseModel):
     )
     user_id: Optional[str] = None
     user_email: Optional[str] = None
+
+
+class PrintTemplateRequest(BaseModel):
+    """Request body for Print Template. Returns exact HTML/CSS wrapper used for PDF."""
+
+    printProperties: PrintProperties
+    htmlContent: Optional[str] = None

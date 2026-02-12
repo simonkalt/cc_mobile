@@ -32,6 +32,135 @@ if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_playwright_browsers)
 
 
+# Placeholder used when returning template without content (for frontend to inject)
+PRINT_TEMPLATE_CONTENT_PLACEHOLDER = "{{LETTER_CONTENT}}"
+
+
+def _build_print_template_css_and_body(
+    print_properties: Dict,
+) -> tuple[str, str]:
+    """
+    Build the CSS and body_style for the print template.
+    Returns (css_block, body_style_string) used by both PDF generation and get_print_template.
+    """
+    margins = print_properties.get("margins", {})
+    font_family = print_properties.get("fontFamily", "Times New Roman")
+    font_size = print_properties.get("fontSize", 12)
+    line_height = print_properties.get("lineHeight", 1.6)
+    page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
+    use_default_fonts = print_properties.get("useDefaultFonts", False)
+
+    margin_top = margins.get("top", 1.0)
+    margin_right = margins.get("right", 0.75)
+    margin_bottom = margins.get("bottom", 0.75)
+    margin_left = margins.get("left", 0.75)
+    width_in = page_size.get("width", 8.5)
+    height_in = page_size.get("height", 11.0)
+
+    body_style = "margin: 0; padding: 0; box-sizing: border-box;"
+    if not use_default_fonts:
+        if font_family and str(font_family).strip().lower() == "default":
+            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
+                line_height
+            )
+        else:
+            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+
+    css_block = f"""
+@page {{
+  size: {width_in}in {height_in}in;
+  margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
+}}
+*, *::before, *::after {{ box-sizing: border-box; }}
+/* Force zero margin/padding on all content so only @page margin applies */
+.print-content * {{ margin: 0 !important; padding: 0 !important; }}
+body {{ {body_style} }}
+.print-content {{
+  max-width: 100%;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}}
+.print-content * {{ max-width: 100%; }}
+.print-content table {{ table-layout: fixed; width: 100% !important; }}
+.print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
+.print-content p {{ page-break-inside: avoid; margin: 0 !important; padding: 0 !important; }}
+/* Single <br /> = one line break; 0.12em matches PDF spacing */
+.print-content br {{ display: block; margin-top: 0.12em !important; }}
+.print-content ul, .print-content ol {{ padding-left: 1.2em !important; }}
+"""
+    return css_block.strip(), body_style
+
+
+def get_print_template(
+    print_properties: Dict,
+    html_content: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Return the exact HTML/CSS wrapper used for PDF generation.
+
+    When htmlContent is provided: normalizes it (same as PDF pipeline), injects into
+    the template, and returns the full document. Use this for "Match PDF" or "Print
+    Preview" view—render the returned HTML and it will match the PDF.
+
+    When htmlContent is omitted: returns the template with {{LETTER_CONTENT}} placeholder.
+    Frontend can replace that placeholder with normalized content.
+
+    Returns:
+        {
+            "html": full HTML document string,
+            "contentPlaceholder": "{{LETTER_CONTENT}}" (when no htmlContent provided)
+        }
+    """
+    css_block, _ = _build_print_template_css_and_body(print_properties)
+
+    if html_content and html_content.strip():
+        # Same normalization as PDF pipeline—single source of truth
+        content = _normalize_html_for_pdf(html_content)
+        content = _strip_newlines_adjacent_to_br(content)
+        content = _normalize_line_breaks_in_html(content)
+    else:
+        content = PRINT_TEMPLATE_CONTENT_PLACEHOLDER
+
+    full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+{css_block}
+</style>
+</head>
+<body>
+<div class="print-content">{content}</div>
+</body>
+</html>"""
+
+    result: Dict[str, str] = {"html": full_html}
+    if not (html_content and html_content.strip()):
+        result["contentPlaceholder"] = PRINT_TEMPLATE_CONTENT_PLACEHOLDER
+    return result
+
+
+def normalize_html_for_print(html_content: str) -> str:
+    """
+    Normalize HTML for print/PDF. Single pipeline—use this for both display (Match PDF
+    view) and PDF generation to ensure consistency.
+
+    - Merges </p><p> to <br />
+    - Collapses redundant <br />
+    - Ensures break before Sincerely,
+    - Strips newlines adjacent to <br />
+    - Converts literal \\n to <br />
+    """
+    if not html_content:
+        return html_content
+    html_content = _normalize_html_for_pdf(html_content)
+    html_content = _strip_newlines_adjacent_to_br(html_content)
+    html_content = _normalize_line_breaks_in_html(html_content)
+    return html_content
+
+
 def _normalize_html_for_pdf(html_content: str) -> str:
     """
     Normalize HTML for PDF so spacing is consistent regardless of editor output.
@@ -348,70 +477,23 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
 async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> bytes:
     """
     Generate PDF using Playwright (Chromium) Async API. Safe to call from asyncio.
-    Margins are applied via page.pdf(margin={...}) so Chromium applies them on every page.
+    Uses the same template as get_print_template for single-source-of-truth.
     """
     margins = print_properties.get("margins", {})
-    font_family = print_properties.get("fontFamily", "Times New Roman")
-    font_size = print_properties.get("fontSize", 12)
-    line_height = print_properties.get("lineHeight", 1.6)
     page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
-    use_default_fonts = print_properties.get("useDefaultFonts", False)
-
-    margin_top = margins.get("top", 1.0)
-    margin_right = margins.get("right", 0.75)
-    margin_bottom = margins.get("bottom", 0.75)
-    margin_left = margins.get("left", 0.75)
     width_in = page_size.get("width", 8.5)
     height_in = page_size.get("height", 11.0)
 
-    body_style = "margin: 0; padding: 0; box-sizing: border-box;"
-    if not use_default_fonts:
-        if font_family and str(font_family).strip().lower() == "default":
-            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
-                line_height
-            )
-        else:
-            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+    template_result = get_print_template(print_properties, html_content)
+    html_doc = template_result["html"]
 
-    # Apply user margins in @page so Chromium respects them (API margin can be ignored when prefer_css_page_size is True)
     logger.info(
         "Playwright PDF margins (in): top=%s, right=%s, bottom=%s, left=%s",
-        margin_top,
-        margin_right,
-        margin_bottom,
-        margin_left,
+        margins.get("top", 1.0),
+        margins.get("right", 0.75),
+        margins.get("bottom", 0.75),
+        margins.get("left", 0.75),
     )
-    html_doc = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8">
-<style>
-@page {{
-  size: {width_in}in {height_in}in;
-  margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
-}}
-*, *::before, *::after {{ box-sizing: border-box; }}
-/* Force zero margin/padding on all content so only @page margin applies (no "letter within a letter") */
-.print-content * {{ margin: 0 !important; padding: 0 !important; }}
-body {{ {body_style} }}
-.print-content {{
-  max-width: 100%;
-  width: 100%;
-  overflow-x: hidden;
-  overflow-wrap: break-word;
-  word-wrap: break-word;
-}}
-.print-content * {{ max-width: 100%; }}
-.print-content table {{ table-layout: fixed; width: 100% !important; }}
-.print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
-.print-content p {{ page-break-inside: avoid; margin: 0 !important; padding: 0 !important; }}
-.print-content br {{ display: block; margin-top: 0.12em !important; }}
-.print-content ul, .print-content ol {{ padding-left: 1.2em !important; }}
-</style>
-</head>
-<body>
-<div class="print-content">{html_content}</div>
-</body>
-</html>"""
 
     # Margins applied via @page in HTML above; prefer_css_page_size so Chromium uses CSS for size and margin
     pdf_options = {
