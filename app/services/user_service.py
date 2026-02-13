@@ -3,6 +3,7 @@ User service - business logic for user operations
 """
 
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Dict, Literal, Optional
@@ -421,6 +422,31 @@ def get_user_by_email(email: str) -> UserResponse:
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    return user_doc_to_response(user)
+
+
+def get_user_by_email_ignore_case(email: str) -> Optional[UserResponse]:
+    """
+    Get user by email (case-insensitive). Returns None if not found.
+    Use for flows like forgot-password so we find the user regardless of casing.
+    """
+    if not email or not email.strip():
+        return None
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
+    pattern = f"^{re.escape(email.strip())}$"
+    user = collection.find_one({"email": {"$regex": pattern, "$options": "i"}})
+    if not user:
+        return None
     return user_doc_to_response(user)
 
 

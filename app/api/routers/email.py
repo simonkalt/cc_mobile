@@ -24,7 +24,12 @@ from app.services.verification_service import (
     complete_registration_from_redis,
     clear_verification_code,
 )
-from app.services.user_service import get_user_by_email, get_user_by_id, create_user_from_registration_data
+from app.services.user_service import (
+    get_user_by_email,
+    get_user_by_email_ignore_case,
+    get_user_by_id,
+    create_user_from_registration_data,
+)
 from app.utils.redis_utils import delete_registration_data, delete_verification_session
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password
@@ -119,13 +124,14 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             )
     
     # Handle existing user flows (forgot_password, change_password)
-    # Find user by email
-    try:
-        user = get_user_by_email(request.email)
-    except HTTPException:
-        # For forgot_password, don't reveal if user exists
+    # Find user by email (case-insensitive so we find them even if casing differs)
+    user = get_user_by_email_ignore_case(request.email)
+    if not user:
+        # For forgot_password, don't reveal if user exists (security best practice)
         if request.purpose == "forgot_password":
-            # Return success even if user doesn't exist (security best practice)
+            logger.info(
+                "forgot_password: no user found for email (returning 200 without sending)"
+            )
             return SendVerificationCodeResponse(
                 success=True,
                 message="If an account exists with this email, a verification code has been sent.",
@@ -136,11 +142,11 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             detail="User not found"
         )
     
-    # Send and store verification code
+    # Send and store verification code (use stored user.email so delivery goes to canonical address)
     try:
         send_and_store_verification_code_email(
             user_id=user.id,
-            email=request.email,
+            email=user.email,
             purpose=request.purpose
         )
         
