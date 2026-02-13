@@ -123,6 +123,13 @@ class Settings:
         os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")
     )  # 30 days default
 
+    # Nutrient.io PDF: when True and NUTRIENT_API_KEY is set, use Nutrient.io for print-preview PDF.
+    # Set to "true" to try Nutrient first; falls back to Playwright/WeasyPrint on failure.
+    NUTRIENT_API_KEY: Optional[str] = os.getenv("NUTRIENT_API_KEY")
+    PRINT_PREVIEW_USE_NUTRIENT: bool = (
+        os.getenv("PRINT_PREVIEW_USE_NUTRIENT", "false").lower() == "true"
+    )
+
     # Print Preview PDF: use only WeasyPrint (skip Playwright) when True.
     # Set to "true" if Playwright margins are wrong at page breaks.
     PRINT_PREVIEW_USE_WEASYPRINT_ONLY: bool = (

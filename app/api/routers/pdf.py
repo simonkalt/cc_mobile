@@ -162,7 +162,9 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
 
     try:
         if has_html:
-            pdf_base64 = await generate_pdf_from_html(request.htmlContent, print_props_dict)
+            pdf_base64 = await generate_pdf_from_html(
+                request.htmlContent, print_props_dict, user_id=request.user_id
+            )
         else:
             pdf_base64 = generate_pdf_from_markdown(request.markdownContent, print_props_dict)
 

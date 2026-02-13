@@ -2,13 +2,17 @@
 PDF generation service
 """
 
+import asyncio
+import hashlib
 import logging
 import base64
+import io
 import os
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
+
+import requests
 
 from app.core.config import settings
 
@@ -57,7 +61,10 @@ def _build_print_template_css_and_body(
     width_in = page_size.get("width", 8.5)
     height_in = page_size.get("height", 11.0)
 
-    body_style = "margin: 0; padding: 0; box-sizing: border-box;"
+    body_style = (
+        "margin: 0; padding: 0; box-sizing: border-box; "
+        "white-space: pre-wrap; word-wrap: break-word;"
+    )
     if not use_default_fonts:
         if font_family and str(font_family).strip().lower() == "default":
             body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
@@ -74,6 +81,8 @@ def _build_print_template_css_and_body(
 *, *::before, *::after {{ box-sizing: border-box; }}
 /* Force zero margin/padding on all content so only @page margin applies */
 .print-content * {{ margin: 0 !important; padding: 0 !important; }}
+/* Explicit p/div reset for line-break fidelity (Nutrient.io and general PDF) */
+.print-content p, .print-content div {{ margin: 0 !important; padding: 0 !important; }}
 body {{ {body_style} }}
 .print-content {{
   max-width: 100%;
@@ -253,21 +262,6 @@ def _normalize_line_breaks_in_html(html_content: str) -> str:
     return "".join(result)
 
 
-def _save_debug_pdf(pdf_bytes: bytes, source: str, html_snippet: Optional[str] = None) -> None:
-    """For testing: save a copy of the generated PDF in the project debug folder."""
-    project_root = Path(__file__).resolve().parent.parent.parent
-    debug_dir = project_root / "debug"
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-
-    try:
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        path = debug_dir / f"{source}_{timestamp}.pdf"
-        path.write_bytes(pdf_bytes)
-        logger.info("Debug copy saved: %s", path.resolve())
-    except Exception as e:
-        logger.warning("Could not save debug PDF copy: %s", e)
-
-
 # Try to import PDF generation libraries
 try:
     import markdown
@@ -294,6 +288,154 @@ except ImportError:
     async_playwright = None
     logger.info(
         "playwright not installed. PDF will use WeasyPrint (install playwright for more reliable margins)."
+    )
+
+
+def _pdf_cache_dir() -> Path:
+    """API-level temp folder for per-user last PDF cache. Created on first use."""
+    _service_root = Path(__file__).resolve().parent
+    _project_root = _service_root.parent.parent
+    cache_dir = _project_root / "tmp" / "pdf_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _safe_user_id(user_id: str) -> str:
+    """Safe filename segment from user_id (no path separators or special chars)."""
+    if not user_id:
+        return ""
+    safe = re.sub(r"[^\w\-]", "_", user_id)
+    return safe or hashlib.sha256(user_id.encode()).hexdigest()[:16]
+
+
+def _content_hash(html_content: str) -> str:
+    """SHA256 hash of normalized HTML for cache key."""
+    return hashlib.sha256(html_content.encode("utf-8")).hexdigest()
+
+
+def get_cached_pdf(user_id: str, content_hash: str) -> Optional[bytes]:
+    """
+    Return cached PDF bytes if we have a stored PDF for this user and its hash matches.
+    Otherwise return None.
+    """
+    if not user_id or not content_hash:
+        return None
+    safe_id = _safe_user_id(user_id)
+    if not safe_id:
+        return None
+    cache_dir = _pdf_cache_dir()
+    pdf_path = cache_dir / f"{safe_id}_last_pdf.pdf"
+    hash_path = cache_dir / f"{safe_id}_last_pdf.hash"
+    if not pdf_path.exists() or not hash_path.exists():
+        return None
+    try:
+        stored_hash = hash_path.read_text(encoding="utf-8").strip()
+        if stored_hash != content_hash:
+            return None
+        return pdf_path.read_bytes()
+    except OSError:
+        return None
+
+
+def set_cached_pdf(user_id: str, content_hash: str, pdf_bytes: bytes) -> None:
+    """
+    Store PDF and content hash for this user. Deletes any existing cached PDF for this user first.
+    """
+    if not user_id or not content_hash:
+        return
+    safe_id = _safe_user_id(user_id)
+    if not safe_id:
+        return
+    cache_dir = _pdf_cache_dir()
+    pdf_path = cache_dir / f"{safe_id}_last_pdf.pdf"
+    hash_path = cache_dir / f"{safe_id}_last_pdf.hash"
+    try:
+        pdf_path.unlink(missing_ok=True)
+        hash_path.unlink(missing_ok=True)
+        pdf_path.write_bytes(pdf_bytes)
+        hash_path.write_text(content_hash, encoding="utf-8")
+    except OSError as e:
+        logger.warning("Could not write PDF cache for user %s: %s", safe_id, e)
+
+
+NUTRIENT_PDF_URL = "https://api.nutrient.io/processor/generate_pdf"
+
+# 1 inch = 25.4 mm (for Nutrient.io margin params)
+INCH_TO_MM = 25.4
+
+
+def _nutrient_page_size_from_properties(print_properties: Dict) -> str:
+    """Map our pageSize (width/height in inches) to Nutrient page_size (e.g. Letter, A4)."""
+    page_size = print_properties.get("pageSize", {})
+    width_in = page_size.get("width", 8.5)
+    height_in = page_size.get("height", 11.0)
+    # Letter = 8.5 x 11 in; A4 ≈ 8.27 x 11.69 in
+    if abs(width_in - 8.27) < 0.1 and abs(height_in - 11.69) < 0.1:
+        return "A4"
+    if abs(width_in - 8.5) < 0.01 and abs(height_in - 11.0) < 0.01:
+        return "Letter"
+    return "Letter"
+
+
+def _generate_pdf_via_nutrient_sync(
+    html_doc: str, api_key: str, print_properties: Dict
+) -> bytes:
+    """
+    Generate PDF via Nutrient.io API (sync). POST full HTML with form params for
+    page size, margins (mm), text_rendering_mode, enable_css, wait_time.
+    Raises on non-2xx or network error so caller can fall back to Playwright/WeasyPrint.
+    """
+    margins = print_properties.get("margins", {})
+    margin_top_mm = round(margins.get("top", 1.0) * INCH_TO_MM, 1)
+    margin_right_mm = round(margins.get("right", 0.75) * INCH_TO_MM, 1)
+    margin_bottom_mm = round(margins.get("bottom", 0.75) * INCH_TO_MM, 1)
+    margin_left_mm = round(margins.get("left", 0.75) * INCH_TO_MM, 1)
+
+    data = {
+        "page_size": _nutrient_page_size_from_properties(print_properties),
+        "page_margin_top": f"{margin_top_mm}mm",
+        "page_margin_bottom": f"{margin_bottom_mm}mm",
+        "page_margin_left": f"{margin_left_mm}mm",
+        "page_margin_right": f"{margin_right_mm}mm",
+        "text_rendering_mode": "html",
+        "enable_css": "true",
+        "wait_time": "1000",
+    }
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    files = {
+        "html": ("index.html", io.BytesIO(html_doc.encode("utf-8")), "text/html; charset=utf-8"),
+    }
+
+    response = requests.post(
+        NUTRIENT_PDF_URL,
+        headers=headers,
+        files=files,
+        data=data,
+        timeout=60,
+        stream=True,
+    )
+    response.raise_for_status()
+
+    buf = io.BytesIO()
+    for chunk in response.iter_content(chunk_size=8096):
+        if chunk:
+            buf.write(chunk)
+    return buf.getvalue()
+
+
+async def _generate_pdf_via_nutrient(html_content: str, print_properties: Dict) -> bytes:
+    """
+    Generate PDF using Nutrient.io. Uses same template as get_print_template for consistency.
+    Runs the HTTP call in a thread so the event loop is not blocked.
+    """
+    template_result = get_print_template(print_properties, html_content)
+    html_doc = template_result["html"]
+    api_key = settings.NUTRIENT_API_KEY or ""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: _generate_pdf_via_nutrient_sync(html_doc, api_key, print_properties),
     )
 
 
@@ -460,9 +602,6 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         # Generate PDF using WeasyPrint
         pdf_bytes = HTML(string=styled_html).write_pdf()
 
-        # For testing: save a copy in the debug folder
-        _save_debug_pdf(pdf_bytes, "generate_pdf")
-
         # Encode to base64
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
 
@@ -542,9 +681,10 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
     width_in = page_size.get("width", 8.5)
     height_in = page_size.get("height", 11.0)
 
-    # Body: no padding (margins are in @page). Orphans/widows 1 so breaks are more natural (2 can force weird spots).
+    # Body: no padding (margins are in @page). white-space: pre-wrap for line-break fidelity (Nutrient/PDF).
     body_style = (
         "margin: 0; padding: 0; box-sizing: border-box; max-width: 100%; "
+        "white-space: pre-wrap; word-wrap: break-word; "
         "orphans: 1; widows: 1; hyphens: none;"
     )
     if not use_default_fonts:
@@ -569,6 +709,7 @@ def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> b
         *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
         /* Force zero margin/padding on all content so only @page margin applies (no "letter within a letter") */
         .print-content * {{ margin: 0 !important; padding: 0 !important; }}
+        .print-content p, .print-content div {{ margin: 0 !important; padding: 0 !important; }}
         body {{ {body_style} }}
         /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
         /* Zero paragraph spacing so any remaining <p> from rich editor don't add extra line height */
@@ -639,14 +780,18 @@ def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
     return HTML(string=minimal).write_pdf()
 
 
-async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> str:
+async def generate_pdf_from_html(
+    html_content: str, print_properties: Dict, user_id: Optional[str] = None
+) -> str:
     """
     Generate a PDF from HTML content using user print preferences.
     Uses WeasyPrint when available (no Playwright/Chromium required); falls back to Playwright if WeasyPrint is not installed.
+    When user_id is provided, caches the last PDF per user in tmp/pdf_cache; same HTML returns cached PDF to save cost.
 
     Args:
         html_content: The HTML fragment to convert (placed inside body).
         print_properties: User print preferences (same shape as generate_pdf_from_markdown).
+        user_id: Optional user id for per-user PDF cache (skip generation if HTML unchanged).
 
     Returns:
         Base64-encoded PDF data as a string (without data URI prefix).
@@ -662,6 +807,13 @@ async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> s
     html_content = _strip_newlines_adjacent_to_br(html_content)
     html_content = _normalize_line_breaks_in_html(html_content)
 
+    content_hash = _content_hash(html_content)
+    if user_id:
+        cached = get_cached_pdf(user_id, content_hash)
+        if cached is not None:
+            logger.info("Print preview PDF cache hit for user_id=%s", _safe_user_id(user_id))
+            return base64.b64encode(cached).decode("utf-8")
+
     # Raw HTML: minimal wrapper (WeasyPrint only)
     if settings.PRINT_PREVIEW_RAW_HTML:
         if not WEASYPRINT_AVAILABLE:
@@ -669,16 +821,38 @@ async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> s
                 "PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is not available."
             )
         pdf_bytes = _generate_pdf_raw_html(html_content, print_properties)
-        _save_debug_pdf(pdf_bytes, "print_preview_pdf_raw", html_snippet=html_content)
+        if user_id:
+            set_cached_pdf(user_id, content_hash, pdf_bytes)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         logger.info(_yellow("PDF writer: WeasyPrint (raw HTML) (%s bytes)"), len(pdf_bytes))
         return pdf_base64
+
+    # Nutrient.io: optional external PDF service (developer option; fall back to Playwright/WeasyPrint on failure)
+    if settings.PRINT_PREVIEW_USE_NUTRIENT and settings.NUTRIENT_API_KEY:
+        try:
+            pdf_bytes = await _generate_pdf_via_nutrient(html_content, print_properties)
+            if user_id:
+                set_cached_pdf(user_id, content_hash, pdf_bytes)
+            pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+            logger.info(
+                _yellow("PDF writer: Nutrient.io (%s bytes, font=%s, size=%spt)"),
+                len(pdf_bytes),
+                font_family,
+                font_size,
+            )
+            return pdf_base64
+        except Exception as e:
+            logger.warning(
+                "Nutrient.io print preview failed (%s), falling back to Playwright/WeasyPrint",
+                e,
+            )
 
     # Prefer Playwright when available (better fidelity); fall back to WeasyPrint
     if PLAYWRIGHT_AVAILABLE and async_playwright:
         try:
             pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
-            _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
+            if user_id:
+                set_cached_pdf(user_id, content_hash, pdf_bytes)
             pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
             logger.info(
                 _yellow("PDF writer: Playwright (%s bytes, font=%s, size=%spt)"),
@@ -695,7 +869,8 @@ async def generate_pdf_from_html(html_content: str, print_properties: Dict) -> s
     # WeasyPrint fallback (no Chromium required; works in WSL, Render, constrained envs)
     if WEASYPRINT_AVAILABLE:
         pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
-        _save_debug_pdf(pdf_bytes, "print_preview_pdf", html_snippet=html_content)
+        if user_id:
+            set_cached_pdf(user_id, content_hash, pdf_bytes)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         logger.info(
             _yellow("PDF writer: WeasyPrint (%s bytes, font=%s, size=%spt)"),
