@@ -41,17 +41,6 @@ from app.services.user_service import (
 logger = logging.getLogger(__name__)
 
 
-def _wants_huge_name(instructions: str) -> bool:
-    """Detect explicit requests to strongly emphasize the candidate name."""
-    if not instructions:
-        return False
-    text = instructions.lower()
-    if "name" not in text:
-        return False
-    emphasis_terms = ("huge", "very large", "big", "larger", "stand out", "headline")
-    return any(term in text for term in emphasis_terms)
-
-
 # Try to import LLM libraries
 try:
     from openai import OpenAI
@@ -502,7 +491,6 @@ You may creatively vary font size, color, and style for lists, tables, headings,
     message_data = {
         "llm": llm,
         "today": f"Date: {today_date}",
-        "name": getattr(user, "name", "") if user else "",
         "company_name": company_name,
         "hiring_manager": hiring_manager,
         "ad_source": ad_source,
@@ -962,45 +950,6 @@ Please incorporate these instructions while maintaining consistency with all oth
             raw_html = raw_html.replace(today_date_iso, today_date)
         if markdown_content and today_date_iso and today_date != today_date_iso:
             markdown_content = markdown_content.replace(today_date_iso, today_date)
-
-        # Ensure candidate name appears in output header/body so downstream styling instructions
-        # (e.g. "make my name huge") have an explicit target in DOCX flow.
-        user_name = (getattr(user, "name", "") if user else "").strip()
-        wants_huge_name = _wants_huge_name(additional_instructions)
-        if user_name:
-            name_in_markdown = user_name.lower() in markdown_content.lower()
-            if not name_in_markdown:
-                logger.warning(
-                    "LLM response missing user name; prepending name to markdown output for consistency"
-                )
-                markdown_content = f"{user_name}\n\n{markdown_content.lstrip()}"
-
-            name_in_html = user_name.lower() in raw_html.lower()
-            if not name_in_html:
-                raw_html = f"<p>{user_name}</p>{raw_html}"
-
-            if wants_huge_name:
-                # Normalize header to a clear markdown heading for deterministic DOCX parsing.
-                name_line_pattern = rf"^\s*(?:#+\s*)?{re.escape(user_name)}\s*\n+"
-                markdown_content = re.sub(
-                    name_line_pattern,
-                    "",
-                    markdown_content,
-                    count=1,
-                    flags=re.IGNORECASE,
-                )
-                markdown_content = f"# {user_name}\n\n{markdown_content.lstrip()}"
-
-                # Ensure rich preview/legacy HTML also reflects the emphasis.
-                raw_html = re.sub(
-                    rf"^\s*<p>\s*{re.escape(user_name)}\s*</p>\s*",
-                    "",
-                    raw_html,
-                    count=1,
-                    flags=re.IGNORECASE,
-                )
-                raw_html = f"<h1>{user_name}</h1>{raw_html.lstrip()}"
-
         # Convert <p>/</p> to <br /> so spacing is single line break (shift-enter), not paragraph (enter)
         raw_html = html_p_to_br(raw_html)
         # Collapse pairs of <br /> into one (6→3, 2→1); do not collapse all runs into one
@@ -1008,10 +957,9 @@ Please incorporate these instructions while maintaining consistency with all oth
         # Double line break only after groups (address, salutation, name, company); single break within groups
         raw_html = double_break_after_groups(raw_html)
 
-        # Apply user's print settings to HTML and collect DOCX style hints for frontend.
+        # Apply user's print settings to HTML
         # Reuse the user object that was already retrieved earlier for personality profiles
         styled_html = raw_html
-        docx_style_hints = {}
         try:
             # Reuse the user object that was already fetched (avoid duplicate database call)
             user_for_styling = user  # Use the user object from earlier in the function
@@ -1031,8 +979,6 @@ Please incorporate these instructions while maintaining consistency with all oth
                         )
 
                         if is_default_font or use_default_fonts:
-                            # Do not emit DOCX style hints when user selected default font behavior.
-                            docx_style_hints = {}
                             # "Default" font or useDefaultFonts: use raw LLM HTML (preserve colors, fonts, sizes)
                             # No wrapper - let LLM inline styles (bold, italic, color, font-size) show through
                             styled_html = raw_html
@@ -1040,50 +986,16 @@ Please incorporate these instructions while maintaining consistency with all oth
                                 "Skipping font wrapper: fontFamily is 'default' or useDefaultFonts is True - using raw LLM HTML"
                             )
                         else:
-                            docx_style_hints = {
-                                "fontFamily": font_family,
-                                "fontSize": font_size,
-                                "lineHeight": line_height,
-                                "useDefaultFonts": use_default_fonts,
-                                "source": "userPreferences.printProperties",
-                            }
                             # Apply user's chosen font/size/line-height
                             font_family_escaped = font_family.replace("'", "\\'")
                             styled_html = f"""<div style="font-family: '{font_family_escaped}', serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
                             logger.info(
                                 f"Applied print settings to HTML: fontFamily={font_family}, fontSize={font_size}pt, lineHeight={line_height}"
                             )
-
-                        if wants_huge_name and user_name:
-                            base_size = float(font_size) if str(font_size).strip() else 12.0
-                            huge_name_size = max(int(round(base_size * 1.8)), 24)
-                            docx_style_hints["nameStyle"] = {
-                                "target": "candidate_name",
-                                "fontSize": huge_name_size,
-                                "bold": True,
-                                "placement": "header",
-                                "source": "additionalInstructions",
-                            }
-                            logger.info(
-                                f"Applied nameStyle hint from additional instructions: fontSize={huge_name_size}pt"
-                            )
         except Exception as e:
             logger.warning(f"Could not apply print settings to HTML: {e}")
 
-        if wants_huge_name and user_name and "nameStyle" not in docx_style_hints:
-            docx_style_hints["nameStyle"] = {
-                "target": "candidate_name",
-                "fontSize": 24,
-                "bold": True,
-                "placement": "header",
-                "source": "additionalInstructions",
-            }
-
-        return {
-            "markdown": markdown_content,
-            "html": styled_html,
-            "docxStyleHints": docx_style_hints,
-        }
+        return {"markdown": markdown_content, "html": styled_html}
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
@@ -1096,7 +1008,6 @@ Please incorporate these instructions while maintaining consistency with all oth
         return {
             "markdown": f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}",
             "html": error_html,
-            "docxStyleHints": {},
         }
     except Exception as e:
         logger.error(f"Error in get_job_info: {str(e)}")
@@ -1104,4 +1015,4 @@ Please incorporate these instructions while maintaining consistency with all oth
         # Clean HTML: strip \r, preserve line breaks as <br />
         error_html = error_html.replace("\r", "").replace("\n", "<br />")
         error_html = re.sub(r" +", " ", error_html)
-        return {"markdown": f"Error: {str(e)}", "html": error_html, "docxStyleHints": {}}
+        return {"markdown": f"Error: {str(e)}", "html": error_html}
