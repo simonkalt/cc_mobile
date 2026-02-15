@@ -5,6 +5,8 @@ Cover letter generation API routes
 import json
 import logging
 import os
+import re
+import html as htmllib
 from typing import Any, Dict
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -31,13 +33,15 @@ router = APIRouter(
 )
 
 
-def _docx_template_hints_from_request(req: Any) -> Dict[str, Any]:
+def _docx_template_hints_from_request(req: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Build stable DOCX hints for frontend editors/exporters."""
     return {
         "version": "1.0",
         "sourceFormat": "markdown",
         "outputFormat": "docx",
         "styleProfile": "cover_letter_standard",
+        "style": payload.get("docxStyleHints", {}) if isinstance(payload, dict) else {},
+        "styleInstructions": getattr(req, "additional_instructions", "") or "",
         "fields": {
             "date_input": getattr(req, "date_input", ""),
             "company_name": getattr(req, "company_name", ""),
@@ -51,6 +55,40 @@ def _docx_template_hints_from_request(req: Any) -> Dict[str, Any]:
     }
 
 
+def _sanitize_markdown_no_html(markdown: str) -> str:
+    """
+    Remove raw HTML tags from markdown content so frontend DOCX creation receives
+    plain markdown/text only.
+    """
+    if not markdown:
+        return ""
+
+    text = str(markdown)
+    # Preserve common style semantics by converting simple HTML to markdown-like text first.
+    for level in range(6, 0, -1):
+        text = re.sub(
+            rf"<\s*h{level}\b[^>]*>(.*?)<\s*/\s*h{level}\s*>",
+            lambda m, n=level: f"{'#' * n} {m.group(1).strip()}\n",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    text = re.sub(r"<\s*(strong|b)\b[^>]*>(.*?)<\s*/\s*(strong|b)\s*>", r"**\2**", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<\s*(em|i)\b[^>]*>(.*?)<\s*/\s*(em|i)\s*>", r"*\2*", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<\s*li\b[^>]*>", "- ", text, flags=re.IGNORECASE)
+    # Convert common block/line-break tags to newlines before stripping remaining tags
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*/\s*(p|div|li|h1|h2|h3|h4|h5|h6)\s*>", "\n", text, flags=re.IGNORECASE)
+    # Remove any remaining HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Decode HTML entities (&amp;, &nbsp;, etc.)
+    text = htmllib.unescape(text)
+    # Normalize line endings and whitespace/newline runs
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
     """
     Enforce DOCX source-of-truth response contract.
@@ -62,10 +100,22 @@ def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
     else:
         payload = {"markdown": str(result) if result is not None else ""}
 
-    payload.pop("html", None)
-    if not payload.get("markdown"):
-        payload["markdown"] = ""
-    payload["docxTemplateHints"] = _docx_template_hints_from_request(req)
+    raw_html = payload.get("html", "") if isinstance(payload, dict) else ""
+    payload.pop("docxStyleHints", None)
+    payload["markdown"] = _sanitize_markdown_no_html(payload.get("markdown", ""))
+    if raw_html:
+        payload["html"] = raw_html
+    else:
+        try:
+            import markdown as mdlib
+
+            payload["html"] = mdlib.markdown(
+                payload["markdown"],
+                extensions=["extra", "nl2br"],
+            )
+        except Exception:
+            payload["html"] = ""
+    payload["docxTemplateHints"] = _docx_template_hints_from_request(req, result if isinstance(result, dict) else payload)
     return payload
 
 

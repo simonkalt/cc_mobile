@@ -2,7 +2,7 @@
 Cover letter related Pydantic models
 """
 from pydantic import BaseModel, Field
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 
 class ChatRequest(BaseModel):
@@ -67,9 +67,12 @@ class DocxTemplateHints(BaseModel):
     outputFormat: str = "docx"
     styleProfile: str = "cover_letter_standard"
     fields: Dict[str, str] = Field(default_factory=dict)
+    style: Dict[str, Any] = Field(default_factory=dict)
+    styleInstructions: str = ""
 
 
 class CoverLetterGenerationResponse(BaseModel):
     markdown: str
+    html: Optional[str] = None
     docxTemplateHints: DocxTemplateHints
 
