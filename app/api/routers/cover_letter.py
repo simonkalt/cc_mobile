@@ -5,12 +5,18 @@ Cover letter generation API routes
 import json
 import logging
 import os
+from typing import Any, Dict
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from app.core.auth import get_current_user
 from app.models.user import UserResponse
 
-from app.models.cover_letter import JobInfoRequest, ChatRequest, CoverLetterWithTextResumeRequest
+from app.models.cover_letter import (
+    JobInfoRequest,
+    ChatRequest,
+    CoverLetterWithTextResumeRequest,
+    CoverLetterGenerationResponse,
+)
 from app.services.cover_letter_service import get_job_info
 from app.utils.pdf_utils import read_pdf_from_bytes
 from app.utils.s3_utils import download_pdf_from_s3, get_s3_client, S3_AVAILABLE
@@ -25,7 +31,45 @@ router = APIRouter(
 )
 
 
-@router.post("/job-info")
+def _docx_template_hints_from_request(req: Any) -> Dict[str, Any]:
+    """Build stable DOCX hints for frontend editors/exporters."""
+    return {
+        "version": "1.0",
+        "sourceFormat": "markdown",
+        "outputFormat": "docx",
+        "styleProfile": "cover_letter_standard",
+        "fields": {
+            "date_input": getattr(req, "date_input", ""),
+            "company_name": getattr(req, "company_name", ""),
+            "hiring_manager": getattr(req, "hiring_manager", ""),
+            "ad_source": getattr(req, "ad_source", ""),
+            "tone": getattr(req, "tone", "Professional"),
+            "address": getattr(req, "address", ""),
+            "phone_number": getattr(req, "phone_number", ""),
+            "additional_instructions": getattr(req, "additional_instructions", ""),
+        },
+    }
+
+
+def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
+    """
+    Enforce DOCX source-of-truth response contract.
+    Removes legacy HTML and returns markdown + docxTemplateHints.
+    Preserves extra non-HTML metadata fields when present.
+    """
+    if isinstance(result, dict):
+        payload: Dict[str, Any] = dict(result)
+    else:
+        payload = {"markdown": str(result) if result is not None else ""}
+
+    payload.pop("html", None)
+    if not payload.get("markdown"):
+        payload["markdown"] = ""
+    payload["docxTemplateHints"] = _docx_template_hints_from_request(req)
+    return payload
+
+
+@router.post("/job-info", response_model=CoverLetterGenerationResponse)
 async def handle_job_info(request: JobInfoRequest):
     """
     Generate cover letter based on job information.
@@ -55,10 +99,10 @@ async def handle_job_info(request: JobInfoRequest):
         user_id=request.user_id,
         user_email=request.user_email,
     )
-    return result
+    return _normalize_generation_response(result, request)
 
 
-@router.post("/cover-letter/generate-with-text-resume")
+@router.post("/cover-letter/generate-with-text-resume", response_model=CoverLetterGenerationResponse)
 async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextResumeRequest):
     """
     Generate cover letter with explicitly pasted resume text.
@@ -95,7 +139,7 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
         user_email=request.user_email,
         is_plain_text=True,  # Skip file processing for pasted text
     )
-    return result
+    return _normalize_generation_response(result, request)
 
 
 @router.post("/chat")
@@ -204,7 +248,7 @@ async def handle_chat(request: Request):
                 user_id=job_request.user_id,
                 user_email=job_request.user_email,
             )
-            return result
+            return _normalize_generation_response(result, job_request)
         else:
             # Handle as regular chat request
             chat_request = ChatRequest(**body)

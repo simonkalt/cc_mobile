@@ -1,8 +1,8 @@
 """
 Cover letter related Pydantic models
 """
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, Dict
 
 
 class ChatRequest(BaseModel):
@@ -48,9 +48,9 @@ class CoverLetterWithTextResumeRequest(BaseModel):
 
 
 class SaveCoverLetterRequest(BaseModel):
-    coverLetterContent: str  # The cover letter content (markdown, HTML, or base64-encoded PDF)
+    coverLetterContent: str  # The cover letter content (markdown text, or base64-encoded DOCX/PDF)
     fileName: Optional[str] = None  # Optional custom filename (without extension)
-    contentType: str = "text/markdown"  # Content type: "text/markdown", "text/html", or "application/pdf"
+    contentType: str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"  # "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/pdf", "text/markdown"
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
@@ -59,4 +59,17 @@ class CoverLetterRequest(BaseModel):
     key: str  # S3 key (user_id/generated_cover_letters/filename)
     user_id: Optional[str] = None
     user_email: Optional[str] = None
+
+
+class DocxTemplateHints(BaseModel):
+    version: str = "1.0"
+    sourceFormat: str = "markdown"
+    outputFormat: str = "docx"
+    styleProfile: str = "cover_letter_standard"
+    fields: Dict[str, str] = Field(default_factory=dict)
+
+
+class CoverLetterGenerationResponse(BaseModel):
+    markdown: str
+    docxTemplateHints: DocxTemplateHints
 

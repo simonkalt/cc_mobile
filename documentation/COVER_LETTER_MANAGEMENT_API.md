@@ -2,6 +2,9 @@
 
 API endpoints for managing saved cover letters in S3 bucket. Cover letters are stored in a user-specific subfolder: `{user_id}/generated_cover_letters/{filename}`
 
+> **Current source-of-truth format:** `.docx` (MS Word).  
+> `.html` is legacy only; new clients should use DOCX for editable content and editor-native PDF export.
+
 ## Base URL
 
 ```
@@ -93,7 +96,7 @@ Download a cover letter from S3 for previewing. Returns the file content with ap
 **Request Example:**
 
 ```
-GET /api/cover-letters/download?key=507f1f77bcf86cd799439011/generated_cover_letters/cover_letter_tech_corp.md&user_id=507f1f77bcf86cd799439011
+GET /api/cover-letters/download?key=507f1f77bcf86cd799439011/generated_cover_letters/cover_letter_tech_corp.docx&user_id=507f1f77bcf86cd799439011
 ```
 
 **Response (200 OK):**
@@ -101,15 +104,17 @@ GET /api/cover-letters/download?key=507f1f77bcf86cd799439011/generated_cover_let
 The response is the file content with appropriate headers:
 
 - **Content-Type**: Based on file extension:
+  - `.docx` → `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
   - `.pdf` → `application/pdf`
-  - `.html` → `text/html`
+  - `.html` → `text/html` (legacy)
   - `.md` → `text/markdown`
 - **Content-Disposition**: `inline; filename="{filename}"`
 
 **Response Body:**
 
+- For DOCX files: Binary DOCX data
 - For PDF files: Binary PDF data
-- For HTML files: HTML text content
+- For HTML files: HTML text content (legacy)
 - For Markdown files: Markdown text content
 
 **Error Responses:**
@@ -212,12 +217,14 @@ async function listCoverLetters(user_id, user_email = null) {
         headers: {
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      throw new Error(
+        errorData.detail || `HTTP error! status: ${response.status}`,
+      );
     }
 
     const result = await response.json();
@@ -239,12 +246,14 @@ async function downloadCoverLetter(key, user_id, user_email = null) {
       `${API_BASE_URL}/api/cover-letters/download?${params.toString()}`,
       {
         method: "GET",
-      }
+      },
     );
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      throw new Error(
+        errorData.detail || `HTTP error! status: ${response.status}`,
+      );
     }
 
     // Get content type and filename from response
@@ -261,7 +270,7 @@ async function downloadCoverLetter(key, user_id, user_email = null) {
       window.open(url, "_blank");
       // Or download: const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
     } else {
-      // For text files (markdown, HTML), get as text
+      // For text files (markdown, HTML legacy), get as text
       const text = await response.text();
       return { content: text, contentType, filename };
     }
@@ -288,7 +297,9 @@ async function deleteCoverLetter(key, user_id, user_email = null) {
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      throw new Error(
+        errorData.detail || `HTTP error! status: ${response.status}`,
+      );
     }
 
     const result = await response.json();
@@ -312,7 +323,7 @@ listCoverLetters(userId).then((files) => {
 
 // Download a cover letter
 const coverLetterKey =
-  "507f1f77bcf86cd799439011/generated_cover_letters/cover_letter_tech_corp.md";
+  "507f1f77bcf86cd799439011/generated_cover_letters/cover_letter_tech_corp.docx";
 downloadCoverLetter(coverLetterKey, userId).then((result) => {
   if (result) {
     console.log("Cover letter content:", result.content);
@@ -348,7 +359,7 @@ function CoverLetterManager({ user_id, user_email }) {
       if (user_email) params.append("user_email", user_email);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/cover-letters/list?${params.toString()}`
+        `${API_BASE_URL}/api/cover-letters/list?${params.toString()}`,
       );
 
       if (!response.ok) {
@@ -373,7 +384,7 @@ function CoverLetterManager({ user_id, user_email }) {
       if (user_email) params.append("user_email", user_email);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/cover-letters/download?${params.toString()}`
+        `${API_BASE_URL}/api/cover-letters/download?${params.toString()}`,
       );
 
       if (!response.ok) {
@@ -467,7 +478,14 @@ export default CoverLetterManager;
 
 ```javascript
 import { useState, useEffect } from "react";
-import { View, Text, Button, FlatList, Alert, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  Button,
+  FlatList,
+  Alert,
+  ActivityIndicator,
+} from "react-native";
 
 function CoverLetterManager({ user_id, user_email }) {
   const [coverLetters, setCoverLetters] = useState([]);
@@ -483,7 +501,7 @@ function CoverLetterManager({ user_id, user_email }) {
       if (user_email) params.append("user_email", user_email);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/cover-letters/list?${params.toString()}`
+        `${API_BASE_URL}/api/cover-letters/list?${params.toString()}`,
       );
 
       if (!response.ok) {
@@ -507,7 +525,7 @@ function CoverLetterManager({ user_id, user_email }) {
       if (user_email) params.append("user_email", user_email);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/cover-letters/download?${params.toString()}`
+        `${API_BASE_URL}/api/cover-letters/download?${params.toString()}`,
       );
 
       if (!response.ok) {
@@ -521,7 +539,10 @@ function CoverLetterManager({ user_id, user_email }) {
       if (contentType === "application/pdf") {
         // For React Native, you might use a library like react-native-pdf
         // or open the URL in a WebView
-        Alert.alert("PDF", "PDF preview not implemented. Use a PDF viewer library.");
+        Alert.alert(
+          "PDF",
+          "PDF preview not implemented. Use a PDF viewer library.",
+        );
       } else {
         const text = await response.text();
         Alert.alert("Cover Letter", text.substring(0, 200) + "...");
@@ -554,12 +575,14 @@ function CoverLetterManager({ user_id, user_email }) {
                     user_id: user_id,
                     user_email: user_email,
                   }),
-                }
+                },
               );
 
               if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.detail || "Failed to delete cover letter");
+                throw new Error(
+                  errorData.detail || "Failed to delete cover letter",
+                );
               }
 
               const result = await response.json();
@@ -570,7 +593,7 @@ function CoverLetterManager({ user_id, user_email }) {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -621,15 +644,16 @@ s3://bucket-name/
   {user_id}/
     generated_cover_letters/
       cover_letter_20240115_143022.md
+      cover_letter_tech_corp.docx
       cover_letter_tech_corp.md
       cover_letter_company_xyz.pdf
-      cover_letter_another_company.html
+      cover_letter_another_company.html (legacy)
       ...
 ```
 
 - Each user has their own folder: `{user_id}/`
 - Cover letters are stored in a subfolder: `{user_id}/generated_cover_letters/`
-- Files can be in multiple formats: `.md`, `.html`, or `.pdf`
+- Files can be in multiple formats: `.docx` (primary), `.pdf`, `.md`, and `.html` (legacy)
 
 ---
 
@@ -638,6 +662,7 @@ s3://bucket-name/
 ### Common Errors
 
 1. **400 Bad Request**: Missing required fields
+
    ```json
    {
      "detail": "user_id or user_email is required to list cover letters"
@@ -645,6 +670,7 @@ s3://bucket-name/
    ```
 
 2. **403 Forbidden**: Attempting to access another user's cover letters
+
    ```json
    {
      "detail": "Cannot download cover letters that don't belong to this user"
@@ -652,6 +678,7 @@ s3://bucket-name/
    ```
 
 3. **404 Not Found**: Cover letter or user not found
+
    ```json
    {
      "detail": "Cover letter not found"
@@ -659,6 +686,7 @@ s3://bucket-name/
    ```
 
 4. **500 Internal Server Error**: S3 operation failed
+
    ```json
    {
      "detail": "S3 error: AccessDenied - ..."
@@ -691,17 +719,20 @@ s3://bucket-name/
 You can test the endpoints using curl:
 
 **List Cover Letters:**
+
 ```bash
 curl -X GET "http://localhost:8000/api/cover-letters/list?user_id=507f1f77bcf86cd799439011"
 ```
 
 **Download Cover Letter:**
+
 ```bash
 curl -X GET "http://localhost:8000/api/cover-letters/download?key=507f1f77bcf86cd799439011/generated_cover_letters/cover_letter_tech_corp.md&user_id=507f1f77bcf86cd799439011" \
-  -o cover_letter.md
+  -o cover_letter.docx
 ```
 
 **Delete Cover Letter:**
+
 ```bash
 curl -X DELETE http://localhost:8000/api/cover-letters/delete \
   -H "Content-Type: application/json" \
@@ -715,9 +746,8 @@ curl -X DELETE http://localhost:8000/api/cover-letters/delete \
 
 ## Notes
 
-- All endpoints require user authentication via `user_id` or `user_email`
+- Endpoints are protected by JWT auth and also require user ownership checks via `user_id` or `user_email`
 - Files are automatically sorted by modification date (newest first)
 - The `generated_cover_letters` subfolder is created automatically if it doesn't exist
 - User validation ensures users can only access their own cover letters
 - System files (`.folder_initialized`) are excluded from listings and cannot be deleted
-

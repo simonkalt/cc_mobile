@@ -637,17 +637,25 @@ async def save_cover_letter(request: SaveCoverLetterRequest, current_user: UserR
 
         content_type_lower = request.contentType.lower().strip() if request.contentType else ""
 
-        if content_type_lower == "text/html" or content_type_lower == "html":
+        if (
+            content_type_lower
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or content_type_lower == "docx"
+        ):
+            file_extension = ".docx"
+        elif content_type_lower == "text/html" or content_type_lower == "html":
             file_extension = ".html"
         elif content_type_lower == "application/pdf" or content_type_lower == "pdf":
             file_extension = ".pdf"
         else:
             file_extension = ".md"
 
-        if safe_filename.endswith((".md", ".html", ".pdf", ".txt")):
+        if safe_filename.endswith((".md", ".html", ".pdf", ".docx", ".txt")):
             existing_ext = None
             if safe_filename.endswith(".pdf"):
                 existing_ext = ".pdf"
+            elif safe_filename.endswith(".docx"):
+                existing_ext = ".docx"
             elif safe_filename.endswith(".html"):
                 existing_ext = ".html"
             elif safe_filename.endswith(".md"):
@@ -675,11 +683,32 @@ async def save_cover_letter(request: SaveCoverLetterRequest, current_user: UserR
                 raise HTTPException(
                     status_code=400, detail=f"Invalid base64 PDF data: {str(e)}"
                 )
+        elif (
+            content_type_lower
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or content_type_lower == "docx"
+        ):
+            try:
+                content_bytes = base64.b64decode(request.coverLetterContent)
+                # DOCX is a ZIP container; files begin with PK signature.
+                if not content_bytes.startswith(b"PK"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid DOCX data: content does not appear to be a valid DOCX file",
+                    )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid base64 DOCX data: {str(e)}"
+                )
         else:
             content_bytes = request.coverLetterContent.encode("utf-8")
 
         if file_extension == ".pdf":
             s3_content_type = "application/pdf"
+        elif file_extension == ".docx":
+            s3_content_type = (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
         elif file_extension == ".html":
             s3_content_type = "text/html"
         else:

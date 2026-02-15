@@ -103,12 +103,12 @@ def _default_system_prompt() -> str:
     """Default system prompt when JSON is missing or invalid. Uses only the single allowed page-formatting paragraph."""
     return (
         "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. "
-        "Return a two-field JSON object: 'markdown' (one line) and 'html' (one line). HTML must match markdown in text. "
-        "HEADER LAYOUT (required): First group: your address (one line) then your phone (one line). Second group: hiring manager (one line) then company (one line). After that, two line breaks before the date/Re:/Dear. Use <br /> for line breaks in HTML. "
-        "PAGE AND HTML FORMATTING (the only formatting rule for layout and output): All attempts to fit the resulting letter to one 8 1/2 x 11\" page must be made. "
+        "Return a one-field JSON object: 'markdown'. Do not return HTML. "
+        "HEADER LAYOUT (required): First group: your address (one line) then your phone (one line). Second group: hiring manager (one line) then company (one line). After that, two line breaks before the date/Re:/Dear. "
+        "PAGE FORMATTING (for DOCX output): All attempts to fit the resulting letter to one 8 1/2 x 11\" page must be made. "
         "Consider all of these factors: page size, font sizes, margins, important job alignments when calculating what and how much text to put on the page. "
         "If content suffers due to lack of job and resume alignment, you may continue to a 2nd page. "
-        "Use the most standard HTML possible that is most compatible with most viewers, browsers, and converters."
+        "Output markdown that converts cleanly to DOCX."
     )
 
 
@@ -254,14 +254,12 @@ def get_oc_info(prompt: str) -> str:
         logger.error("OCI library not available")
         return json.dumps({
             "markdown": "Error: OCI library not available",
-            "html": "<p>Error: OCI library not available</p>",
         })
     
     if not settings.OCI_CONFIG_FILE:
         logger.error("OCI_CONFIG_FILE not configured")
         return json.dumps({
             "markdown": "Error: OCI configuration file not set",
-            "html": "<p>Error: OCI configuration file not set</p>",
         })
     
     try:
@@ -276,7 +274,6 @@ def get_oc_info(prompt: str) -> str:
             logger.error("OCI_COMPARTMENT_ID not configured")
             return json.dumps({
                 "markdown": "Error: OCI compartment ID not set",
-                "html": "<p>Error: OCI compartment ID not set</p>",
             })
         
         config = oci.config.from_file(oci_config_file, oci_config_profile)
@@ -331,7 +328,6 @@ def get_oc_info(prompt: str) -> str:
             return json.dumps(
                 {
                     "markdown": "Error: No response from OCI",
-                    "html": "<p>Error: No response from OCI</p>",
                 }
             )
 
@@ -363,7 +359,5 @@ def get_oc_info(prompt: str) -> str:
     except Exception as e:
         error_msg = f"Error calling OCI Generative AI: {str(e)}"
         logger.error(error_msg)
-        return json.dumps(
-            {"markdown": f"Error: {error_msg}", "html": f"<p>Error: {error_msg}</p>"}
-        )
+        return json.dumps({"markdown": f"Error: {error_msg}"})
 

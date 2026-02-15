@@ -16,6 +16,7 @@ https://your-domain.com  (production)
 **POST** `/api/job-info`
 
 Generate a cover letter based on job information. This endpoint accepts resume content in multiple formats:
+
 - Plain text resume content
 - S3 key (format: `user_id/filename.pdf`) - will be downloaded from S3
 - Base64-encoded PDF data - will be decoded and text extracted
@@ -29,7 +30,7 @@ Generate a cover letter based on job information. This endpoint accepts resume c
   "company_name": "Tech Corp",
   "hiring_manager": "John Doe",
   "ad_source": "LinkedIn",
-  "resume": "John Doe\nSoftware Engineer\n...",  // Can be text, S3 key, or base64 PDF
+  "resume": "John Doe\nSoftware Engineer\n...", // Can be text, S3 key, or base64 PDF
   "jd": "We are looking for a software engineer...",
   "additional_instructions": "Emphasize my experience with React",
   "tone": "Professional",
@@ -64,14 +65,24 @@ Generate a cover letter based on job information. This endpoint accepts resume c
 ```json
 {
   "markdown": "# Cover Letter\n\nDear John Doe,\n\n...",
-  "html": "<h1>Cover Letter</h1>\n<p>Dear John Doe,</p>\n<p>...</p>"
+  "docxTemplateHints": {
+    "version": "1.0",
+    "sourceFormat": "markdown",
+    "outputFormat": "docx",
+    "styleProfile": "cover_letter_standard",
+    "fields": {
+      "date_input": "2024-01-15",
+      "company_name": "Tech Corp",
+      "hiring_manager": "John Doe"
+    }
+  }
 }
 ```
 
 **Response Fields:**
 
 - `markdown`: Cover letter content in Markdown format
-- `html`: Cover letter content in HTML format
+- `docxTemplateHints`: Metadata for frontend DOCX creation/editing workflow
 
 **Error Responses:**
 
@@ -88,6 +99,7 @@ Generate a cover letter based on job information. This endpoint accepts resume c
 Generate a cover letter using explicitly pasted resume text. This endpoint is designed for cases where the user pastes resume content directly into a text field instead of uploading a file.
 
 **Important:** This endpoint accepts **all the same parameters** as `/api/job-info`, including:
+
 - Personality profiles (via `user_id` or `user_email`)
 - Custom tone settings
 - Additional instructions
@@ -98,6 +110,7 @@ Generate a cover letter using explicitly pasted resume text. This endpoint is de
 The only difference is that this endpoint uses `resume_text` (plain text) instead of `resume` (which can be text, S3 key, or base64 PDF).
 
 **Use this endpoint when:**
+
 - User pastes resume text directly into a text field
 - You want to explicitly indicate that the resume is plain text (not a file path or S3 key)
 - You want clearer separation between file-based and text-based resume input
@@ -145,14 +158,24 @@ All fields are identical to `/api/job-info` except for the resume field:
 ```json
 {
   "markdown": "# Cover Letter\n\nDear John Doe,\n\n...",
-  "html": "<h1>Cover Letter</h1>\n<p>Dear John Doe,</p>\n<p>...</p>"
+  "docxTemplateHints": {
+    "version": "1.0",
+    "sourceFormat": "markdown",
+    "outputFormat": "docx",
+    "styleProfile": "cover_letter_standard",
+    "fields": {
+      "date_input": "2024-01-15",
+      "company_name": "Tech Corp",
+      "hiring_manager": "John Doe"
+    }
+  }
 }
 ```
 
 **Response Fields:**
 
 - `markdown`: Cover letter content in Markdown format
-- `html`: Cover letter content in HTML format
+- `docxTemplateHints`: Metadata for frontend DOCX creation/editing workflow
 
 **Error Responses:**
 
@@ -167,81 +190,88 @@ All fields are identical to `/api/job-info` except for the resume field:
 ### JavaScript/React - Using Pasted Resume Text
 
 ```javascript
-async function generateCoverLetterWithPastedResume(resumeText, jobInfo, userId) {
-  const response = await fetch('http://localhost:8000/api/cover-letter/generate-with-text-resume', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+async function generateCoverLetterWithPastedResume(
+  resumeText,
+  jobInfo,
+  userId,
+) {
+  const response = await fetch(
+    "http://localhost:8000/api/cover-letter/generate-with-text-resume",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        llm: "gpt-4",
+        date_input: new Date().toISOString().split("T")[0],
+        company_name: jobInfo.companyName,
+        hiring_manager: jobInfo.hiringManager || "",
+        ad_source: jobInfo.adSource || "",
+        resume_text: resumeText, // Pasted resume text (only difference from file version)
+        jd: jobInfo.jobDescription,
+        additional_instructions: jobInfo.additionalInstructions || "", // Custom instructions
+        tone: jobInfo.tone || "Professional", // Tone setting (can use personality profiles)
+        address: jobInfo.address || "",
+        phone_number: jobInfo.phoneNumber || "",
+        user_id: userId, // Enables personality profiles and user preferences
+        // user_email: 'user@example.com',  // Alternative to user_id
+      }),
     },
-    body: JSON.stringify({
-      llm: 'gpt-4',
-      date_input: new Date().toISOString().split('T')[0],
-      company_name: jobInfo.companyName,
-      hiring_manager: jobInfo.hiringManager || '',
-      ad_source: jobInfo.adSource || '',
-      resume_text: resumeText,  // Pasted resume text (only difference from file version)
-      jd: jobInfo.jobDescription,
-      additional_instructions: jobInfo.additionalInstructions || '',  // Custom instructions
-      tone: jobInfo.tone || 'Professional',  // Tone setting (can use personality profiles)
-      address: jobInfo.address || '',
-      phone_number: jobInfo.phoneNumber || '',
-      user_id: userId,  // Enables personality profiles and user preferences
-      // user_email: 'user@example.com',  // Alternative to user_id
-    }),
-  });
+  );
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Failed to generate cover letter');
+    throw new Error(error.detail || "Failed to generate cover letter");
   }
 
   return await response.json();
 }
 
 // Usage
-const resumeText = document.getElementById('resume-textarea').value;
+const resumeText = document.getElementById("resume-textarea").value;
 const coverLetter = await generateCoverLetterWithPastedResume(
   resumeText,
   {
-    companyName: 'Tech Corp',
-    hiringManager: 'John Doe',
-    jobDescription: 'We are looking for...',
+    companyName: "Tech Corp",
+    hiringManager: "John Doe",
+    jobDescription: "We are looking for...",
   },
-  '507f1f77bcf86cd799439011'
+  "507f1f77bcf86cd799439011",
 );
 
-console.log(coverLetter.markdown);  // Markdown format
-console.log(coverLetter.html);      // HTML format
+console.log(coverLetter.markdown); // Markdown format
+console.log(coverLetter.docxTemplateHints); // DOCX generation/editing hints
 ```
 
 ### JavaScript/React - Using S3 Resume File
 
 ```javascript
 async function generateCoverLetterWithS3Resume(s3Key, jobInfo, userId) {
-  const response = await fetch('http://localhost:8000/api/job-info', {
-    method: 'POST',
+  const response = await fetch("http://localhost:8000/api/job-info", {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      llm: 'gpt-4',
-      date_input: new Date().toISOString().split('T')[0],
+      llm: "gpt-4",
+      date_input: new Date().toISOString().split("T")[0],
       company_name: jobInfo.companyName,
-      hiring_manager: jobInfo.hiringManager || '',
-      ad_source: jobInfo.adSource || '',
-      resume: `${userId}/${s3Key}`,  // S3 key format: user_id/filename.pdf
+      hiring_manager: jobInfo.hiringManager || "",
+      ad_source: jobInfo.adSource || "",
+      resume: `${userId}/${s3Key}`, // S3 key format: user_id/filename.pdf
       jd: jobInfo.jobDescription,
-      additional_instructions: jobInfo.additionalInstructions || '',
-      tone: jobInfo.tone || 'Professional',
-      address: jobInfo.address || '',
-      phone_number: jobInfo.phoneNumber || '',
+      additional_instructions: jobInfo.additionalInstructions || "",
+      tone: jobInfo.tone || "Professional",
+      address: jobInfo.address || "",
+      phone_number: jobInfo.phoneNumber || "",
       user_id: userId,
     }),
   });
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Failed to generate cover letter');
+    throw new Error(error.detail || "Failed to generate cover letter");
   }
 
   return await response.json();
@@ -251,31 +281,34 @@ async function generateCoverLetterWithS3Resume(s3Key, jobInfo, userId) {
 ### Using Axios
 
 ```javascript
-import axios from 'axios';
+import axios from "axios";
 
 const generateCoverLetter = async (resumeText, jobInfo, userId) => {
   try {
     const response = await axios.post(
-      'http://localhost:8000/api/cover-letter/generate-with-text-resume',
+      "http://localhost:8000/api/cover-letter/generate-with-text-resume",
       {
-        llm: 'gpt-4',
-        date_input: new Date().toISOString().split('T')[0],
+        llm: "gpt-4",
+        date_input: new Date().toISOString().split("T")[0],
         company_name: jobInfo.companyName,
-        hiring_manager: jobInfo.hiringManager || '',
-        ad_source: jobInfo.adSource || '',
+        hiring_manager: jobInfo.hiringManager || "",
+        ad_source: jobInfo.adSource || "",
         resume_text: resumeText,
         jd: jobInfo.jobDescription,
-        additional_instructions: jobInfo.additionalInstructions || '',
-        tone: jobInfo.tone || 'Professional',
-        address: jobInfo.address || '',
-        phone_number: jobInfo.phoneNumber || '',
+        additional_instructions: jobInfo.additionalInstructions || "",
+        tone: jobInfo.tone || "Professional",
+        address: jobInfo.address || "",
+        phone_number: jobInfo.phoneNumber || "",
         user_id: userId,
-      }
+      },
     );
 
     return response.data;
   } catch (error) {
-    console.error('Error generating cover letter:', error.response?.data || error.message);
+    console.error(
+      "Error generating cover letter:",
+      error.response?.data || error.message,
+    );
     throw error;
   }
 };
@@ -332,6 +365,7 @@ curl -X POST "http://localhost:8000/api/job-info" \
 When using `/api/cover-letter/generate-with-text-resume`, the `resume_text` parameter should contain plain text resume content. The text will be used directly without any processing.
 
 **Example:**
+
 ```
 John Doe
 Software Engineer
@@ -350,6 +384,7 @@ Tech Company Inc.
 ### S3 Resume File
 
 When using `/api/job-info` with an S3 key:
+
 - Format: `user_id/filename.pdf` (e.g., `507f1f77bcf86cd799439011/resume.pdf`)
 - The file will be downloaded from S3
 - Text will be extracted from the PDF automatically
@@ -358,6 +393,7 @@ When using `/api/job-info` with an S3 key:
 ### Base64 PDF Resume
 
 When using `/api/job-info` with base64-encoded PDF:
+
 - The PDF data should be base64-encoded
 - The endpoint will automatically detect and decode it
 - Text will be extracted from the PDF
@@ -393,15 +429,19 @@ Always handle errors appropriately:
 
 ```javascript
 try {
-  const coverLetter = await generateCoverLetterWithPastedResume(resumeText, jobInfo, userId);
-  // Use coverLetter.markdown or coverLetter.html
+  const coverLetter = await generateCoverLetterWithPastedResume(
+    resumeText,
+    jobInfo,
+    userId,
+  );
+  // Use coverLetter.markdown + coverLetter.docxTemplateHints
 } catch (error) {
   if (error.response?.status === 400) {
-    console.error('Invalid request:', error.response.data.detail);
+    console.error("Invalid request:", error.response.data.detail);
   } else if (error.response?.status === 503) {
-    console.error('Service unavailable:', error.response.data.detail);
+    console.error("Service unavailable:", error.response.data.detail);
   } else {
-    console.error('Unexpected error:', error.message);
+    console.error("Unexpected error:", error.message);
   }
 }
 ```
@@ -424,16 +464,15 @@ try {
 2. **Parameter Parity**: Both endpoints (`/api/job-info` and `/api/cover-letter/generate-with-text-resume`) accept **exactly the same parameters** except for the resume field:
    - `/api/job-info` uses `resume` (can be text, S3 key, or base64 PDF)
    - `/api/cover-letter/generate-with-text-resume` uses `resume_text` (plain text only)
-   
+
    All other parameters (personality profiles via `user_id`/`user_email`, `tone`, `additional_instructions`, `company_name`, `hiring_manager`, `ad_source`, `address`, `phone_number`, etc.) work identically on both endpoints.
 
 3. **User Identification**: Providing `user_id` or `user_email` enables access to custom personality profiles and user preferences.
 
-3. **Date Format**: The `date_input` should be in `YYYY-MM-DD` format (e.g., "2024-01-15").
+4. **Date Format**: The `date_input` should be in `YYYY-MM-DD` format (e.g., "2024-01-15").
 
-4. **Response Format**: Both endpoints return the cover letter in both Markdown and HTML formats for flexibility in display.
+5. **Response Format**: Both endpoints return markdown content and `docxTemplateHints` (HTML is deprecated and removed from generation responses).
 
-5. **Performance**: Cover letter generation typically takes 5-30 seconds depending on the LLM model and content length.
+6. **Performance**: Cover letter generation typically takes 5-30 seconds depending on the LLM model and content length.
 
-6. **Rate Limiting**: Be aware of rate limits for your LLM provider when making multiple requests.
-
+7. **Rate Limiting**: Be aware of rate limits for your LLM provider when making multiple requests.

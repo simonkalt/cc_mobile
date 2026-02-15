@@ -21,9 +21,9 @@ Save a generated cover letter to the user's `generated_cover_letters` subfolder 
 
 ```json
 {
-  "coverLetterContent": "# Cover Letter\n\nDear Hiring Manager,\n\n...",
+  "coverLetterContent": "<base64_docx_bytes>",
   "fileName": "cover_letter_company_name",
-  "contentType": "text/markdown",
+  "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "user_id": "507f1f77bcf86cd799439011",
   "user_email": "user@example.com"
 }
@@ -33,13 +33,15 @@ Save a generated cover letter to the user's `generated_cover_letters` subfolder 
 
 - `coverLetterContent` (required): The cover letter content as a string. Can be:
   - Markdown text (for `text/markdown`)
-  - HTML text (for `text/html`)
+  - Base64-encoded DOCX data (for `application/vnd.openxmlformats-officedocument.wordprocessingml.document`)
+  - HTML text (legacy only, for `text/html`)
   - Base64-encoded PDF data (for `application/pdf`)
 - `fileName` (optional): Custom filename without extension. If not provided, a timestamped filename will be generated (e.g., `cover_letter_20240115_143022`).
-- `contentType` (optional): Content type of the cover letter. Defaults to `"text/markdown"`. Can be:
+- `contentType` (optional): Content type of the cover letter. Defaults to `"application/vnd.openxmlformats-officedocument.wordprocessingml.document"`. Can be:
+  - `"application/vnd.openxmlformats-officedocument.wordprocessingml.document"` - Saves as `.docx` file (requires base64 DOCX data)
+  - `"application/pdf"` - Saves as `.pdf` file (requires base64 PDF data)
   - `"text/markdown"` - Saves as `.md` file
-  - `"text/html"` - Saves as `.html` file
-  - `"application/pdf"` - Saves as `.pdf` file (requires base64-encoded PDF data)
+  - `"text/html"` - Saves as `.html` file (legacy)
 - `user_id` (optional): User ID - required if `user_email` is not provided
 - `user_email` (optional): User email - will be resolved to `user_id` if provided
 
@@ -48,8 +50,8 @@ Save a generated cover letter to the user's `generated_cover_letters` subfolder 
 ```json
 {
   "success": true,
-  "key": "507f1f77bcf86cd799439011/generated_cover_letters/cover_letter_company_name.md",
-  "fileName": "cover_letter_company_name.md",
+  "key": "507f1f77bcf86cd799439011/generated_cover_letters/cover_letter_company_name.docx",
+  "fileName": "cover_letter_company_name.docx",
   "message": "Cover letter saved successfully",
   "fileSize": 1234
 }
@@ -74,8 +76,8 @@ Save a generated cover letter to the user's `generated_cover_letters` subfolder 
 
 - The `generated_cover_letters` subfolder is created automatically if it doesn't exist
 - If `fileName` is provided, it will be sanitized to remove unsafe characters
-- File extension (`.md` or `.html`) is automatically added based on `contentType`
-- If `fileName` already includes an extension (`.md`, `.html`, `.txt`), it will be used as-is
+- File extension (`.docx`, `.pdf`, `.md`, or `.html`) is automatically added based on `contentType`
+- If `fileName` already includes an extension (`.docx`, `.pdf`, `.md`, `.html`, `.txt`), it will be used as-is
 - The main user folder (`{user_id}/`) is also created if it doesn't exist
 - Filenames are sanitized to ensure S3 compatibility
 
@@ -91,14 +93,15 @@ async function saveCoverLetter(
   coverLetterContent,
   fileName = null,
   user_id = null,
-  user_email = null
+  user_email = null,
 ) {
   const API_BASE_URL = "http://localhost:8000"; // or your production URL
 
   try {
     const requestBody = {
       coverLetterContent: coverLetterContent,
-      contentType: "text/markdown", // or "text/html"
+      contentType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // primary
       user_id: user_id,
       user_email: user_email,
     };
@@ -116,13 +119,13 @@ async function saveCoverLetter(
           "Content-Type": "application/json",
         },
         body: JSON.stringify(requestBody),
-      }
+      },
     );
 
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(
-        errorData.detail || `HTTP error! status: ${response.status}`
+        errorData.detail || `HTTP error! status: ${response.status}`,
       );
     }
 
@@ -148,7 +151,7 @@ John Doe`;
 saveCoverLetter(
   markdownContent,
   "cover_letter_tech_corp", // Optional custom filename
-  "507f1f77bcf86cd799439011" // user_id
+  "507f1f77bcf86cd799439011", // user_id
 )
   .then((result) => {
     console.log(`Cover letter saved as: ${result.fileName}`);
@@ -168,7 +171,7 @@ saveCoverLetter(
   "cover_letter_tech_corp",
   "507f1f77bcf86cd799439011",
   null,
-  "text/html" // Specify HTML content type
+  "text/html", // Specify HTML content type
 ).then((result) => {
   console.log(`HTML cover letter saved as: ${result.fileName}`);
 });
@@ -206,7 +209,7 @@ function SaveCoverLetterButton({ coverLetterContent, user_id, user_email }) {
             user_id: user_id,
             user_email: user_email,
           }),
-        }
+        },
       );
 
       if (!response.ok) {
@@ -258,7 +261,7 @@ async function saveCoverLetter(coverLetterContent, fileName, user_id) {
           contentType: "text/markdown",
           user_id: user_id,
         }),
-      }
+      },
     );
 
     const result = await response.json();
@@ -302,7 +305,7 @@ const coverLetterData = await jobInfoResponse.json();
 await saveCoverLetter(
   coverLetterData.markdown,
   `cover_letter_tech_corp_${new Date().toISOString().split("T")[0]}`,
-  user_id
+  user_id,
 );
 
 // Or save the HTML version
@@ -311,7 +314,7 @@ await saveCoverLetter(
   `cover_letter_tech_corp_${new Date().toISOString().split("T")[0]}`,
   user_id,
   null,
-  "text/html"
+  "text/html",
 );
 ```
 
@@ -332,7 +335,7 @@ await saveCoverLetter(
   "cover_letter_tech_corp",
   user_id,
   null,
-  "application/pdf"
+  "application/pdf",
 );
 
 // Method 2: Generate PDF from HTML using a library (example with html2pdf.js)
@@ -369,7 +372,7 @@ async function saveCoverLetterAsPDF(htmlContent, fileName, user_id) {
     fileName,
     user_id,
     null,
-    "application/pdf"
+    "application/pdf",
   );
 }
 
