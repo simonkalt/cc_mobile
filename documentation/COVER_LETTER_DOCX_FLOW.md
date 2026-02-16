@@ -6,6 +6,18 @@ This document describes the **intended application flow** and how the server sup
 
 ---
 
+## Who produces the .docx?
+
+**The user receives a .docx file** with the requested layout and formatting. That file is produced by **our backend**, not by the LLM. LLM APIs (OpenAI, Claude, Gemini, etc.) return **text or JSON**, not binary files like .docx. So the flow is:
+
+1. **LLM** returns structured content (e.g. plain text with newlines, or JSON) that describes the letter and its structure.
+2. **Backend** converts that response into a Word document (.docx) with the correct paragraphs, spacing, and list formatting.
+3. **User** receives that .docx (e.g. as `docxBase64` in the API response).
+
+The **document** the user gets has all the formatting requested—paragraphs, spacing, bullets—because we build the .docx from the structure the LLM specified.
+
+---
+
 ## Desired Regimen
 
 1. **LLM prompts** are sent to the server; the server processes them and produces a **.docx** document (the “fully adorned” cover letter).
