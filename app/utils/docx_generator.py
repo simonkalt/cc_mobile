@@ -18,12 +18,14 @@ logger = logging.getLogger(__name__)
 try:
     from docx import Document
     from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_BREAK
 
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
     Document = None
     RGBColor = None
+    WD_BREAK = None
 
 
 def _parse_span_style(style_attr: str) -> Dict:
@@ -71,12 +73,21 @@ class _HTMLToBlocksParser(HTMLParser):
         return dict(self._style_stack[-1])
 
     def _flush_run(self, text: str):
-        t = (text or "").strip()
-        if not t:
+        if not text:
             return
-        run = {"text": t, "bold": self._bold > 0, "italic": self._italic > 0}
-        run.update(self._current_style())
-        self._current_runs.append(run)
+        # Every newline = new paragraph (so body paragraphs and list items get clear delineation)
+        parts = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        for i, part in enumerate(parts):
+            t = part.strip()
+            if not t:
+                if i < len(parts) - 1:
+                    self._emit_block()
+                continue
+            run = {"text": t, "bold": self._bold > 0, "italic": self._italic > 0}
+            run.update(self._current_style())
+            self._current_runs.append(run)
+            if i < len(parts) - 1:
+                self._emit_block()
 
     def _emit_block(self):
         if not self._current_runs:
@@ -92,7 +103,7 @@ class _HTMLToBlocksParser(HTMLParser):
         tag = tag.lower()
         if tag in ("p", "div", "br"):
             if tag == "br":
-                self._flush_run(" ")
+                self._current_runs.append({"line_break": True})
             else:
                 self._emit_block()
         elif tag in ("strong", "b"):
@@ -130,8 +141,15 @@ class _HTMLToBlocksParser(HTMLParser):
             pass
 
     def handle_data(self, data: str):
-        if data:
-            self._flush_run(htmllib.unescape(data))
+        if not data:
+            return
+        data = htmllib.unescape(data)
+        # \n\n = new paragraph (new block); single \n = line break within paragraph
+        paragraphs = data.replace("\r\n", "\n").replace("\r", "\n").split("\n\n")
+        for i, para in enumerate(paragraphs):
+            if i > 0:
+                self._emit_block()
+            self._flush_run(para)
 
     def get_blocks(self) -> List[Dict]:
         self._emit_block()
@@ -139,11 +157,10 @@ class _HTMLToBlocksParser(HTMLParser):
 
 
 def _html_to_blocks(html: str) -> List[Dict]:
-    """Convert HTML to a list of blocks with runs (text, bold, italic)."""
+    """Convert HTML to a list of blocks with runs (text, bold, italic, line_break)."""
     if not html or not html.strip():
         return []
-    # Normalize: replace <br/> with space so we don't split mid-paragraph
-    html = re.sub(r"<br\s*/?\s*>", " ", html, flags=re.IGNORECASE)
+    # Keep <br/> so the parser can emit line_break runs
     parser = _HTMLToBlocksParser()
     try:
         parser.feed(html)
@@ -268,6 +285,18 @@ def build_docx_from_content(
     else:
         blocks = _markdown_to_blocks(content or "")
 
+    # Heuristic: paragraphs whose first run starts with • or - or * become list items (LLM may not use <ul><li>)
+    for block in blocks:
+        if block.get("type") != "p" or not block.get("runs"):
+            continue
+        first_run = block["runs"][0]
+        if first_run.get("line_break"):
+            continue
+        first_text = first_run.get("text", "")
+        if re.match(r"^[•\-*]\s+", first_text):
+            block["type"] = "li"
+            first_run["text"] = re.sub(r"^[•\-*]\s+", "", first_text)
+
     doc = Document()
     style = doc.styles["Normal"]
     style.font.name = font_family
@@ -277,13 +306,25 @@ def build_docx_from_content(
 
     for block in blocks:
         p = doc.add_paragraph()
-        p.paragraph_format.space_after = space_after
         if block["type"] == "li":
             p.style = "List Bullet"
+            # Don't set space_after; let Word's list style control bullet spacing
+        else:
+            p.paragraph_format.space_after = space_after
+        last_ended_with_space = True  # avoid leading space before first run
         for run_spec in block["runs"]:
+            if run_spec.get("line_break"):
+                if WD_BREAK is not None:
+                    p.add_run().add_break(WD_BREAK.LINE)
+                last_ended_with_space = True
+                continue
             text = run_spec.get("text", "")
             if not text:
                 continue
+            # Preserve space around inline/spans: add space if previous run didn't end with space and this doesn't start with one
+            if not last_ended_with_space and not (text.startswith(" ") or text.startswith("\t")):
+                text = " " + text
+            last_ended_with_space = text.endswith(" ") or text.endswith("\t")
             run = p.add_run(text)
             run_font = run.font
             run_font.name = (run_spec.get("font_family") or "").strip() or font_family
