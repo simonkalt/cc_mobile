@@ -6,7 +6,7 @@ This document is the **single reference** for the frontend to implement the requ
 
 ## Required flow (high level)
 
-1. **Generate** → Call generation API; receive **docxBase64** (the .docx) and optionally **markdown**. No HTML.
+1. **Generate** → Call generation API; receive **docxBase64** (the .docx) and optionally **content** (plain text). No HTML, no markdown.
 2. **Display / Edit** → Use the **.docx** as the only formatted artifact: show it via a DOCX viewer or by converting to PDF (docx-to-pdf); let the user edit the .docx (in-app editor or download → edit in Word → re-upload).
 3. **Print preview** → Send the **current .docx** to **POST /api/files/docx-to-pdf**; display or download the returned PDF.
 4. **Save** → Send the (possibly edited) .docx to **POST /api/files/save-cover-letter** with `contentType` = docx.
@@ -29,13 +29,13 @@ This document is the **single reference** for the frontend to implement the requ
 
 ```json
 {
-  "markdown": "...",
+  "docxBase64": "<base64-encoded .docx bytes>",
   "docxTemplateHints": { "version": "1.0", "sourceFormat": "markdown", "outputFormat": "docx", "styleProfile": "cover_letter_standard", "fields": { ... }, "styleInstructions": "...", "style": {} },
-  "docxBase64": "<base64-encoded .docx bytes>"
+  "content": "Optional plain text of the letter (for search/fallback only)."
 }
 ```
 
-The API **does not** return `html`. All creative formatting (bold, italic, color, bullets, font family, font size) is in the **.docx** only.
+The API returns **docx only**: no `html`, no `markdown`. Optional `content` is plain text. All formatting is in the **.docx**.
 
 **Required frontend logic (docx-only):**
 
@@ -45,7 +45,7 @@ The API **does not** return `html`. All creative formatting (bold, italic, color
     - Use a **DOCX viewer** component (e.g. docx-preview, or similar), or
     - Call **POST /api/files/docx-to-pdf** with this .docx and display the returned PDF as the “preview”.
   - Editing: use a DOCX-capable editor or “Download .docx → edit in Word → re-upload”. Use the same .docx for print preview and save.
-- **`markdown`** is optional (e.g. for search or fallback); it is plain text + markdown syntax and is **not** the primary way to display the letter. The formatted view is the .docx (or the PDF from it).
+- **`content`** (optional) is plain text only; use for search or fallback. The formatted view is always the .docx (or the PDF from it).
 
 ---
 
@@ -122,7 +122,7 @@ See [COVER_LETTER_MANAGEMENT_API.md](./COVER_LETTER_MANAGEMENT_API.md) for more 
 
 | Action          | Method | Endpoint                                      | Key request                         | Key response              |
 |-----------------|--------|-----------------------------------------------|-------------------------------------|---------------------------|
-| Generate letter | POST   | `/api/job-info` or `/api/cover-letter/generate-with-text-resume` | JSON body (job info, resume, etc.) | `docxBase64`, markdown (no html) |
+| Generate letter | POST   | `/api/job-info` or `/api/cover-letter/generate-with-text-resume` | JSON body (job info, resume, etc.) | `docxBase64`, `docxTemplateHints`, optional `content` (no html/markdown) |
 | Print preview   | POST   | `/api/files/docx-to-pdf`                      | `multipart/form-data`, part `file` = .docx | `pdfBase64`               |
 | Save letter     | POST   | `/api/files/save-cover-letter`                | JSON: `coverLetterContent` (base64), `contentType` (docx) | `key`, `fileName`, `success` |
 | List saved      | GET    | `/api/cover-letters/list`                     | Query: `user_id` or `user_email`    | `files[]`                 |

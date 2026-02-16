@@ -2,6 +2,8 @@
 
 API endpoints for generating cover letters using AI/LLM models. These endpoints accept job information and resume content to generate personalized cover letters.
 
+**Contract: docx-only.** The API returns a single formatted artifact—the .docx file (`docxBase64`). No HTML or Markdown is returned; optional `content` is plain text only. The frontend should use the .docx for display, editing, print preview (via POST /api/files/docx-to-pdf), and save.
+
 ## Base URL
 
 ```
@@ -64,7 +66,7 @@ Generate a cover letter based on job information. This endpoint accepts resume c
 
 ```json
 {
-  "markdown": "# Cover Letter\n\nDear John Doe,\n\n...",
+  "docxBase64": "<base64-encoded .docx bytes>",
   "docxTemplateHints": {
     "version": "1.0",
     "sourceFormat": "markdown",
@@ -75,14 +77,16 @@ Generate a cover letter based on job information. This endpoint accepts resume c
       "company_name": "Tech Corp",
       "hiring_manager": "John Doe"
     }
-  }
+  },
+  "content": "Optional plain text of the letter (for search/fallback)."
 }
 ```
 
-**Response Fields:**
+**Response Fields (docx-only contract):**
 
-- `markdown`: Cover letter content in Markdown format
-- `docxTemplateHints`: Metadata for frontend DOCX creation/editing workflow
+- `docxBase64`: The cover letter as a .docx file (base64). Single formatted artifact; display/edit or convert to PDF via POST /api/files/docx-to-pdf.
+- `docxTemplateHints`: Metadata for frontend (fields, style profile).
+- `content`: Optional plain text. No `html` or `markdown` is returned.
 
 **Error Responses:**
 
@@ -153,29 +157,7 @@ All fields are identical to `/api/job-info` except for the resume field:
 - `user_id` (optional): User ID for accessing custom personality profiles and user preferences
 - `user_email` (optional): User email for accessing custom personality profiles (will be resolved to user_id)
 
-**Response (200 OK):**
-
-```json
-{
-  "markdown": "# Cover Letter\n\nDear John Doe,\n\n...",
-  "docxTemplateHints": {
-    "version": "1.0",
-    "sourceFormat": "markdown",
-    "outputFormat": "docx",
-    "styleProfile": "cover_letter_standard",
-    "fields": {
-      "date_input": "2024-01-15",
-      "company_name": "Tech Corp",
-      "hiring_manager": "John Doe"
-    }
-  }
-}
-```
-
-**Response Fields:**
-
-- `markdown`: Cover letter content in Markdown format
-- `docxTemplateHints`: Metadata for frontend DOCX creation/editing workflow
+**Response (200 OK):** Same as `/api/job-info`: `docxBase64`, `docxTemplateHints`, optional `content`. No `html` or `markdown`.
 
 **Error Responses:**
 

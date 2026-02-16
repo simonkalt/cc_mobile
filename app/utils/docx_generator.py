@@ -209,6 +209,30 @@ def _html_to_plain_paragraphs(html: str) -> list:
     return paragraphs if paragraphs else [""]
 
 
+def _plain_text_to_blocks(text: str) -> List[Dict]:
+    """Convert plain text to blocks. Double newline = paragraph; single newline = line break. No HTML/Markdown parsing."""
+    if not text or not text.strip():
+        return []
+    blocks = []
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    raw_paras = re.split(r"\n\s*\n", normalized.strip())
+    for raw in raw_paras:
+        lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+        if not lines:
+            continue
+        runs = []
+        for i, line in enumerate(lines):
+            if i > 0:
+                runs.append({"line_break": True})
+            runs.append({"text": line, "bold": False, "italic": False})
+        # Heuristic: line starting with • or - or * (followed by space) = list item
+        is_li = bool(runs and re.match(r"^[•\-*]\s+", runs[0].get("text", "")))
+        if is_li and runs:
+            runs[0]["text"] = re.sub(r"^[•\-*]\s+", "", runs[0]["text"])
+        blocks.append({"type": "li" if is_li else "p", "runs": runs})
+    return blocks
+
+
 def _markdown_to_blocks(markdown: str) -> List[Dict]:
     """Convert markdown to blocks with runs (preserve ** and * as bold/italic)."""
     if not markdown or not markdown.strip():
@@ -276,14 +300,16 @@ def build_docx_from_content(
     content: str,
     *,
     from_html: bool = False,
+    from_plain_text: bool = False,
     print_properties: Optional[Dict] = None,
 ) -> bytes:
     """
-    Build a Word .docx from cover letter content, preserving bold, italic, and lists.
+    Build a Word .docx from cover letter content.
 
     Args:
-        content: The cover letter body (markdown or HTML).
-        from_html: If True, treat content as HTML; otherwise treat as markdown.
+        content: The cover letter body (plain text, markdown, or HTML).
+        from_html: If True, treat content as HTML.
+        from_plain_text: If True, treat content as plain text (\\n = line break, \\n\\n = paragraph). No markup.
         print_properties: Optional dict with fontFamily, fontSize, lineHeight.
 
     Returns:
@@ -305,7 +331,9 @@ def build_docx_from_content(
     except (TypeError, ValueError):
         line_height = 1.6
 
-    if from_html:
+    if from_plain_text:
+        blocks = _plain_text_to_blocks(content or "")
+    elif from_html:
         blocks = _html_to_blocks(content)
     else:
         blocks = _markdown_to_blocks(content or "")
@@ -376,14 +404,25 @@ def build_docx_from_content(
 
 
 def build_docx_from_generation_result(
-    markdown: str,
+    content: Optional[str] = None,
+    markdown: Optional[str] = None,
     html: Optional[str] = None,
     print_properties: Optional[Dict] = None,
+    *,
+    use_plain_text: bool = False,
 ) -> bytes:
     """
-    Build .docx from the same content returned by cover letter generation (markdown + optional html).
-    Prefers HTML if provided; preserves bold, italic, and lists.
+    Build .docx from cover letter generation result.
+    When use_plain_text is True (docx-only flow), content is plain text only.
+    Otherwise: prefers content as plain text if use_plain_text; else prefers html, then markdown.
     """
+    if use_plain_text and content:
+        return build_docx_from_content(
+            content, from_plain_text=True, print_properties=print_properties
+        )
     if html and html.strip():
         return build_docx_from_content(html, from_html=True, print_properties=print_properties)
-    return build_docx_from_content(markdown or "", from_html=False, print_properties=print_properties)
+    raw = content or markdown or ""
+    if use_plain_text:
+        return build_docx_from_content(raw, from_plain_text=True, print_properties=print_properties)
+    return build_docx_from_content(raw, from_html=False, print_properties=print_properties)

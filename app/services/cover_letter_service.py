@@ -447,10 +447,10 @@ Apply this personality throughout the entire cover letter. This instruction take
     if template_content:
         template_instruction = f"""
 === TEMPLATE STRUCTURE - EXACT LINE BREAKS REQUIRED ===
-Your cover letter MUST follow this structure. Preserve every line break exactly as shown.
-- Use <br /> in your HTML output for each line break in the template.
-- Single blank line in template = one <br /> between blocks.
-- Double blank line in template = <br /><br /> between blocks.
+Your cover letter MUST follow this structure. Preserve every line break exactly as shown in your "content" output.
+- One newline between each header line in the template.
+- Single blank line in template = one newline between blocks.
+- Double blank line in template = two newlines (blank line) between blocks.
 - The order, placement, and phrasing cues (Re:, salutation, closing) must match the template.
 
 TEMPLATE:
@@ -901,10 +901,26 @@ Please incorporate these instructions while maintaining consistency with all oth
             else:
                 json_r = None
 
-            # Fix 2: If still no parse (e.g. unterminated string), recover "markdown" from start
+            # Fix 2: If still no parse (e.g. unterminated string), recover "content" or "markdown" from start
             if json_r is None and ("Unterminated string" in str(e) or "Expecting" in str(e)):
+                content_match = re.search(r'"content"\s*:\s*"', json_str)
                 markdown_match = re.search(r'"markdown"\s*:\s*"', json_str)
-                if markdown_match:
+                if content_match:
+                    value_start = content_match.end()
+                    raw_content = json_str[value_start:]
+                    escaped = (
+                        raw_content.replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    try:
+                        fixed_str = '{"content": "' + escaped + '"}'
+                        json_r = json.loads(fixed_str)
+                        logger.info("Recovered from unterminated string: using content")
+                    except json.JSONDecodeError:
+                        pass
+                if json_r is None and markdown_match:
                     value_start = markdown_match.end()
                     raw_markdown = json_str[value_start:]
                     # Escape for JSON: backslash and quote first, then newlines
@@ -926,13 +942,22 @@ Please incorporate these instructions while maintaining consistency with all oth
             if json_r is None:
                 raise e
 
-        # Clean up the markdown field - remove "markdown " prefix if Gemini added it
+        # Docx-only flow: LLM returns single field "content" (plain text)
+        letter_content = json_r.get("content")
+        if letter_content is not None and isinstance(letter_content, str):
+            if letter_content.startswith("content "):
+                letter_content = letter_content[8:].lstrip()
+                logger.info("Removed 'content ' prefix from LLM response")
+            if today_date_iso and today_date and today_date != today_date_iso:
+                letter_content = letter_content.replace(today_date_iso, today_date)
+            return {"content": letter_content}
+
+        # Legacy flow: markdown + html
         markdown_content = json_r.get("markdown", "")
         if markdown_content.startswith("markdown "):
-            markdown_content = markdown_content[9:]  # Remove "markdown " (9 characters)
+            markdown_content = markdown_content[9:]
             logger.info("Removed 'markdown ' prefix from Gemini response")
 
-        # Get raw HTML from LLM response (may be empty if we recovered from truncated JSON)
         raw_html = json_r.get("html", "")
         if not raw_html and markdown_content:
             try:
@@ -947,31 +972,22 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.warning(f"Could not convert markdown to HTML: {md_err}")
 
         raw_html = raw_html or ""
-        # Fix document date: if LLM echoed short form (YYYY-MM-DD), replace with long form
         if today_date_iso and today_date and today_date != today_date_iso:
             raw_html = raw_html.replace(today_date_iso, today_date)
         if markdown_content and today_date_iso and today_date != today_date_iso:
             markdown_content = markdown_content.replace(today_date_iso, today_date)
-        # Convert <p>/</p> to <br /> so spacing is single line break (shift-enter), not paragraph (enter)
         raw_html = html_p_to_br(raw_html)
-        # Collapse pairs of <br /> into one (6→3, 2→1); do not collapse all runs into one
         raw_html = collapse_br_pairs(raw_html)
-        # Double line break only after groups (address, salutation, name, company); single break within groups
         raw_html = double_break_after_groups(raw_html)
 
-        # Apply user's print settings to HTML
-        # Reuse the user object that was already retrieved earlier for personality profiles
         styled_html = raw_html
         try:
-            # Reuse the user object that was already fetched (avoid duplicate database call)
-            user_for_styling = user  # Use the user object from earlier in the function
-
+            user_for_styling = user
             if user_for_styling and user_for_styling.preferences:
                 app_settings = user_for_styling.preferences.get("appSettings", {})
                 if isinstance(app_settings, dict):
                     print_props = app_settings.get("printProperties", {})
                     if isinstance(print_props, dict) and print_props:
-                        # Check if user wants to use default fonts from LLM HTML
                         use_default_fonts = print_props.get("useDefaultFonts", False)
                         font_family = print_props.get("fontFamily", "Times New Roman")
                         font_size = print_props.get("fontSize", 12)
@@ -979,16 +995,12 @@ Please incorporate these instructions while maintaining consistency with all oth
                         is_default_font = (
                             font_family and str(font_family).strip().lower() == "default"
                         )
-
                         if is_default_font or use_default_fonts:
-                            # "Default" font or useDefaultFonts: use raw LLM HTML (preserve colors, fonts, sizes)
-                            # No wrapper - let LLM inline styles (bold, italic, color, font-size) show through
                             styled_html = raw_html
                             logger.info(
                                 "Skipping font wrapper: fontFamily is 'default' or useDefaultFonts is True - using raw LLM HTML"
                             )
                         else:
-                            # Apply user's chosen font/size/line-height
                             font_family_escaped = font_family.replace("'", "\\'")
                             styled_html = f"""<div style="font-family: '{font_family_escaped}', serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
                             logger.info(
@@ -1002,19 +1014,15 @@ Please incorporate these instructions while maintaining consistency with all oth
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
         logger.error(f"Response length: {len(r)} characters")
+        error_msg = f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}"
         error_html = f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
-        # Clean HTML: strip \r, preserve line breaks as <br />
         error_html = error_html.replace("\r", "").replace("\n", "<br />")
         error_html = re.sub(r" +", " ", error_html)
-
-        return {
-            "markdown": f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}",
-            "html": error_html,
-        }
+        return {"content": error_msg, "markdown": error_msg, "html": error_html}
     except Exception as e:
         logger.error(f"Error in get_job_info: {str(e)}")
+        error_msg = f"Error: {str(e)}"
         error_html = f"<p>Error: {str(e)}</p>"
-        # Clean HTML: strip \r, preserve line breaks as <br />
         error_html = error_html.replace("\r", "").replace("\n", "<br />")
         error_html = re.sub(r" +", " ", error_html)
-        return {"markdown": f"Error: {str(e)}", "html": error_html}
+        return {"content": error_msg, "markdown": error_msg, "html": error_html}

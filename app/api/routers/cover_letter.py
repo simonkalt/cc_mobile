@@ -94,38 +94,45 @@ def _sanitize_markdown_no_html(markdown: str) -> str:
 
 def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
     """
-    Enforce DOCX source-of-truth response contract.
-    Removes legacy HTML and returns markdown + docxTemplateHints.
-    Preserves extra non-HTML metadata fields when present.
+    Docx-only contract: preserve "content" (plain text) when present; else legacy markdown/html.
+    Always attach docxTemplateHints. Response will expose docxBase64 + docxTemplateHints + optional content.
     """
     if isinstance(result, dict):
         payload: Dict[str, Any] = dict(result)
     else:
-        payload = {"markdown": str(result) if result is not None else ""}
+        payload = {"content": str(result) if result is not None else ""}
 
-    raw_html = payload.get("html", "") if isinstance(payload, dict) else ""
     payload.pop("docxStyleHints", None)
+    # When we have "content" (docx-only flow), keep it as-is; docx is built from plain text
+    if payload.get("content") is not None:
+        payload["docxTemplateHints"] = _docx_template_hints_from_request(
+            req, result if isinstance(result, dict) else payload
+        )
+        return payload
+    # Legacy: markdown/html
+    raw_html = payload.get("html", "")
     payload["markdown"] = _sanitize_markdown_no_html(payload.get("markdown", ""))
     if raw_html:
         payload["html"] = raw_html
     else:
         try:
             import markdown as mdlib
-
             payload["html"] = mdlib.markdown(
                 payload["markdown"],
                 extensions=["extra", "nl2br"],
             )
         except Exception:
             payload["html"] = ""
-    payload["docxTemplateHints"] = _docx_template_hints_from_request(req, result if isinstance(result, dict) else payload)
+    payload["docxTemplateHints"] = _docx_template_hints_from_request(
+        req, result if isinstance(result, dict) else payload
+    )
     return payload
 
 
 def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
     """
-    Build a .docx from markdown/html and attach as docxBase64 so the client
-    receives the fully adorned .docx for editing. Print preview = docx-to-pdf with this file.
+    Build a .docx from content (plain text) or legacy markdown/html and attach as docxBase64.
+    Docx-only flow: use payload["content"] with use_plain_text=True.
     """
     try:
         print_properties = None
@@ -148,10 +155,13 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
             except Exception as e:
                 logger.debug("Could not get user print properties by email: %s", e)
 
+        use_plain_text = "content" in payload
         docx_bytes = build_docx_from_generation_result(
-            payload.get("markdown", ""),
-            payload.get("html"),
+            content=payload.get("content"),
+            markdown=payload.get("markdown"),
+            html=payload.get("html"),
             print_properties=print_properties,
+            use_plain_text=use_plain_text,
         )
         payload["docxBase64"] = base64.b64encode(docx_bytes).decode("utf-8")
         logger.info("Attached .docx to generation response (%s bytes)", len(docx_bytes))
@@ -193,8 +203,9 @@ async def handle_job_info(request: JobInfoRequest):
     )
     payload = _normalize_generation_response(result, request)
     _attach_docx_to_payload(payload, request)
-    # Docx-only contract: do not send html to frontend; .docx is the single formatted artifact
+    # Docx-only contract: return docx + hints + optional content; no markdown/html
     payload.pop("html", None)
+    payload.pop("markdown", None)
     return payload
 
 
@@ -238,6 +249,7 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
     payload = _normalize_generation_response(result, request)
     _attach_docx_to_payload(payload, request)
     payload.pop("html", None)
+    payload.pop("markdown", None)
     return payload
 
 
@@ -350,6 +362,7 @@ async def handle_chat(request: Request):
             payload = _normalize_generation_response(result, job_request)
             _attach_docx_to_payload(payload, job_request)
             payload.pop("html", None)
+            payload.pop("markdown", None)
             return payload
         else:
             # Handle as regular chat request

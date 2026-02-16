@@ -72,8 +72,8 @@ class DocxTemplateHints(BaseModel):
 
 
 class CoverLetterGenerationResponse(BaseModel):
-    markdown: str
-    html: Optional[str] = None
+    """Docx-only contract: .docx is the single formatted artifact; optional content is plain text."""
+    docxBase64: Optional[str] = None  # .docx file (base64); display/edit this; print preview = docx-to-pdf with this file
     docxTemplateHints: DocxTemplateHints
-    docxBase64: Optional[str] = None  # Fully adorned .docx for client to download and edit; print preview = docx-to-pdf with this (or edited) file
+    content: Optional[str] = None  # Plain text of the letter (optional; frontend uses docx)
 
