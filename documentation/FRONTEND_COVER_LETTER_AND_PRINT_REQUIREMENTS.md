@@ -1,14 +1,14 @@
 # Frontend: Cover Letter & Print Preview — Required Logic and Endpoints
 
-This document is the **single reference** for the frontend to implement the required cover letter flow and print preview. Follow it so the app matches the backend’s DOCX-based regimen.
+This document is the **single reference** for the frontend to implement the required cover letter flow and print preview. The backend uses a **docx-only** contract: the API does not send HTML; all formatting (bold, color, bullets, fonts, sizes) lives in the **.docx** only.
 
 ---
 
 ## Required flow (high level)
 
-1. **Generate** → Call generation API; receive **markdown**, **html**, and **docxBase64** (the .docx).
-2. **Edit** → Treat the **.docx** as the source of truth: let the user open/edit it (or download and re-upload after editing).
-3. **Print preview** → Send the **current .docx** (generated or edited) to **POST /api/files/docx-to-pdf**; show or download the returned PDF.
+1. **Generate** → Call generation API; receive **docxBase64** (the .docx) and optionally **markdown**. No HTML.
+2. **Display / Edit** → Use the **.docx** as the only formatted artifact: show it via a DOCX viewer or by converting to PDF (docx-to-pdf); let the user edit the .docx (in-app editor or download → edit in Word → re-upload).
+3. **Print preview** → Send the **current .docx** to **POST /api/files/docx-to-pdf**; display or download the returned PDF.
 4. **Save** → Send the (possibly edited) .docx to **POST /api/files/save-cover-letter** with `contentType` = docx.
 
 ---
@@ -30,18 +30,22 @@ This document is the **single reference** for the frontend to implement the requ
 ```json
 {
   "markdown": "...",
-  "html": "...",
   "docxTemplateHints": { "version": "1.0", "sourceFormat": "markdown", "outputFormat": "docx", "styleProfile": "cover_letter_standard", "fields": { ... }, "styleInstructions": "...", "style": {} },
   "docxBase64": "<base64-encoded .docx bytes>"
 }
 ```
 
-**Required frontend logic:**
+The API **does not** return `html`. All creative formatting (bold, italic, color, bullets, font family, font size) is in the **.docx** only.
 
-- Prefer **`docxBase64`** as the main artifact. If present:
-  - Decode base64 to binary and treat as the **current cover letter .docx** (e.g. save to temp file, open in editor, or offer download).
-  - Use this same .docx for editing, print preview, and save (until the user edits it or generates again).
-- If `docxBase64` is missing (e.g. server error or old backend), you may fall back to markdown/html and your own export path, but the **required** path is: use the server-provided .docx when available.
+**Required frontend logic (docx-only):**
+
+- Treat **`docxBase64`** as the single source of truth for the letter and its formatting.
+  - Decode base64 to binary and use as the **current cover letter .docx** (e.g. for a DOCX viewer, download, or to send to docx-to-pdf for print preview).
+  - Do **not** render any HTML; there is no `html` field. To show the letter on screen, either:
+    - Use a **DOCX viewer** component (e.g. docx-preview, or similar), or
+    - Call **POST /api/files/docx-to-pdf** with this .docx and display the returned PDF as the “preview”.
+  - Editing: use a DOCX-capable editor or “Download .docx → edit in Word → re-upload”. Use the same .docx for print preview and save.
+- **`markdown`** is optional (e.g. for search or fallback); it is plain text + markdown syntax and is **not** the primary way to display the letter. The formatted view is the .docx (or the PDF from it).
 
 ---
 
@@ -118,7 +122,7 @@ See [COVER_LETTER_MANAGEMENT_API.md](./COVER_LETTER_MANAGEMENT_API.md) for more 
 
 | Action          | Method | Endpoint                                      | Key request                         | Key response              |
 |-----------------|--------|-----------------------------------------------|-------------------------------------|---------------------------|
-| Generate letter | POST   | `/api/job-info` or `/api/cover-letter/generate-with-text-resume` | JSON body (job info, resume, etc.) | `docxBase64`, markdown, html |
+| Generate letter | POST   | `/api/job-info` or `/api/cover-letter/generate-with-text-resume` | JSON body (job info, resume, etc.) | `docxBase64`, markdown (no html) |
 | Print preview   | POST   | `/api/files/docx-to-pdf`                      | `multipart/form-data`, part `file` = .docx | `pdfBase64`               |
 | Save letter     | POST   | `/api/files/save-cover-letter`                | JSON: `coverLetterContent` (base64), `contentType` (docx) | `key`, `fileName`, `success` |
 | List saved      | GET    | `/api/cover-letters/list`                     | Query: `user_id` or `user_email`    | `files[]`                 |

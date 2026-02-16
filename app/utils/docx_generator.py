@@ -1,36 +1,165 @@
 """
 Generate a .docx (Word) document from cover letter content (markdown or HTML).
 
-Used so the server can return a fully adorned .docx to the client for editing;
-print preview then uses POST /api/files/docx-to-pdf with that (possibly edited) .docx.
+Preserves bold, italic, and lists in the output. Used so the server can return
+a fully adorned .docx to the client for editing; print preview then uses
+POST /api/files/docx-to-pdf with that (possibly edited) .docx.
 """
 
 import io
+import html as htmllib
 import logging
 import re
-from typing import Dict, Optional
+from html.parser import HTMLParser
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 try:
     from docx import Document
-    from docx.shared import Pt
+    from docx.shared import Pt, RGBColor
 
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
     Document = None
+    RGBColor = None
+
+
+def _parse_span_style(style_attr: str) -> Dict:
+    """Parse style='...' into color_hex, font_size_pt, font_family (for docx runs)."""
+    out = {}
+    if not style_attr or not isinstance(style_attr, str):
+        return out
+    # color: #RRGGBB or color:#RRGGBB
+    m = re.search(r"color\s*:\s*#([0-9a-fA-F]{3,8})\b", style_attr)
+    if m:
+        hex_val = m.group(1)
+        if len(hex_val) == 3:
+            hex_val = "".join(c * 2 for c in hex_val)
+        if len(hex_val) >= 6:
+            out["color_hex"] = "#" + hex_val[:6]
+    # font-size: 14pt or font-size:14pt
+    m = re.search(r"font-size\s*:\s*(\d+(?:\.\d+)?)\s*pt\b", style_attr, re.IGNORECASE)
+    if m:
+        try:
+            out["font_size_pt"] = float(m.group(1))
+        except (TypeError, ValueError):
+            pass
+    # font-family: 'Arial' or font-family: Arial, sans-serif
+    m = re.search(r"font-family\s*:\s*['\"]?([^'\";,}]+)", style_attr, re.IGNORECASE)
+    if m:
+        out["font_family"] = m.group(1).strip().strip("'\"").split(",")[0].strip()
+    return out
+
+
+class _HTMLToBlocksParser(HTMLParser):
+    """Parse HTML into blocks; each run can have text, bold, italic, color, font_size_pt, font_family."""
+
+    def __init__(self):
+        super().__init__()
+        self.blocks: List[Dict] = []
+        self._current_block_type = "p"
+        self._current_runs: List[Dict] = []
+        self._bold = 0
+        self._italic = 0
+        self._style_stack: List[Dict] = []  # stack of {color_hex, font_size_pt, font_family} from <span>
+
+    def _current_style(self) -> Dict:
+        if not self._style_stack:
+            return {}
+        return dict(self._style_stack[-1])
+
+    def _flush_run(self, text: str):
+        t = (text or "").strip()
+        if not t:
+            return
+        run = {"text": t, "bold": self._bold > 0, "italic": self._italic > 0}
+        run.update(self._current_style())
+        self._current_runs.append(run)
+
+    def _emit_block(self):
+        if not self._current_runs:
+            return
+        self.blocks.append({
+            "type": self._current_block_type,
+            "runs": self._current_runs,
+        })
+        self._current_runs = []
+        self._current_block_type = "p"
+
+    def handle_starttag(self, tag: str, attrs: list):
+        tag = tag.lower()
+        if tag in ("p", "div", "br"):
+            if tag == "br":
+                self._flush_run(" ")
+            else:
+                self._emit_block()
+        elif tag in ("strong", "b"):
+            self._bold += 1
+        elif tag in ("em", "i"):
+            self._italic += 1
+        elif tag == "span":
+            style_dict = {}
+            for k, v in attrs:
+                if k and k.lower() == "style" and v:
+                    style_dict = _parse_span_style(v)
+                    break
+            self._style_stack.append(style_dict)
+        elif tag == "li":
+            self._emit_block()
+            self._current_block_type = "li"
+        elif tag in ("ul", "ol"):
+            pass
+
+    def handle_endtag(self, tag: str):
+        tag = tag.lower()
+        if tag in ("p", "div"):
+            self._emit_block()
+        elif tag in ("strong", "b"):
+            self._bold = max(0, self._bold - 1)
+        elif tag in ("em", "i"):
+            self._italic = max(0, self._italic - 1)
+        elif tag == "span":
+            if self._style_stack:
+                self._style_stack.pop()
+        elif tag == "li":
+            self._emit_block()
+            self._current_block_type = "p"
+        elif tag in ("ul", "ol"):
+            pass
+
+    def handle_data(self, data: str):
+        if data:
+            self._flush_run(htmllib.unescape(data))
+
+    def get_blocks(self) -> List[Dict]:
+        self._emit_block()
+        return self.blocks
+
+
+def _html_to_blocks(html: str) -> List[Dict]:
+    """Convert HTML to a list of blocks with runs (text, bold, italic)."""
+    if not html or not html.strip():
+        return []
+    # Normalize: replace <br/> with space so we don't split mid-paragraph
+    html = re.sub(r"<br\s*/?\s*>", " ", html, flags=re.IGNORECASE)
+    parser = _HTMLToBlocksParser()
+    try:
+        parser.feed(html)
+        return parser.get_blocks()
+    except Exception as e:
+        logger.warning("HTML parse failed, falling back to plain paragraphs: %s", e)
+        return [{"type": "p", "runs": [{"text": re.sub(r"<[^>]+>", "", html), "bold": False, "italic": False}]}]
 
 
 def _html_to_plain_paragraphs(html: str) -> list:
-    """Convert HTML to a list of paragraph texts (one string per paragraph)."""
+    """Convert HTML to a list of paragraph texts (one string per paragraph). Fallback when no formatting needed."""
     if not html or not html.strip():
         return [""]
-    # Replace block breaks with a sentinel, then split
     text = re.sub(r"</p>\s*<p(\s[^>]*)?>", "\n\n", html, flags=re.IGNORECASE)
     text = re.sub(r"<br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</(div|h[1-6]|li|tr)>", "\n", text, flags=re.IGNORECASE)
-    # Strip remaining tags
     text = re.sub(r"<[^>]+>", "", text)
     text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
     text = re.sub(r" +", " ", text)
@@ -38,23 +167,67 @@ def _html_to_plain_paragraphs(html: str) -> list:
     return paragraphs if paragraphs else [""]
 
 
-def _markdown_to_plain_paragraphs(markdown: str) -> list:
-    """Convert markdown to a list of paragraph texts (one string per paragraph)."""
+def _markdown_to_blocks(markdown: str) -> List[Dict]:
+    """Convert markdown to blocks with runs (preserve ** and * as bold/italic)."""
     if not markdown or not markdown.strip():
-        return [""]
-    # Split on double newline for paragraphs; single newline becomes space within paragraph
-    parts = re.split(r"\n\s*\n", markdown.strip())
-    paragraphs = []
-    for p in parts:
-        line = " ".join(p.splitlines()).strip()
-        if line:
-            # Strip markdown bold/italic for plain docx
-            line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
-            line = re.sub(r"\*(.+?)\*", r"\1", line)
-            line = re.sub(r"__(.+?)__", r"\1", line)
-            line = re.sub(r"_(.+?)_", r"\1", line)
-            paragraphs.append(line)
-    return paragraphs if paragraphs else [""]
+        return []
+    blocks = []
+    # Split into paragraphs (double newline)
+    raw_paras = re.split(r"\n\s*\n", markdown.strip())
+    for raw in raw_paras:
+        line = " ".join(raw.splitlines()).strip()
+        if not line:
+            continue
+        # Detect list item
+        is_li = bool(re.match(r"^[\-\*]\s+", line) or re.match(r"^\d+\.\s+", line))
+        line = re.sub(r"^[\-\*]\s+", "", line)
+        line = re.sub(r"^\d+\.\s+", "", line)
+        # Split into runs by ** and *
+        runs = []
+        rest = line
+        while rest:
+            # Bold: **text**
+            m = re.search(r"\*\*(.+?)\*\*", rest)
+            if m:
+                before = rest[: m.start()]
+                if before:
+                    runs.append({"text": before, "bold": False, "italic": False})
+                runs.append({"text": m.group(1), "bold": True, "italic": False})
+                rest = rest[m.end() :]
+                continue
+            # Italic: *text*
+            m = re.search(r"\*(.+?)\*", rest)
+            if m:
+                before = rest[: m.start()]
+                if before:
+                    runs.append({"text": before, "bold": False, "italic": False})
+                runs.append({"text": m.group(1), "bold": False, "italic": True})
+                rest = rest[m.end() :]
+                continue
+            # __bold__
+            m = re.search(r"__(.+?)__", rest)
+            if m:
+                before = rest[: m.start()]
+                if before:
+                    runs.append({"text": before, "bold": False, "italic": False})
+                runs.append({"text": m.group(1), "bold": True, "italic": False})
+                rest = rest[m.end() :]
+                continue
+            # _italic_
+            m = re.search(r"_(.+?)_", rest)
+            if m:
+                before = rest[: m.start()]
+                if before:
+                    runs.append({"text": before, "bold": False, "italic": False})
+                runs.append({"text": m.group(1), "bold": False, "italic": True})
+                rest = rest[m.end() :]
+                continue
+            runs.append({"text": rest, "bold": False, "italic": False})
+            break
+        if not runs:
+            runs = [{"text": line, "bold": False, "italic": False}]
+        blocks.append({"type": "li" if is_li else "p", "runs": runs})
+    return blocks
 
 
 def build_docx_from_content(
@@ -64,18 +237,15 @@ def build_docx_from_content(
     print_properties: Optional[Dict] = None,
 ) -> bytes:
     """
-    Build a Word .docx from cover letter content.
+    Build a Word .docx from cover letter content, preserving bold, italic, and lists.
 
     Args:
         content: The cover letter body (markdown or HTML).
         from_html: If True, treat content as HTML; otherwise treat as markdown.
-        print_properties: Optional dict with fontFamily, fontSize, lineHeight (for document default style).
+        print_properties: Optional dict with fontFamily, fontSize, lineHeight.
 
     Returns:
         .docx file as bytes.
-
-    Raises:
-        ImportError: If python-docx is not installed.
     """
     if not DOCX_AVAILABLE or Document is None:
         raise ImportError("python-docx is not installed. Install with: pip install python-docx")
@@ -94,21 +264,44 @@ def build_docx_from_content(
         line_height = 1.6
 
     if from_html:
-        paragraphs = _html_to_plain_paragraphs(content)
+        blocks = _html_to_blocks(content)
     else:
-        paragraphs = _markdown_to_plain_paragraphs(content)
+        blocks = _markdown_to_blocks(content or "")
 
     doc = Document()
     style = doc.styles["Normal"]
     style.font.name = font_family
     style.font.size = Pt(font_size_pt)
 
-    for para_text in paragraphs:
+    space_after = Pt(round(font_size_pt * line_height * 0.4))
+
+    for block in blocks:
         p = doc.add_paragraph()
-        p.paragraph_format.space_after = Pt(round(font_size_pt * line_height * 0.4))
-        run = p.add_run(para_text)
-        run.font.name = font_family
-        run.font.size = Pt(font_size_pt)
+        p.paragraph_format.space_after = space_after
+        if block["type"] == "li":
+            p.style = "List Bullet"
+        for run_spec in block["runs"]:
+            text = run_spec.get("text", "")
+            if not text:
+                continue
+            run = p.add_run(text)
+            run_font = run.font
+            run_font.name = (run_spec.get("font_family") or "").strip() or font_family
+            size_pt = run_spec.get("font_size_pt")
+            run_font.size = Pt(size_pt if size_pt is not None and size_pt > 0 else font_size_pt)
+            run.bold = run_spec.get("bold", False)
+            run.italic = run_spec.get("italic", False)
+            color_hex = run_spec.get("color_hex")
+            if color_hex and RGBColor is not None:
+                hex_val = color_hex.lstrip("#")
+                if len(hex_val) >= 6:
+                    try:
+                        r = int(hex_val[0:2], 16)
+                        g = int(hex_val[2:4], 16)
+                        b = int(hex_val[4:6], 16)
+                        run_font.color.rgb = RGBColor(r, g, b)
+                    except (ValueError, TypeError):
+                        pass
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -123,8 +316,7 @@ def build_docx_from_generation_result(
 ) -> bytes:
     """
     Build .docx from the same content returned by cover letter generation (markdown + optional html).
-
-    Prefers HTML if provided (matches what the user sees); otherwise uses markdown.
+    Prefers HTML if provided; preserves bold, italic, and lists.
     """
     if html and html.strip():
         return build_docx_from_content(html, from_html=True, print_properties=print_properties)

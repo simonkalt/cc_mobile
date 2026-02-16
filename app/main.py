@@ -207,10 +207,11 @@ except Exception as e:
     raise
 
 # Register each router separately so one failure does not prevent others (e.g. pdf/print-template)
+# Use importlib so we load app.api.routers.<name> by name; routers/__init__.py does not export submodules.
 def _register_router(name, router_attr="router"):
     try:
-        from app.api import routers
-        mod = getattr(routers, name)
+        import importlib
+        mod = importlib.import_module(f"app.api.routers.{name}")
         router = getattr(mod, router_attr)
         app.include_router(router)
         logger.info(f"Registered router: {name}")

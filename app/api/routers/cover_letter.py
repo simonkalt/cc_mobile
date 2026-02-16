@@ -193,6 +193,8 @@ async def handle_job_info(request: JobInfoRequest):
     )
     payload = _normalize_generation_response(result, request)
     _attach_docx_to_payload(payload, request)
+    # Docx-only contract: do not send html to frontend; .docx is the single formatted artifact
+    payload.pop("html", None)
     return payload
 
 
@@ -235,6 +237,7 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
     )
     payload = _normalize_generation_response(result, request)
     _attach_docx_to_payload(payload, request)
+    payload.pop("html", None)
     return payload
 
 
@@ -344,7 +347,10 @@ async def handle_chat(request: Request):
                 user_id=job_request.user_id,
                 user_email=job_request.user_email,
             )
-            return _normalize_generation_response(result, job_request)
+            payload = _normalize_generation_response(result, job_request)
+            _attach_docx_to_payload(payload, job_request)
+            payload.pop("html", None)
+            return payload
         else:
             # Handle as regular chat request
             chat_request = ChatRequest(**body)
