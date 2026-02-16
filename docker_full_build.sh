@@ -17,4 +17,4 @@ docker run --name cc-mobile-api \
   -p 8000:8000 \
   -v ${PWD}:/app \
   cc-mobile-api \
-  python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+  python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

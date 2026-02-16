@@ -85,7 +85,7 @@ No API call in this step; logic is entirely on the client.
 
 **Important:** Do **not** use **POST /api/files/print-preview-pdf** (HTML-based) for the primary flow. The required path is: **.docx → docx-to-pdf → PDF**. See also [DOCX_TO_PDF_API.md](./DOCX_TO_PDF_API.md).
 
-**If you get 404:** Ensure the URL is exactly **`/api/files/docx-to-pdf`** (with the `/api/files/` prefix). See [PRINT_PREVIEW_PDF_API.md](./PRINT_PREVIEW_PDF_API.md) troubleshooting for “Not Found / Falling back to HTML preview”.
+**If you get "Error generating PDF for print preview: Error: not Found" (404):** (1) URL must be exactly **`/api/files/docx-to-pdf`** (with the `/api/files/` prefix). See [PRINT_PREVIEW_PDF_API.md](./PRINT_PREVIEW_PDF_API.md) troubleshooting for “Not Found / Falling back to HTML preview”.
 
 ---
 

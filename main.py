@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, status, HTTPException, Depends
+from fastapi import FastAPI, Request, status, HTTPException, Depends, APIRouter, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 
 # Import authentication early (before endpoints that use it)
@@ -394,9 +394,10 @@ _register_router("llm_config", _import_llm_config)
 _register_router("personality", _import_personality)
 _register_router("config", _import_config)
 _register_router("cover_letter", _import_cover_letter)
+# Register pdf before files so POST /api/files/print-template matches the pdf router first
+pdf_ok = _register_router("pdf", _import_pdf)
 _register_router("files", _import_files)
 _register_router("cover_letters", _import_cover_letters)
-pdf_ok = _register_router("pdf", _import_pdf)   # POST /api/files/print-template
 _register_router("sms", _import_sms)
 _register_router("email", _import_email)
 
@@ -409,38 +410,65 @@ def _log_files_routes():
             logger.info(f"Files route registered: {list(methods)} {path}")
 _log_files_routes()
 
-# Fallback: if pdf router didn't register, add POST /api/files/print-template so we don't 404 in Docker
+# Fallback: if pdf router didn't register, add BOTH print-template and docx-to-pdf on one router (so Docker gets both)
 _has_print_template = any(
     "print-template" in (getattr(r, "path", "") or "")
     for r in getattr(app, "routes", [])
 )
-if not _has_print_template:
+_has_docx_to_pdf = any(
+    "docx-to-pdf" in (getattr(r, "path", "") or "")
+    for r in getattr(app, "routes", [])
+)
+if not _has_print_template or not _has_docx_to_pdf:
     try:
-        from fastapi import APIRouter, Depends
         from app.core.auth import get_current_user
         from app.models.pdf import PrintTemplateRequest
         _fallback = APIRouter(prefix="/api/files", tags=["pdf"], dependencies=[Depends(get_current_user)])
-        @_fallback.post("/print-template")
-        async def _print_template_fallback(req: PrintTemplateRequest):
-            from app.services.pdf_service import get_print_template
-            ps = req.printProperties.pageSize
-            d = {
-                "margins": {"top": req.printProperties.margins.top, "right": req.printProperties.margins.right, "bottom": req.printProperties.margins.bottom, "left": req.printProperties.margins.left},
-                "fontFamily": req.printProperties.fontFamily or "Times New Roman",
-                "fontSize": req.printProperties.fontSize if req.printProperties.fontSize is not None else 12,
-                "lineHeight": req.printProperties.lineHeight if req.printProperties.lineHeight is not None else 1.6,
-                "pageSize": {"width": ps.width if ps else 8.5, "height": ps.height if ps else 11.0},
-                "useDefaultFonts": req.printProperties.useDefaultFonts or False,
-            }
-            out = get_print_template(d, req.htmlContent)
-            out["printProperties"] = {"margins": d["margins"], "fontFamily": d["fontFamily"], "fontSize": d["fontSize"], "lineHeight": d["lineHeight"], "pageSize": d["pageSize"], "useDefaultFonts": d["useDefaultFonts"]}
-            if d.get("color") is not None:
-                out["printProperties"]["color"] = d["color"]
-            return out
+        if not _has_print_template:
+            @_fallback.post("/print-template")
+            async def _print_template_fallback(req: PrintTemplateRequest):
+                from app.services.pdf_service import get_print_template
+                ps = req.printProperties.pageSize
+                d = {
+                    "margins": {"top": req.printProperties.margins.top, "right": req.printProperties.margins.right, "bottom": req.printProperties.margins.bottom, "left": req.printProperties.margins.left},
+                    "fontFamily": req.printProperties.fontFamily or "Times New Roman",
+                    "fontSize": req.printProperties.fontSize if req.printProperties.fontSize is not None else 12,
+                    "lineHeight": req.printProperties.lineHeight if req.printProperties.lineHeight is not None else 1.6,
+                    "pageSize": {"width": ps.width if ps else 8.5, "height": ps.height if ps else 11.0},
+                    "useDefaultFonts": req.printProperties.useDefaultFonts or False,
+                }
+                out = get_print_template(d, req.htmlContent)
+                out["printProperties"] = {"margins": d["margins"], "fontFamily": d["fontFamily"], "fontSize": d["fontSize"], "lineHeight": d["lineHeight"], "pageSize": d["pageSize"], "useDefaultFonts": d["useDefaultFonts"]}
+                if d.get("color") is not None:
+                    out["printProperties"]["color"] = d["color"]
+                return out
+        # docx-to-pdf: no auth so frontend can call it with same JWT as other /api/files (router has get_current_user; we need a route without it for docx-to-pdf if we want to avoid auth - but main pdf router has auth. So keep auth.)
+        if not _has_docx_to_pdf:
+            @_fallback.post("/docx-to-pdf")
+            async def _docx_to_pdf_fallback(file: UploadFile = File(..., description=".docx file")):
+                if not file.filename or not file.filename.lower().endswith(".docx"):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A .docx file is required. Use the 'file' form field.")
+                try:
+                    docx_bytes = await file.read()
+                except Exception as e:
+                    logger.error("Failed to read uploaded file: %s", e)
+                    raise HTTPException(status_code=400, detail="Failed to read uploaded file")
+                if len(docx_bytes) < 100:
+                    raise HTTPException(status_code=400, detail="Uploaded file is too small or empty")
+                try:
+                    import asyncio as _asyncio
+                    from app.services.pdf_service import convert_docx_to_pdf
+                    pdf_bytes = await _asyncio.to_thread(convert_docx_to_pdf, docx_bytes)
+                except FileNotFoundError:
+                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="LibreOffice (soffice) is not installed on the server.")
+                except (ValueError, RuntimeError) as e:
+                    raise HTTPException(status_code=500, detail=str(e))
+                import base64 as _b64
+                return {"success": True, "pdfBase64": _b64.b64encode(pdf_bytes).decode("utf-8"), "message": "PDF generated from .docx successfully"}
         app.include_router(_fallback)
-        logger.info("Registered fallback POST /api/files/print-template")
+        logger.info("Registered fallback /api/files: print-template=%s docx-to-pdf=%s", not _has_print_template, not _has_docx_to_pdf)
     except Exception as e:
-        logger.warning("Could not register fallback print-template: %s", e, exc_info=True)
+        logger.warning("Could not register fallback pdf routes: %s", e, exc_info=True)
 
 # Import and register subscriptions router separately with detailed error handling
 print("=" * 80)
