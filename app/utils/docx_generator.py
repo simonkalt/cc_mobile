@@ -55,6 +55,22 @@ def _parse_span_style(style_attr: str) -> Dict:
     return out
 
 
+def _is_salutation(line: str) -> bool:
+    """True if line looks like a salutation (Dear ..., To whom it may concern, etc.)."""
+    if not line or not isinstance(line, str):
+        return False
+    s = line.strip()
+    if not s:
+        return False
+    if s.startswith("Dear ") and len(s) > 5:
+        return True
+    if s.lower().startswith("to whom it may concern"):
+        return True
+    if s.lower().startswith("dear sir or madam"):
+        return True
+    return False
+
+
 class _HTMLToBlocksParser(HTMLParser):
     """Parse HTML into blocks; each run can have text, bold, italic, color, font_size_pt, font_family."""
 
@@ -66,6 +82,7 @@ class _HTMLToBlocksParser(HTMLParser):
         self._bold = 0
         self._italic = 0
         self._style_stack: List[Dict] = []  # stack of {color_hex, font_size_pt, font_family} from <span>
+        self._after_salutation = False  # avoid new paragraph after "Dear ..." to prevent page break
 
     def _current_style(self) -> Dict:
         if not self._style_stack:
@@ -80,14 +97,22 @@ class _HTMLToBlocksParser(HTMLParser):
         for i, part in enumerate(parts):
             t = part.strip()
             if not t:
-                if i < len(parts) - 1:
+                if self._after_salutation:
+                    self._current_runs.append({"line_break": True})  # blank line between salutation and body
+                    self._after_salutation = False
+                elif i < len(parts) - 1:
                     self._emit_block()
                 continue
             run = {"text": t, "bold": self._bold > 0, "italic": self._italic > 0}
             run.update(self._current_style())
             self._current_runs.append(run)
             if i < len(parts) - 1:
-                self._emit_block()
+                if _is_salutation(t):
+                    # Keep salutation and first body paragraph in same Word paragraph to avoid page break
+                    self._current_runs.append({"line_break": True})
+                    self._after_salutation = True
+                else:
+                    self._emit_block()
 
     def _emit_block(self):
         if not self._current_runs:

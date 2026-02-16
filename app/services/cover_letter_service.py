@@ -597,25 +597,25 @@ Please incorporate these instructions while maintaining consistency with all oth
             # )
 
     # Debug: capture prompts for analysis (tmp/debug_prompts.json)
-    try:
-        _service_dir = os.path.dirname(os.path.abspath(__file__))
-        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
-        _tmp_dir = os.path.join(_project_root, "tmp")
-        os.makedirs(_tmp_dir, exist_ok=True)
-        _debug_path = os.path.join(_tmp_dir, "debug_prompts.json")
-        _debug_payload = {
-            "personality_tone_text": selected_profile,
-            "template_content": template_content or None,
-            "matched_profile_name": matched_profile_name or tone,
-            "job_description": jd,
-            "resume_text": resume_content,
-            "additional_instructions_text": (additional_instructions or "").strip(),
-        }
-        with open(_debug_path, "w", encoding="utf-8") as _f:
-            json.dump(_debug_payload, _f, indent=2, ensure_ascii=False)
-        logger.info(f"Wrote debug prompts to {_debug_path}")
-    except Exception as _e:
-        logger.warning(f"Could not write debug_prompts.json: {_e}")
+    # try:
+    #     _service_dir = os.path.dirname(os.path.abspath(__file__))
+    #     _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+    #     _tmp_dir = os.path.join(_project_root, "tmp")
+    #     os.makedirs(_tmp_dir, exist_ok=True)
+    #     _debug_path = os.path.join(_tmp_dir, "debug_prompts.json")
+    #     _debug_payload = {
+    #         "personality_tone_text": selected_profile,
+    #         "template_content": template_content or None,
+    #         "matched_profile_name": matched_profile_name or tone,
+    #         "job_description": jd,
+    #         "resume_text": resume_content,
+    #         "additional_instructions_text": (additional_instructions or "").strip(),
+    #     }
+    #     with open(_debug_path, "w", encoding="utf-8") as _f:
+    #         json.dump(_debug_payload, _f, indent=2, ensure_ascii=False)
+    #     logger.info(f"Wrote debug prompts to {_debug_path}")
+    # except Exception as _e:
+    #     logger.warning(f"Could not write debug_prompts.json: {_e}")
 
     r = ""
 
