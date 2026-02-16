@@ -43,6 +43,14 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 
 **Note:** Render automatically sets the `$PORT` environment variable, so use that instead of a hardcoded port.
 
+### Alternative: Deploy with Docker (required for docx→PDF)
+
+If you use **POST /api/files/docx-to-pdf** (LibreOffice), deploy as **Docker** so LibreOffice is available:
+
+1. In Render, set **Environment** to **Docker** (not "Python 3").
+2. Use the repo **Dockerfile** (root); Render will build it. No build/start commands needed.
+3. See [LIBREOFFICE_SETUP.md](./LIBREOFFICE_SETUP.md) for details.
+
 ## Step 4: Set Environment Variables
 
 In the Render dashboard, go to **"Environment"** tab and add:

@@ -2,8 +2,10 @@
 PDF generation API routes
 """
 
+import asyncio
+import base64
 import logging
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, File, HTTPException, UploadFile, status, Depends
 from app.core.auth import get_current_user
 from app.models.user import UserResponse
 from app.models.pdf import GeneratePDFRequest, PrintPreviewPDFRequest, PrintTemplateRequest
@@ -12,12 +14,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["pdf"], dependencies=[Depends(get_current_user)])
 
-# Import PDF generation service
-from app.services.pdf_service import (
-    generate_pdf_from_markdown,
-    generate_pdf_from_html,
-    get_print_template,
-)
+# Lazy-import pdf_service so the router registers even if the service fails to load (e.g. in Docker).
+# This avoids 404 on /api/files/print-template when optional deps (playwright, etc.) are missing at import time.
+
+
+def _get_print_template(print_props_dict, html_content):
+    from app.services.pdf_service import get_print_template
+    return get_print_template(print_props_dict, html_content)
 
 
 @router.post("/print-template")
@@ -49,7 +52,7 @@ async def print_template_endpoint(request: PrintTemplateRequest):
         },
         "useDefaultFonts": request.printProperties.useDefaultFonts,
     }
-    result = get_print_template(print_props_dict, request.htmlContent)
+    result = _get_print_template(print_props_dict, request.htmlContent)
     return result
 
 
@@ -92,7 +95,8 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
             "useDefaultFonts": request.printProperties.useDefaultFonts,
         }
 
-        # Generate PDF
+        # Generate PDF (lazy import so router registers even if pdf_service fails at import)
+        from app.services.pdf_service import generate_pdf_from_markdown
         pdf_base64 = generate_pdf_from_markdown(request.markdownContent, print_props_dict)
 
         logger.info("PDF generated successfully")
@@ -161,6 +165,7 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
     }
 
     try:
+        from app.services.pdf_service import generate_pdf_from_html, generate_pdf_from_markdown
         if has_html:
             pdf_base64 = await generate_pdf_from_html(
                 request.htmlContent, print_props_dict, user_id=request.user_id
@@ -180,3 +185,51 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
         error_msg = f"Failed to generate Print Preview PDF: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@router.post("/docx-to-pdf")
+async def docx_to_pdf_endpoint(file: UploadFile = File(..., description=".docx file to convert to PDF")):
+    """
+    Convert a .docx document to PDF (direct conversion; preserves .docx formatting).
+
+    Use this when the cover letter is edited as .docx (e.g. in a Document Editor WebView).
+    The PDF is generated from the .docx itself, not from HTML, so formatting matches the document.
+
+    **Requires:** LibreOffice installed on the server (e.g. `soffice` on PATH).
+    """
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A .docx file is required. Use the 'file' form field.",
+        )
+
+    try:
+        docx_bytes = await file.read()
+    except Exception as e:
+        logger.error("Failed to read uploaded file: %s", e)
+        raise HTTPException(status_code=400, detail="Failed to read uploaded file")
+
+    if len(docx_bytes) < 100:
+        raise HTTPException(status_code=400, detail="Uploaded file is too small or empty")
+
+    try:
+        from app.services.pdf_service import convert_docx_to_pdf
+        pdf_bytes = await asyncio.to_thread(convert_docx_to_pdf, docx_bytes)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Docx to PDF is not available: LibreOffice (soffice) is not installed on the server.",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        logger.error("Docx to PDF conversion error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
+
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    logger.info("Docx to PDF converted successfully (%s bytes PDF)", len(pdf_bytes))
+    return {
+        "success": True,
+        "pdfBase64": pdf_base64,
+        "message": "PDF generated from .docx successfully",
+    }

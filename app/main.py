@@ -172,37 +172,28 @@ except Exception as e:
     logger.error(f"Failed to register users router: {e}", exc_info=True)
     raise
 
-# Import and include other routers
-try:
-    from app.api.routers import (
-        job_url,
-        linkedin,
-        llm_config,
-        personality,
-        config,
-        cover_letter,
-        files,
-        cover_letters,
-        pdf,
-        sms,
-        email,
-    )
+# Register each router separately so one failure does not prevent others (e.g. pdf/print-template)
+def _register_router(name, router_attr="router"):
+    try:
+        from app.api import routers
+        mod = getattr(routers, name)
+        router = getattr(mod, router_attr)
+        app.include_router(router)
+        logger.info(f"Registered router: {name}")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not register router {name}: {e}", exc_info=True)
+        return False
 
-    app.include_router(job_url.router)
-    app.include_router(linkedin.router)
-    app.include_router(llm_config.router)
-    app.include_router(personality.router)
-    app.include_router(config.router)
-    app.include_router(cover_letter.router)
-    app.include_router(files.router)
-    app.include_router(cover_letters.router)
-    app.include_router(pdf.router)
-    app.include_router(sms.router)
-    app.include_router(email.router)
-except ImportError as e:
-    logger.error(f"❌ Some routers could not be imported: {e}", exc_info=True)
-except Exception as e:
-    logger.error(f"❌ Failed to register some routers: {e}", exc_info=True)
+for _name in ("job_url", "linkedin", "llm_config", "personality", "config", "cover_letter", "files", "cover_letters", "pdf", "sms", "email"):
+    _register_router(_name)
+
+# Log /api/files routes so we can confirm print-template is available
+for route in getattr(app, "routes", []):
+    path = getattr(route, "path", "") or ""
+    if "/api/files" in path or "print-template" in path:
+        methods = getattr(route, "methods", set()) or set()
+        logger.info(f"Files route registered: {list(methods)} {path}")
 
 # Import and register subscriptions router separately with detailed error handling
 # Note: This module may be imported multiple times (by start script check, uvicorn reloader, and server process)

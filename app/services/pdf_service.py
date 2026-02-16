@@ -9,6 +9,8 @@ import base64
 import io
 import os
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -356,6 +358,71 @@ def set_cached_pdf(user_id: str, content_hash: str, pdf_bytes: bytes) -> None:
         hash_path.write_text(content_hash, encoding="utf-8")
     except OSError as e:
         logger.warning("Could not write PDF cache for user %s: %s", safe_id, e)
+
+
+def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
+    """
+    Convert a .docx document to PDF using LibreOffice headless.
+    Preserves formatting from the .docx (direct conversion, no HTML pipeline).
+
+    Requires LibreOffice to be installed (e.g. apt-get install libreoffice-writer on Linux,
+    or LibreOffice on Windows/macOS with 'soffice' on PATH).
+
+    Args:
+        docx_bytes: Raw bytes of the .docx file.
+
+    Returns:
+        PDF file as bytes.
+
+    Raises:
+        FileNotFoundError: If LibreOffice (soffice) is not installed.
+        RuntimeError: If conversion fails.
+    """
+    if not docx_bytes or len(docx_bytes) < 100:
+        raise ValueError("Invalid or empty .docx content")
+
+    # Use a single temp directory for both input and output
+    with tempfile.TemporaryDirectory(prefix="docx2pdf_") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        docx_path = tmpdir_path / "document.docx"
+        docx_path.write_bytes(docx_bytes)
+
+        # LibreOffice: --headless --convert-to pdf --outdir <dir> <file>
+        # Output will be <dir>/document.pdf
+        try:
+            subprocess.run(
+                [
+                    "soffice",
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(tmpdir_path),
+                    str(docx_path),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=120,
+                cwd=str(tmpdir_path),
+            )
+        except FileNotFoundError:
+            logger.error(
+                "LibreOffice (soffice) not found. Install it for docx→PDF (e.g. apt install libreoffice-writer)."
+            )
+            raise FileNotFoundError(
+                "LibreOffice (soffice) is not installed. Required for docx to PDF conversion."
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Docx to PDF conversion timed out")
+        except subprocess.CalledProcessError as e:
+            logger.error("LibreOffice conversion failed: %s %s", e.stderr, e.stdout)
+            raise RuntimeError(f"Docx to PDF conversion failed: {e.stderr.decode() if e.stderr else str(e)}")
+
+        pdf_path = tmpdir_path / "document.pdf"
+        if not pdf_path.exists():
+            raise RuntimeError("LibreOffice did not produce a PDF file")
+
+        return pdf_path.read_bytes()
 
 
 NUTRIENT_PDF_URL = "https://api.nutrient.io/processor/generate_pdf"

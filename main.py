@@ -366,34 +366,73 @@ try:
 except Exception as e:
     logger.error(f"Failed to register users router: {e}", exc_info=True)
 
-try:
-    from app.api.routers import (
-        job_url,
-        llm_config,
-        personality,
-        config,
-        cover_letter,
-        files,
-        cover_letters,
-        pdf,
-        sms,
-        email,
-    )
+# Register each router separately so one failure does not prevent others (e.g. pdf/print-template)
+def _register_router(name, import_fn, router_attr="router"):
+    try:
+        mod = import_fn()
+        router = getattr(mod, router_attr)
+        app.include_router(router)
+        logger.info(f"Registered router: {name}")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not register router {name}: {e}", exc_info=True)
+        return False
 
-    app.include_router(job_url.router)
-    app.include_router(llm_config.router)
-    app.include_router(personality.router)
-    app.include_router(config.router)
-    app.include_router(cover_letter.router)
-    app.include_router(files.router)
-    app.include_router(cover_letters.router)
-    app.include_router(pdf.router)
-    app.include_router(sms.router)
-    app.include_router(email.router)
-except ImportError as e:
-    logger.warning(f"Some routers could not be imported: {e}")
-except Exception as e:
-    logger.error(f"Failed to register some routers: {e}", exc_info=True)
+def _import_job_url(): from app.api.routers import job_url; return job_url
+def _import_llm_config(): from app.api.routers import llm_config; return llm_config
+def _import_personality(): from app.api.routers import personality; return personality
+def _import_config(): from app.api.routers import config; return config
+def _import_cover_letter(): from app.api.routers import cover_letter; return cover_letter
+def _import_files(): from app.api.routers import files; return files
+def _import_cover_letters(): from app.api.routers import cover_letters; return cover_letters
+def _import_pdf(): from app.api.routers import pdf; return pdf
+def _import_sms(): from app.api.routers import sms; return sms
+def _import_email(): from app.api.routers import email; return email
+
+_register_router("job_url", _import_job_url)
+_register_router("llm_config", _import_llm_config)
+_register_router("personality", _import_personality)
+_register_router("config", _import_config)
+_register_router("cover_letter", _import_cover_letter)
+_register_router("files", _import_files)
+_register_router("cover_letters", _import_cover_letters)
+pdf_ok = _register_router("pdf", _import_pdf)   # POST /api/files/print-template
+_register_router("sms", _import_sms)
+_register_router("email", _import_email)
+
+# Log /api/files routes at startup so we can confirm print-template is available (e.g. in Docker)
+def _log_files_routes():
+    for route in getattr(app, "routes", []):
+        path = getattr(route, "path", "") or ""
+        if "/api/files" in path or "print-template" in path:
+            methods = getattr(route, "methods", set()) or set()
+            logger.info(f"Files route registered: {list(methods)} {path}")
+_log_files_routes()
+
+# Fallback: if pdf router didn't register, add POST /api/files/print-template so we don't 404 in Docker
+_has_print_template = any(
+    "print-template" in (getattr(r, "path", "") or "")
+    for r in getattr(app, "routes", [])
+)
+if not _has_print_template:
+    try:
+        from fastapi import APIRouter, Depends
+        from app.core.auth import get_current_user
+        from app.models.pdf import PrintTemplateRequest
+        _fallback = APIRouter(prefix="/api/files", tags=["pdf"], dependencies=[Depends(get_current_user)])
+        @_fallback.post("/print-template")
+        async def _print_template_fallback(req: PrintTemplateRequest):
+            from app.services.pdf_service import get_print_template
+            d = {
+                "margins": {"top": req.printProperties.margins.top, "right": req.printProperties.margins.right, "bottom": req.printProperties.margins.bottom, "left": req.printProperties.margins.left},
+                "fontFamily": req.printProperties.fontFamily, "fontSize": req.printProperties.fontSize, "lineHeight": req.printProperties.lineHeight,
+                "pageSize": {"width": req.printProperties.pageSize.width, "height": req.printProperties.pageSize.height}, "useDefaultFonts": req.printProperties.useDefaultFonts,
+            }
+            return get_print_template(d, req.htmlContent)
+        app.include_router(_fallback)
+        logger.info("Registered fallback POST /api/files/print-template")
+    except Exception as e:
+        logger.warning("Could not register fallback print-template: %s", e, exc_info=True)
 
 # Import and register subscriptions router separately with detailed error handling
 print("=" * 80)

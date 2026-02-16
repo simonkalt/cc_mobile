@@ -25,6 +25,9 @@ email-validator
 markdown
 # DOCX generation/manipulation for cover letter .docx pipeline
 python-docx>=1.1.0
+# System dependency for POST /api/files/docx-to-pdf (not a pip package):
+#   Local: see documentation/LIBREOFFICE_SETUP.md
+#   Render: deploy as Docker (same repo Dockerfile installs LibreOffice)
 weasyprint
 # Print preview PDF; after pip install run: playwright install chromium
 playwright>=1.40.0
