@@ -36,6 +36,7 @@ async def print_template_endpoint(request: PrintTemplateRequest):
 
     Use the same printProperties as for POST /api/files/print-preview-pdf.
     """
+    ps = request.printProperties.pageSize
     print_props_dict = {
         "margins": {
             "top": request.printProperties.margins.top,
@@ -43,16 +44,28 @@ async def print_template_endpoint(request: PrintTemplateRequest):
             "bottom": request.printProperties.margins.bottom,
             "left": request.printProperties.margins.left,
         },
-        "fontFamily": request.printProperties.fontFamily,
-        "fontSize": request.printProperties.fontSize,
-        "lineHeight": request.printProperties.lineHeight,
+        "fontFamily": request.printProperties.fontFamily or "Times New Roman",
+        "fontSize": request.printProperties.fontSize if request.printProperties.fontSize is not None else 12,
+        "lineHeight": request.printProperties.lineHeight if request.printProperties.lineHeight is not None else 1.6,
         "pageSize": {
-            "width": request.printProperties.pageSize.width,
-            "height": request.printProperties.pageSize.height,
+            "width": ps.width if ps else 8.5,
+            "height": ps.height if ps else 11.0,
         },
-        "useDefaultFonts": request.printProperties.useDefaultFonts,
+        "useDefaultFonts": request.printProperties.useDefaultFonts or False,
     }
     result = _get_print_template(print_props_dict, request.htmlContent)
+    # Include printProperties in the response so the front-end can apply font size etc.
+    # when rendering content in its own container (the same values are already in result["html"] <style>).
+    result["printProperties"] = {
+        "margins": print_props_dict["margins"],
+        "fontFamily": print_props_dict["fontFamily"],
+        "fontSize": print_props_dict["fontSize"],
+        "lineHeight": print_props_dict["lineHeight"],
+        "pageSize": print_props_dict["pageSize"],
+        "useDefaultFonts": print_props_dict["useDefaultFonts"],
+    }
+    if print_props_dict.get("color") is not None:
+        result["printProperties"]["color"] = print_props_dict["color"]
     return result
 
 
@@ -147,6 +160,7 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
             request.printProperties.margins.left,
         )
 
+    ps = request.printProperties.pageSize
     print_props_dict = {
         "margins": {
             "top": request.printProperties.margins.top,
@@ -154,16 +168,15 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
             "bottom": request.printProperties.margins.bottom,
             "left": request.printProperties.margins.left,
         },
-        "fontFamily": request.printProperties.fontFamily,
-        "fontSize": request.printProperties.fontSize,
-        "lineHeight": request.printProperties.lineHeight,
+        "fontFamily": request.printProperties.fontFamily or "Times New Roman",
+        "fontSize": request.printProperties.fontSize if request.printProperties.fontSize is not None else 12,
+        "lineHeight": request.printProperties.lineHeight if request.printProperties.lineHeight is not None else 1.6,
         "pageSize": {
-            "width": request.printProperties.pageSize.width,
-            "height": request.printProperties.pageSize.height,
+            "width": ps.width if ps else 8.5,
+            "height": ps.height if ps else 11.0,
         },
-        "useDefaultFonts": request.printProperties.useDefaultFonts,
+        "useDefaultFonts": request.printProperties.useDefaultFonts or False,
     }
-
     try:
         from app.services.pdf_service import generate_pdf_from_html, generate_pdf_from_markdown
         if has_html:

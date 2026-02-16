@@ -193,6 +193,15 @@ PDF generation failed (e.g. WeasyPrint not available or invalid HTML):
 }
 ```
 
+### 404 Not Found / "Falling back to HTML preview"
+
+If the front-end shows **"Error: Not Found: Falling back to HTML preview"**, the request is hitting a URL that does not exist. Ensure you call the **correct base path**:
+
+- **Print template (HTML/CSS for Match PDF view):** **POST** `/api/files/print-template`
+- **Print Preview PDF:** **POST** `/api/files/print-preview-pdf`
+
+Do **not** use paths like `/api/print-preview-pdf` or `/print-template` without the `/api/files/` prefix. In Docker (or any deployment), ensure the app registers the PDF router so these routes exist; check startup logs for `Registered router: pdf` or `Files route registered: ... print-template`.
+
 ## Example: Fetch with Bearer token
 
 ```javascript

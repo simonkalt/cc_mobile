@@ -423,12 +423,20 @@ if not _has_print_template:
         @_fallback.post("/print-template")
         async def _print_template_fallback(req: PrintTemplateRequest):
             from app.services.pdf_service import get_print_template
+            ps = req.printProperties.pageSize
             d = {
                 "margins": {"top": req.printProperties.margins.top, "right": req.printProperties.margins.right, "bottom": req.printProperties.margins.bottom, "left": req.printProperties.margins.left},
-                "fontFamily": req.printProperties.fontFamily, "fontSize": req.printProperties.fontSize, "lineHeight": req.printProperties.lineHeight,
-                "pageSize": {"width": req.printProperties.pageSize.width, "height": req.printProperties.pageSize.height}, "useDefaultFonts": req.printProperties.useDefaultFonts,
+                "fontFamily": req.printProperties.fontFamily or "Times New Roman",
+                "fontSize": req.printProperties.fontSize if req.printProperties.fontSize is not None else 12,
+                "lineHeight": req.printProperties.lineHeight if req.printProperties.lineHeight is not None else 1.6,
+                "pageSize": {"width": ps.width if ps else 8.5, "height": ps.height if ps else 11.0},
+                "useDefaultFonts": req.printProperties.useDefaultFonts or False,
             }
-            return get_print_template(d, req.htmlContent)
+            out = get_print_template(d, req.htmlContent)
+            out["printProperties"] = {"margins": d["margins"], "fontFamily": d["fontFamily"], "fontSize": d["fontSize"], "lineHeight": d["lineHeight"], "pageSize": d["pageSize"], "useDefaultFonts": d["useDefaultFonts"]}
+            if d.get("color") is not None:
+                out["printProperties"]["color"] = d["color"]
+            return out
         app.include_router(_fallback)
         logger.info("Registered fallback POST /api/files/print-template")
     except Exception as e:

@@ -2,6 +2,7 @@
 Cover letter generation API routes
 """
 
+import base64
 import json
 import logging
 import os
@@ -20,8 +21,10 @@ from app.models.cover_letter import (
     CoverLetterGenerationResponse,
 )
 from app.services.cover_letter_service import get_job_info
+from app.services.user_service import get_user_by_id, get_user_by_email
 from app.utils.pdf_utils import read_pdf_from_bytes
 from app.utils.s3_utils import download_pdf_from_s3, get_s3_client, S3_AVAILABLE
+from app.utils.docx_generator import build_docx_from_generation_result
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -119,6 +122,45 @@ def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
     return payload
 
 
+def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
+    """
+    Build a .docx from markdown/html and attach as docxBase64 so the client
+    receives the fully adorned .docx for editing. Print preview = docx-to-pdf with this file.
+    """
+    try:
+        print_properties = None
+        if getattr(req, "user_id", None):
+            try:
+                user = get_user_by_id(req.user_id)
+                if user and user.preferences:
+                    app_settings = (user.preferences or {}).get("appSettings", {})
+                    if isinstance(app_settings, dict):
+                        print_properties = app_settings.get("printProperties")
+            except Exception as e:
+                logger.debug("Could not get user print properties by id: %s", e)
+        if not print_properties and getattr(req, "user_email", None):
+            try:
+                user = get_user_by_email(req.user_email)
+                if user and user.preferences:
+                    app_settings = (user.preferences or {}).get("appSettings", {})
+                    if isinstance(app_settings, dict):
+                        print_properties = app_settings.get("printProperties")
+            except Exception as e:
+                logger.debug("Could not get user print properties by email: %s", e)
+
+        docx_bytes = build_docx_from_generation_result(
+            payload.get("markdown", ""),
+            payload.get("html"),
+            print_properties=print_properties,
+        )
+        payload["docxBase64"] = base64.b64encode(docx_bytes).decode("utf-8")
+        logger.info("Attached .docx to generation response (%s bytes)", len(docx_bytes))
+    except ImportError as e:
+        logger.warning("python-docx not available, skipping docx generation: %s", e)
+    except Exception as e:
+        logger.warning("Failed to build .docx for generation response: %s", e, exc_info=True)
+
+
 @router.post("/job-info", response_model=CoverLetterGenerationResponse)
 async def handle_job_info(request: JobInfoRequest):
     """
@@ -149,7 +191,9 @@ async def handle_job_info(request: JobInfoRequest):
         user_id=request.user_id,
         user_email=request.user_email,
     )
-    return _normalize_generation_response(result, request)
+    payload = _normalize_generation_response(result, request)
+    _attach_docx_to_payload(payload, request)
+    return payload
 
 
 @router.post("/cover-letter/generate-with-text-resume", response_model=CoverLetterGenerationResponse)
@@ -189,7 +233,9 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
         user_email=request.user_email,
         is_plain_text=True,  # Skip file processing for pasted text
     )
-    return _normalize_generation_response(result, request)
+    payload = _normalize_generation_response(result, request)
+    _attach_docx_to_payload(payload, request)
+    return payload
 
 
 @router.post("/chat")

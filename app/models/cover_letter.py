@@ -75,4 +75,5 @@ class CoverLetterGenerationResponse(BaseModel):
     markdown: str
     html: Optional[str] = None
     docxTemplateHints: DocxTemplateHints
+    docxBase64: Optional[str] = None  # Fully adorned .docx for client to download and edit; print preview = docx-to-pdf with this (or edited) file
 

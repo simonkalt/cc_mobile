@@ -41,6 +41,71 @@ if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
 # Placeholder used when returning template without content (for frontend to inject)
 PRINT_TEMPLATE_CONTENT_PLACEHOLDER = "{{LETTER_CONTENT}}"
 
+# Named colors that may appear in Additional Instructions -> CSS color
+_STYLE_NAMED_COLORS = {
+    "black": "#000000",
+    "white": "#ffffff",
+    "blue": "#0000ff",
+    "navy": "#000080",
+    "red": "#ff0000",
+    "green": "#008000",
+    "gray": "#808080",
+    "grey": "#808080",
+    "dark gray": "#404040",
+    "dark grey": "#404040",
+}
+
+
+def parse_style_instructions(text: Optional[str]) -> Dict:
+    """
+    Parse free-text style instructions (e.g. from Additional Instructions) for font size,
+    font family, line height, and color. Returns a dict of overrides to merge into print_properties.
+    """
+    if not text or not str(text).strip():
+        return {}
+    t = " " + str(text).lower() + " "
+    out = {}
+    # Font size: e.g. "12pt", "14pt", "12 pt", "14px"
+    m = re.search(r"\b(\d{1,2})\s*pt\b", t, re.IGNORECASE)
+    if m:
+        out["fontSize"] = float(m.group(1))
+    else:
+        m = re.search(r"\b(\d{1,2})\s*px\b", t, re.IGNORECASE)
+        if m:
+            px = int(m.group(1))
+            out["fontSize"] = max(8, min(24, round(px * 0.75)))  # rough px -> pt
+    # Font family: common names (must be whole-word)
+    for name in ("arial", "times new roman", "georgia", "verdana", "helvetica", "garamond", "calibri"):
+        if re.search(rf"\b{re.escape(name)}\b", t):
+            out["fontFamily"] = name.title()
+            break
+    # Line height: e.g. "line height 1.5", "1.6 line height"
+    m = re.search(r"(?:line\s*height|line-height)\s*[:\s]*(\d+(?:\.\d+)?)", t, re.IGNORECASE)
+    if m:
+        out["lineHeight"] = float(m.group(1))
+    else:
+        m = re.search(r"\b(1\.\d{1,2})\s*(?:line|spacing)\b", t, re.IGNORECASE)
+        if m:
+            out["lineHeight"] = float(m.group(1))
+    # Color: #hex, rgb(...), or named
+    m = re.search(r"#([0-9a-f]{3}(?:[0-9a-f]{3})?)\b", t, re.IGNORECASE)
+    if m:
+        hex_val = m.group(1)
+        if len(hex_val) == 3:
+            hex_val = "".join(c * 2 for c in hex_val)
+        out["color"] = "#" + hex_val
+    else:
+        m = re.search(r"rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", t, re.IGNORECASE)
+        if m:
+            r, g, b = m.group(1), m.group(2), m.group(3)
+            out["color"] = f"rgb({r},{g},{b})"
+        else:
+            for name, hex_val in _STYLE_NAMED_COLORS.items():
+                if re.search(rf"\b{re.escape(name)}\b", t):
+                    out["color"] = hex_val
+                    break
+    return out
+
 
 def _build_print_template_css_and_body(
     print_properties: Dict,
@@ -55,6 +120,7 @@ def _build_print_template_css_and_body(
     line_height = print_properties.get("lineHeight", 1.6)
     page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
     use_default_fonts = print_properties.get("useDefaultFonts", False)
+    color = print_properties.get("color", "#000")
 
     margin_top = margins.get("top", 1.0)
     margin_right = margins.get("right", 0.75)
@@ -69,11 +135,11 @@ def _build_print_template_css_and_body(
     )
     if not use_default_fonts:
         if font_family and str(font_family).strip().lower() == "default":
-            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
-                line_height
+            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: {1};".format(
+                line_height, color
             )
         else:
-            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
+            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: {color};'
 
     css_block = f"""
 @page {{
@@ -273,24 +339,27 @@ except ImportError:
     PDF_GENERATION_AVAILABLE = False
     logger.warning("markdown not available. PDF generation will not work.")
 
-try:
-    from weasyprint import HTML
+# WeasyPrint: remarked out - using LibreOffice only as PDF engine for now.
+# try:
+#     from weasyprint import HTML
+#     WEASYPRINT_AVAILABLE = True
+# except (ImportError, OSError) as e:
+#     WEASYPRINT_AVAILABLE = False
+#     logger.warning(f"weasyprint not available. PDF generation will not work. Error: {str(e)}")
+WEASYPRINT_AVAILABLE = False
 
-    WEASYPRINT_AVAILABLE = True
-except (ImportError, OSError) as e:
-    WEASYPRINT_AVAILABLE = False
-    logger.warning(f"weasyprint not available. PDF generation will not work. Error: {str(e)}")
-
-try:
-    from playwright.async_api import async_playwright
-
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-    async_playwright = None
-    logger.info(
-        "playwright not installed. PDF will use WeasyPrint (install playwright for more reliable margins)."
-    )
+# Playwright: remarked out - using LibreOffice only as PDF engine for now.
+# try:
+#     from playwright.async_api import async_playwright
+#     PLAYWRIGHT_AVAILABLE = True
+# except ImportError:
+#     PLAYWRIGHT_AVAILABLE = False
+#     async_playwright = None
+#     logger.info(
+#         "playwright not installed. PDF will use WeasyPrint (install playwright for more reliable margins)."
+#     )
+PLAYWRIGHT_AVAILABLE = False
+async_playwright = None
 
 
 def _pdf_cache_dir() -> Path:
@@ -425,6 +494,53 @@ def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
         return pdf_path.read_bytes()
 
 
+def _generate_pdf_via_libreoffice_html(html_doc: str) -> bytes:
+    """
+    Generate PDF from full HTML document using LibreOffice headless.
+    Writes HTML to a temp file and runs: soffice --headless --convert-to pdf --outdir <dir> file.html
+
+    Requires LibreOffice (soffice) on PATH.
+    """
+    with tempfile.TemporaryDirectory(prefix="pdf_libreoffice_") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        html_path = tmpdir_path / "document.html"
+        html_path.write_text(html_doc, encoding="utf-8")
+        try:
+            subprocess.run(
+                [
+                    "soffice",
+                    "--headless",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(tmpdir_path),
+                    str(html_path),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=120,
+                cwd=str(tmpdir_path),
+            )
+        except FileNotFoundError:
+            logger.error(
+                "LibreOffice (soffice) not found. Install it (e.g. apt install libreoffice-writer)."
+            )
+            raise FileNotFoundError(
+                "LibreOffice (soffice) is not installed. Required for PDF generation."
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("HTML to PDF conversion timed out")
+        except subprocess.CalledProcessError as e:
+            logger.error("LibreOffice HTML→PDF failed: %s %s", e.stderr, e.stdout)
+            raise RuntimeError(
+                f"LibreOffice HTML to PDF failed: {e.stderr.decode() if e.stderr else str(e)}"
+            )
+        pdf_path = tmpdir_path / "document.pdf"
+        if not pdf_path.exists():
+            raise RuntimeError("LibreOffice did not produce a PDF file")
+        return pdf_path.read_bytes()
+
+
 NUTRIENT_PDF_URL = "https://api.nutrient.io/processor/generate_pdf"
 
 # 1 inch = 25.4 mm (for Nutrient.io margin params)
@@ -530,8 +646,6 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
     """
     if not PDF_GENERATION_AVAILABLE:
         raise ImportError("markdown library is not installed. Cannot generate PDF.")
-    if not WEASYPRINT_AVAILABLE:
-        raise ImportError("weasyprint library is not installed. Cannot generate PDF.")
 
     try:
         # Normalize markdown content: replace escaped newlines with actual newlines
@@ -546,133 +660,14 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         )
 
         # Strip unwanted \r and \n characters from HTML output
-        # Remove carriage returns and normalize line feeds to spaces (HTML doesn't need them)
         html_content = html_content.replace("\r", "").replace("\n", " ")
-        # Collapse multiple spaces to single space
         html_content = re.sub(r" +", " ", html_content)
 
-        # Extract print properties with defaults
-        margins = print_properties.get("margins", {})
-        font_family = print_properties.get("fontFamily", "Times New Roman")
-        font_size = print_properties.get("fontSize", 12)
-        line_height = print_properties.get("lineHeight", 1.6)
-        page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
-        use_default_fonts = print_properties.get("useDefaultFonts", False)
-
-        # Use @page margin: 0 and body padding for margins so all four sides are reliably inset
-        # (WeasyPrint can ignore @page margin-right in some cases; body padding always applies)
-        mt, mr, mb, ml = (
-            margins.get("top", 1.0),
-            margins.get("right", 0.75),
-            margins.get("bottom", 0.25),
-            margins.get("left", 0.75),
-        )
-        styled_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                @page {{
-                    size: {page_size['width']}in {page_size['height']}in;
-                    margin: 0;
-                }}
-                body {{
-                    font-family: "{font_family}", serif;
-                    font-size: {font_size}pt;
-                    line-height: {line_height};
-                    margin: 0;
-                    padding: {mt}in {mr}in {mb}in {ml}in;
-                    box-sizing: border-box;
-                    color: #000;
-                }}
-                h1, h2, h3, h4, h5, h6 {{
-                    font-weight: bold;
-                    margin-top: 1em;
-                    margin-bottom: 0.5em;
-                    page-break-after: avoid;
-                }}
-                h1 {{ font-size: 2em; }}
-                h2 {{ font-size: 1.5em; }}
-                h3 {{ font-size: 1.25em; }}
-                h4 {{ font-size: 1.1em; }}
-                h5 {{ font-size: 1em; }}
-                h6 {{ font-size: 0.9em; }}
-                strong, b {{ font-weight: bold; }}
-                em, i {{ font-style: italic; }}
-                ul, ol {{
-                    margin: 1em 0;
-                    padding-left: 2em;
-                }}
-                li {{
-                    margin: 0.5em 0;
-                }}
-                p {{
-                    margin: 0;
-                    padding: 0;
-                }}
-                code {{
-                    background-color: #f4f4f4;
-                    padding: 2px 4px;
-                    border-radius: 3px;
-                    font-family: "Courier New", monospace;
-                    font-size: 0.9em;
-                }}
-                pre {{
-                    background-color: #f4f4f4;
-                    padding: 10px;
-                    border-radius: 3px;
-                    page-break-inside: avoid;
-                }}
-                pre code {{
-                    background-color: transparent;
-                    padding: 0;
-                }}
-                blockquote {{
-                    border-left: 4px solid #ddd;
-                    padding-left: 1em;
-                    margin: 1em 0;
-                    font-style: italic;
-                }}
-                table {{
-                    border-collapse: collapse;
-                    width: 100%;
-                    margin: 1em 0;
-                    page-break-inside: avoid;
-                }}
-                th, td {{
-                    border: 1px solid #ddd;
-                    padding: 8px;
-                    text-align: left;
-                }}
-                th {{
-                    background-color: #f2f2f2;
-                    font-weight: bold;
-                }}
-                a {{
-                    color: #0066cc;
-                    text-decoration: underline;
-                }}
-                hr {{
-                    border: none;
-                    border-top: 1px solid #ddd;
-                    margin: 1em 0;
-                }}
-            </style>
-        </head>
-        <body>
-            {html_content}
-        </body>
-        </html>
-        """
-
-        # Generate PDF using WeasyPrint
-        pdf_bytes = HTML(string=styled_html).write_pdf()
-
-        # Encode to base64
+        # Use same template as get_print_template for consistency; then LibreOffice HTML→PDF
+        full_html = get_print_template(print_properties, html_content)["html"]
+        pdf_bytes = _generate_pdf_via_libreoffice_html(full_html)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-
-        logger.info(_yellow("PDF writer: WeasyPrint (from markdown) (%s bytes)"), len(pdf_bytes))
+        logger.info(_yellow("PDF writer: LibreOffice (from markdown) (%s bytes)"), len(pdf_bytes))
         return pdf_base64
 
     except Exception as e:
@@ -680,171 +675,28 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         raise Exception(f"Failed to generate PDF: {str(e)}")
 
 
-async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> bytes:
-    """
-    Generate PDF using Playwright (Chromium) Async API. Safe to call from asyncio.
-    Uses the same template as get_print_template for single-source-of-truth.
-    """
-    margins = print_properties.get("margins", {})
-    page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
-    width_in = page_size.get("width", 8.5)
-    height_in = page_size.get("height", 11.0)
-
-    template_result = get_print_template(print_properties, html_content)
-    html_doc = template_result["html"]
-
-    logger.info(
-        "Playwright PDF margins (in): top=%s, right=%s, bottom=%s, left=%s",
-        margins.get("top", 1.0),
-        margins.get("right", 0.75),
-        margins.get("bottom", 0.75),
-        margins.get("left", 0.75),
-    )
-
-    # Margins applied via @page in HTML above; prefer_css_page_size so Chromium uses CSS for size and margin
-    pdf_options = {
-        "prefer_css_page_size": True,
-        "margin": {"top": "0", "right": "0", "bottom": "0", "left": "0"},
-    }
-    if not (abs(width_in - 8.5) < 0.01 and abs(height_in - 11.0) < 0.01):
-        pdf_options["width"] = f"{width_in}in"
-        pdf_options["height"] = f"{height_in}in"
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        )
-        page = await browser.new_page()
-        await page.set_content(html_doc, wait_until="networkidle")
-        pdf_bytes = await page.pdf(**pdf_options)
-        await browser.close()
-
-    return pdf_bytes
+# Remarked out: Playwright PDF engine (using LibreOffice only for now).
+# async def _generate_pdf_via_playwright(html_content: str, print_properties: Dict) -> bytes:
+#     """Generate PDF using Playwright (Chromium)."""
+#     ...
+#     async with async_playwright() as p:
+#         browser = await p.chromium.launch(...)
+#         ...
+#     return pdf_bytes
 
 
-def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> bytes:
-    """
-    Generate PDF from HTML using WeasyPrint. Uses @page with explicit size and
-    margins so WeasyPrint handles page breaks correctly on every page. Page-break
-    CSS (orphans, widows, page-break-inside/after) is applied per WeasyPrint docs.
-    Use when PRINT_PREVIEW_USE_WEASYPRINT_ONLY is True or as fallback when Playwright fails.
-    """
-    margins = print_properties.get("margins", {})
-    font_family = print_properties.get("fontFamily", "Times New Roman")
-    font_size = print_properties.get("fontSize", 12)
-    line_height = print_properties.get("lineHeight", 1.6)
-    page_size = print_properties.get("pageSize", {"width": 8.5, "height": 11.0})
-    use_default_fonts = print_properties.get("useDefaultFonts", False)
-
-    margin_top = margins.get("top", 1.0)
-    margin_right = margins.get("right", 0.75)
-    margin_bottom = margins.get("bottom", 0.75)
-    margin_left = margins.get("left", 0.75)
-    width_in = page_size.get("width", 8.5)
-    height_in = page_size.get("height", 11.0)
-
-    # Body: no padding (margins are in @page). white-space: pre-wrap for line-break fidelity (Nutrient/PDF).
-    body_style = (
-        "margin: 0; padding: 0; box-sizing: border-box; max-width: 100%; "
-        "white-space: pre-wrap; word-wrap: break-word; "
-        "orphans: 1; widows: 1; hyphens: none;"
-    )
-    if not use_default_fonts:
-        if font_family and str(font_family).strip().lower() == "default":
-            body_style += " font-family: Arial, sans-serif; font-size: 12pt; line-height: {0}; color: #000;".format(
-                line_height
-            )
-        else:
-            body_style += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;'
-
-    wrapper = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        /* Critical: @page with size and margins so WeasyPrint handles breaks on every page */
-        @page {{
-            size: {width_in}in {height_in}in;
-            margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
-        }}
-        *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        /* Force zero margin/padding on all content so only @page margin applies (no "letter within a letter") */
-        .print-content * {{ margin: 0 !important; padding: 0 !important; }}
-        .print-content p, .print-content div {{ margin: 0 !important; padding: 0 !important; }}
-        body {{ {body_style} }}
-        /* Baseline only on body; we do not set font on .print-content or .print-content * so inline font/size/family win */
-        /* Zero paragraph spacing so any remaining <p> from rich editor don't add extra line height */
-        .print-content p {{ margin: 0 !important; padding: 0 !important; }}
-        /* Single <br /> = one line break; keep margin small so PDF matches on-screen spacing */
-        .print-content br {{ display: block; margin-top: 0.12em !important; }}
-        .print-content ul, .print-content ol {{ padding-left: 1.2em !important; }}
-        /* Keep heading with the next block (avoid break right after a heading) */
-        .print-content h1, .print-content h2, .print-content h3 {{
-            page-break-after: avoid;
-            margin: 0 !important;
-            padding: 0 !important;
-        }}
-        /* Do NOT use page-break-inside: avoid on .letter-section: it forces the whole body
-           onto the next page when the first section is just header/company, causing a
-           break right after the company name. Let content flow naturally; paragraphs
-           and headings still control breaks. */
-        /* Optional: frontend can add <div class="page-break"></div> to force a new page */
-        .print-content .page-break {{ page-break-after: always; }}
-        .print-content {{
-            max-width: 100%;
-            width: 100%;
-            /* WeasyPrint does not support overflow-x; use overflow-wrap for long words */
-            overflow-wrap: break-word;
-            word-wrap: break-word;
-            word-break: normal;
-            hyphens: none;
-        }}
-        .print-content * {{ max-width: 100%; }}
-        .print-content table {{ table-layout: fixed; width: 100% !important; }}
-        .print-content img, .print-content pre, .print-content code {{ max-width: 100%; }}
-    </style>
-</head>
-<body>
-<div class="print-content">{html_content}</div>
-</body>
-</html>
-"""
-    return HTML(string=wrapper).write_pdf()
+# Remarked out: WeasyPrint PDF engine (using LibreOffice only for now).
+# def _generate_pdf_via_weasyprint(html_content: str, print_properties: Dict) -> bytes:
+#     """Generate PDF from HTML using WeasyPrint."""
+#     ...
+#     return HTML(string=wrapper).write_pdf()
 
 
-def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
-    """
-    Generate PDF from raw HTML with minimal wrapper only: no @page, no .print-content.
-    Uses print_properties font size so WeasyPrint default (e.g. 16px) doesn't make text too large.
-    Use when PRINT_PREVIEW_RAW_HTML is True.
-    """
-    font_family = print_properties.get("fontFamily", "Times New Roman")
-    font_size = print_properties.get("fontSize", 12)
-    line_height = print_properties.get("lineHeight", 1.6)
-    use_default_fonts = print_properties.get("useDefaultFonts", False)
-    body_css = "margin: 0; padding: 0;"
-    if not use_default_fonts:
-        body_css += f' font-family: "{font_family}", serif; font-size: {font_size}pt; line-height: {line_height};'
-    minimal = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  body {{ {body_css} }}
-  p, div, h1, h2, h3, ul, ol, li {{ margin: 0; padding: 0; }}
-</style>
-</head>
-<body>
-{html_content}
-</body>
-</html>"""
-    return HTML(string=minimal).write_pdf()
+# Remarked out: raw HTML WeasyPrint path (using LibreOffice only for now).
+# def _generate_pdf_raw_html(html_content: str, print_properties: Dict) -> bytes:
+#     """Generate PDF from raw HTML with minimal wrapper (WeasyPrint)."""
+#     ...
+#     return HTML(string=minimal).write_pdf()
 
 
 async def generate_pdf_from_html(
@@ -852,7 +704,7 @@ async def generate_pdf_from_html(
 ) -> str:
     """
     Generate a PDF from HTML content using user print preferences.
-    Uses WeasyPrint when available (no Playwright/Chromium required); falls back to Playwright if WeasyPrint is not installed.
+    Uses LibreOffice (soffice) as the PDF engine: HTML → temp file → soffice --convert-to pdf.
     When user_id is provided, caches the last PDF per user in tmp/pdf_cache; same HTML returns cached PDF to save cost.
 
     Args:
@@ -864,7 +716,7 @@ async def generate_pdf_from_html(
         Base64-encoded PDF data as a string (without data URI prefix).
 
     Raises:
-        ImportError: If neither WeasyPrint nor Playwright is available.
+        FileNotFoundError: If LibreOffice (soffice) is not installed.
     """
     font_family = print_properties.get("fontFamily", "Times New Roman")
     font_size = print_properties.get("fontSize", 12)
@@ -881,73 +733,42 @@ async def generate_pdf_from_html(
             logger.info("Print preview PDF cache hit for user_id=%s", _safe_user_id(user_id))
             return base64.b64encode(cached).decode("utf-8")
 
-    # Raw HTML: minimal wrapper (WeasyPrint only)
-    if settings.PRINT_PREVIEW_RAW_HTML:
-        if not WEASYPRINT_AVAILABLE:
-            raise ImportError(
-                "PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is not available."
-            )
-        pdf_bytes = _generate_pdf_raw_html(html_content, print_properties)
-        if user_id:
-            set_cached_pdf(user_id, content_hash, pdf_bytes)
-        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-        logger.info(_yellow("PDF writer: WeasyPrint (raw HTML) (%s bytes)"), len(pdf_bytes))
-        return pdf_base64
-
-    # Nutrient.io: optional external PDF service (developer option; fall back to Playwright/WeasyPrint on failure)
-    if settings.PRINT_PREVIEW_USE_NUTRIENT and settings.NUTRIENT_API_KEY:
-        try:
-            pdf_bytes = await _generate_pdf_via_nutrient(html_content, print_properties)
-            if user_id:
-                set_cached_pdf(user_id, content_hash, pdf_bytes)
-            pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-            logger.info(
-                _yellow("PDF writer: Nutrient.io (%s bytes, font=%s, size=%spt)"),
-                len(pdf_bytes),
-                font_family,
-                font_size,
-            )
-            return pdf_base64
-        except Exception as e:
-            logger.warning(
-                "Nutrient.io print preview failed (%s), falling back to Playwright/WeasyPrint",
-                e,
-            )
-
-    # Prefer Playwright when available (better fidelity); fall back to WeasyPrint
-    if PLAYWRIGHT_AVAILABLE and async_playwright:
-        try:
-            pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
-            if user_id:
-                set_cached_pdf(user_id, content_hash, pdf_bytes)
-            pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-            logger.info(
-                _yellow("PDF writer: Playwright (%s bytes, font=%s, size=%spt)"),
-                len(pdf_bytes),
-                font_family,
-                font_size,
-            )
-            return pdf_base64
-        except Exception as e:
-            logger.warning("Playwright print preview failed (%s), falling back to WeasyPrint", e)
-            if not WEASYPRINT_AVAILABLE:
-                raise
-
-    # WeasyPrint fallback (no Chromium required; works in WSL, Render, constrained envs)
-    if WEASYPRINT_AVAILABLE:
-        pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
-        if user_id:
-            set_cached_pdf(user_id, content_hash, pdf_bytes)
-        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-        logger.info(
-            _yellow("PDF writer: WeasyPrint (%s bytes, font=%s, size=%spt)"),
-            len(pdf_bytes),
-            font_family,
-            font_size,
-        )
-        return pdf_base64
-
-    raise ImportError(
-        "Print preview PDF requires Playwright or WeasyPrint. "
-        "Install Playwright: pip install playwright && playwright install chromium (preferred), or WeasyPrint: pip install weasyprint"
+    # LibreOffice only: HTML → temp file → soffice --convert-to pdf
+    template_result = get_print_template(print_properties, html_content)
+    html_doc = template_result["html"]
+    loop = asyncio.get_event_loop()
+    pdf_bytes = await loop.run_in_executor(
+        None,
+        lambda: _generate_pdf_via_libreoffice_html(html_doc),
     )
+    if user_id:
+        set_cached_pdf(user_id, content_hash, pdf_bytes)
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    logger.info(
+        _yellow("PDF writer: LibreOffice (%s bytes, font=%s, size=%spt)"),
+        len(pdf_bytes),
+        font_family,
+        font_size,
+    )
+    return pdf_base64
+
+    # --- Remarked out: other PDF engines (using LibreOffice only for now) ---
+    # # Raw HTML: minimal wrapper (WeasyPrint only)
+    # if settings.PRINT_PREVIEW_RAW_HTML:
+    #     if not WEASYPRINT_AVAILABLE:
+    #         raise ImportError(
+    #             "PRINT_PREVIEW_RAW_HTML is True but WeasyPrint is not available."
+    #         )
+    #     pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
+    #     ...
+    # # Nutrient.io: optional external PDF service
+    # if settings.PRINT_PREVIEW_USE_NUTRIENT and settings.NUTRIENT_API_KEY:
+    #     ...
+    # # Playwright when available
+    # if PLAYWRIGHT_AVAILABLE and async_playwright:
+    #     pdf_bytes = await _generate_pdf_via_playwright(html_content, print_properties)
+    #     ...
+    # # WeasyPrint fallback
+    # if WEASYPRINT_AVAILABLE:
+    #     pdf_bytes = _generate_pdf_via_weasyprint(html_content, print_properties)
+    #     ...

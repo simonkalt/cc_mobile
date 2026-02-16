@@ -487,6 +487,8 @@ You may creatively vary font size, color, and style for lists, tables, headings,
                         f"Added typography baseline to prompt: fontFamily={font_family}, fontSize={font_size}pt"
                     )
 
+    # Additional Instructions are passed to the LLM only (below); no parsing or post/pre adorning of the letter here.
+
     # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
         "llm": llm,
