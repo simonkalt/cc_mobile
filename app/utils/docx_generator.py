@@ -7,6 +7,7 @@ POST /api/files/docx-to-pdf with that (possibly edited) .docx.
 """
 
 import io
+import os
 import html as htmllib
 import logging
 import re
@@ -139,7 +140,12 @@ class _HTMLToBlocksParser(HTMLParser):
         if not data:
             return
         data = htmllib.unescape(data)
-        self._flush_run(data)
+        # \n\n = new paragraph (emit block); \n = line break within paragraph
+        segments = data.replace("\r\n", "\n").replace("\r", "\n").split("\n\n")
+        for i, seg in enumerate(segments):
+            if i > 0:
+                self._emit_block()
+            self._flush_run(seg)
 
     def get_blocks(self) -> List[Dict]:
         self._emit_block()
@@ -228,20 +234,37 @@ def _html_to_plain_paragraphs(html: str) -> list:
 #     return "\n\n".join(out)
 
 
+def _ensure_paragraph_breaks(text: str) -> str:
+    """
+    If content has no double newlines but has single newlines, insert \\n\\n at likely
+    paragraph boundaries (sentence end . ? ! followed by newline and capital letter)
+    so the docx gets multiple <w:p> instead of one.
+    """
+    if not text or "\n\n" in text:
+        return text or ""
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    # After sentence-ending punctuation + optional space, newline, then capital letter → paragraph break
+    normalized = re.sub(r"([.?!])\s*\n(\s*[A-Z])", r"\1\n\n\2", normalized)
+    return normalized
+
+
 def _plain_text_to_blocks(text: str) -> List[Dict]:
-    """Pure: one block for entire text; each \\n = line break (no paragraph splitting)."""
+    """One rule only: \\n\\n = new paragraph (<w:p>); \\n = line break (<w:br/>) within paragraph."""
     if not text:
         return []
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = normalized.split("\n")
-    runs = []
-    for i, line in enumerate(lines):
-        runs.append({"text": line, "bold": False, "italic": False})
-        if i < len(lines) - 1:
-            runs.append({"line_break": True})
-    if not runs:
-        return []
-    return [{"type": "p", "runs": runs}]
+    normalized = _ensure_paragraph_breaks(normalized)
+    paragraphs = re.split(r"\n\s*\n", normalized.strip() if normalized else "")
+    blocks = []
+    for para in paragraphs:
+        lines = para.split("\n")
+        runs = []
+        for i, line in enumerate(lines):
+            runs.append({"text": line, "bold": False, "italic": False})
+            if i < len(lines) - 1:
+                runs.append({"line_break": True})
+        blocks.append({"type": "p", "runs": runs})
+    return blocks
 
 
 def _markdown_to_blocks(markdown: str) -> List[Dict]:
@@ -412,7 +435,30 @@ def build_docx_from_content(
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-    return buf.read()
+    docx_bytes = buf.read()
+
+    # Debug: write first docx from content to tmp/ for inspection (paragraph structure)
+    if from_plain_text and content:
+        try:
+            _dir = os.path.dirname(os.path.abspath(__file__))
+            _root = os.path.normpath(os.path.join(_dir, "..", ".."))
+            _tmp = os.path.join(_root, "tmp")
+            os.makedirs(_tmp, exist_ok=True)
+            _docx_path = os.path.join(_tmp, "raw-debug.docx")
+            _info_path = os.path.join(_tmp, "raw-debug-info.txt")
+            with open(_docx_path, "wb") as f:
+                f.write(docx_bytes)
+            with open(_info_path, "w", encoding="utf-8") as f:
+                f.write(f"block_count={len(blocks)}\n")
+                has_double = "\n\n" in (content or "")
+                f.write(f"content_has_double_newline={has_double}\n")
+                preview = (content or "")[:1200]
+                f.write(f"content_preview (repr)=\n{repr(preview)}\n")
+            logger.debug("Wrote tmp/raw-debug.docx and tmp/raw-debug-info.txt for conversion check")
+        except Exception as e:
+            logger.debug("Could not write tmp debug docx: %s", e)
+
+    return docx_bytes
 
 
 def build_docx_from_generation_result(
