@@ -55,22 +55,6 @@ def _parse_span_style(style_attr: str) -> Dict:
     return out
 
 
-def _is_salutation(line: str) -> bool:
-    """True if line looks like a salutation (Dear ..., To whom it may concern, etc.)."""
-    if not line or not isinstance(line, str):
-        return False
-    s = line.strip()
-    if not s:
-        return False
-    if s.startswith("Dear ") and len(s) > 5:
-        return True
-    if s.lower().startswith("to whom it may concern"):
-        return True
-    if s.lower().startswith("dear sir or madam"):
-        return True
-    return False
-
-
 class _HTMLToBlocksParser(HTMLParser):
     """Parse HTML into blocks; each run can have text, bold, italic, color, font_size_pt, font_family."""
 
@@ -82,7 +66,6 @@ class _HTMLToBlocksParser(HTMLParser):
         self._bold = 0
         self._italic = 0
         self._style_stack: List[Dict] = []  # stack of {color_hex, font_size_pt, font_family} from <span>
-        self._after_salutation = False  # avoid new paragraph after "Dear ..." to prevent page break
 
     def _current_style(self) -> Dict:
         if not self._style_stack:
@@ -92,27 +75,14 @@ class _HTMLToBlocksParser(HTMLParser):
     def _flush_run(self, text: str):
         if not text:
             return
-        # Every newline = new paragraph (so body paragraphs and list items get clear delineation)
+        # Pure: no paragraph splitting from newlines; only \n → line break within current block
         parts = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
         for i, part in enumerate(parts):
-            t = part.strip()
-            if not t:
-                if self._after_salutation:
-                    self._current_runs.append({"line_break": True})  # blank line between salutation and body
-                    self._after_salutation = False
-                elif i < len(parts) - 1:
-                    self._emit_block()
-                continue
-            run = {"text": t, "bold": self._bold > 0, "italic": self._italic > 0}
+            run = {"text": part, "bold": self._bold > 0, "italic": self._italic > 0}
             run.update(self._current_style())
             self._current_runs.append(run)
             if i < len(parts) - 1:
-                if _is_salutation(t):
-                    # Keep salutation and first body paragraph in same Word paragraph to avoid page break
-                    self._current_runs.append({"line_break": True})
-                    self._after_salutation = True
-                else:
-                    self._emit_block()
+                self._current_runs.append({"line_break": True})
 
     def _emit_block(self):
         if not self._current_runs:
@@ -169,12 +139,7 @@ class _HTMLToBlocksParser(HTMLParser):
         if not data:
             return
         data = htmllib.unescape(data)
-        # \n\n = new paragraph (new block); single \n = line break within paragraph
-        paragraphs = data.replace("\r\n", "\n").replace("\r", "\n").split("\n\n")
-        for i, para in enumerate(paragraphs):
-            if i > 0:
-                self._emit_block()
-            self._flush_run(para)
+        self._flush_run(data)
 
     def get_blocks(self) -> List[Dict]:
         self._emit_block()
@@ -264,27 +229,19 @@ def _html_to_plain_paragraphs(html: str) -> list:
 
 
 def _plain_text_to_blocks(text: str) -> List[Dict]:
-    """Convert plain text to blocks. Double newline = paragraph; single newline = line break. No HTML/Markdown parsing."""
-    if not text or not text.strip():
+    """Pure: one block for entire text; each \\n = line break (no paragraph splitting)."""
+    if not text:
         return []
-    blocks = []
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    raw_paras = re.split(r"\n\s*\n", normalized.strip())
-    for raw in raw_paras:
-        lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
-        if not lines:
-            continue
-        runs = []
-        for i, line in enumerate(lines):
-            if i > 0:
-                runs.append({"line_break": True})
-            runs.append({"text": line, "bold": False, "italic": False})
-        # Heuristic: line starting with • or - or * (followed by space) = list item
-        is_li = bool(runs and re.match(r"^[•\-*]\s+", runs[0].get("text", "")))
-        if is_li and runs:
-            runs[0]["text"] = re.sub(r"^[•\-*]\s+", "", runs[0]["text"])
-        blocks.append({"type": "li" if is_li else "p", "runs": runs})
-    return blocks
+    lines = normalized.split("\n")
+    runs = []
+    for i, line in enumerate(lines):
+        runs.append({"text": line, "bold": False, "italic": False})
+        if i < len(lines) - 1:
+            runs.append({"line_break": True})
+    if not runs:
+        return []
+    return [{"type": "p", "runs": runs}]
 
 
 def _markdown_to_blocks(markdown: str) -> List[Dict]:
@@ -411,6 +368,7 @@ def build_docx_from_content(
 
     space_after = Pt(round(font_size_pt * line_height * 0.4))
 
+    # One <w:p> per block (see BACKEND_DOCX_PARAGRAPH_AND_LINE_BREAKS.md)
     for block in blocks:
         p = doc.add_paragraph()
         if block["type"] == "li":

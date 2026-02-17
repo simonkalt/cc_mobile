@@ -27,6 +27,29 @@ Templates under `templates/{creative,formal,informal}/*.template` are included i
 
 ---
 
+## Line breaks missing: debugging
+
+**Confirmed:** The client uses `docxBase64` only and does not render from `content`. If line breaks are still missing in the app, the cause is one of:
+
+### 1. The .docx has no paragraph/line breaks (backend)
+
+The file may be built with one paragraph for the whole body. To verify:
+
+1. Save the received .docx (decode `docxBase64` and write to a file).
+2. Unzip it (e.g. `unzip letter.docx -d letter_docx` or rename to `.zip` and extract).
+3. Open `word/document.xml` and look at the body:
+   - Each paragraph should be a separate `<w:p>…</w:p>`.
+   - Line breaks within a paragraph are `<w:br/>`.
+   - If the whole letter is inside a single `<w:p>` with one long `<w:t>`, there are no paragraph breaks in the file.
+
+**Fix:** The backend that builds the .docx (`app/utils/docx_generator.py`) must emit one `<w:p>` per paragraph (and `<w:br/>` where line breaks are intended). Plain-text content is split by `\n\n` into paragraphs and by `\n` into runs with line breaks; ensure `_plain_text_to_blocks` and the block→document loop produce separate paragraphs.
+
+### 2. The editor library is dropping them (frontend)
+
+If the .docx has correct structure (multiple `<w:p>` or `<w:br/>`) but the app still shows no breaks, the docx→DOM conversion (e.g. **@eigenpal/docx-js-editor**) may be merging paragraphs. Next step: inspect the WebView DOM (e.g. via remote debugging) and check whether the letter body is a single `<p>` or multiple `<p>`/`<br>` elements.
+
+---
+
 ## Desired Regimen
 
 1. **LLM prompts** are sent to the server; the server processes them and produces a **.docx** document (the “fully adorned” cover letter).

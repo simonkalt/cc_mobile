@@ -1051,8 +1051,6 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info("Removed 'content ' prefix from LLM response")
             if today_date_iso and today_date and today_date != today_date_iso:
                 letter_content = letter_content.replace(today_date_iso, today_date)
-            # Insert line breaks in long paragraphs so .docx has readable lines (not one block)
-            # letter_content = insert_line_breaks_in_long_paragraphs(letter_content, max_chars=80)
             return {"content": letter_content}
 
         # Legacy flow: markdown + html
