@@ -150,6 +150,10 @@ class Settings:
         Path(__file__).parent.parent.parent / "personality_profiles.json"
     )
     TEMPLATES_DIR: Path = Path(__file__).parent.parent.parent / "templates"
+    # Include template structure in LLM prompt for consistent line breaks. Set to "false" to revert.
+    USE_TEMPLATE_IN_PROMPT: bool = (
+        os.getenv("USE_TEMPLATE_IN_PROMPT", "true").lower() == "true"
+    )
 
 
 # Global settings instance

@@ -1,4 +1,5 @@
 python-dotenv
+colorama
 openai
 anthropic
 google-generativeai

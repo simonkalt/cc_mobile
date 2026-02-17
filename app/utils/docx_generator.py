@@ -209,6 +209,60 @@ def _html_to_plain_paragraphs(html: str) -> list:
     return paragraphs if paragraphs else [""]
 
 
+# def insert_line_breaks_in_long_paragraphs(text: str, max_chars: int = 80) -> str:
+#     """
+#     Insert single newlines in long paragraphs so the .docx gets line breaks at sentence
+#     boundaries instead of one dense block. Only affects paragraphs that have no internal
+#     newlines and exceed max_chars. Preserves existing \\n and \\n\\n.
+#     """
+#     if not text or not text.strip():
+#         return text
+#     normalized = (text or "").replace("\r\n", "\n\n").replace("\r", "\n\n")
+#     paragraphs = re.split(r"\n\s*\n", normalized)
+#     out = []
+#     for para in paragraphs:
+#         para = para.strip()
+#         if not para:
+#             out.append("")
+#             continue
+#         # Already has internal line breaks, or short enough
+#         if "\n" in para or len(para) <= max_chars:
+#             out.append(para)
+#             continue
+#         # Break at sentence boundaries: . " or .) " or ? " or ?) " when next char is A-Z
+#         result_lines = []
+#         rest = para
+#         while len(rest) > max_chars:
+#             chunk = rest[: max_chars + 1]
+#             best_pos = -1
+#             best_len = 0
+#             for ending in [".) ", ". ", "?) ", "? "]:
+#                 pos = chunk.rfind(ending)
+#                 if pos != -1:
+#                     next_idx = pos + len(ending)
+#                     if next_idx < len(rest) and rest[next_idx].isalpha() and rest[next_idx].isupper():
+#                         if pos > best_pos:
+#                             best_pos = pos
+#                             best_len = len(ending)
+#             if best_pos == -1:
+#                 # No sentence end; break at last space
+#                 pos = chunk.rfind(" ")
+#                 if pos != -1:
+#                     best_pos = pos
+#                     best_len = 1
+#             if best_pos == -1:
+#                 result_lines.append(rest)
+#                 rest = ""
+#                 break
+#             end = best_pos + best_len
+#             result_lines.append(rest[:end].rstrip())
+#             rest = rest[end:].lstrip()
+#         if rest:
+#             result_lines.append(rest)
+#         out.append("\n".join(result_lines))
+#     return "\n\n".join(out)
+
+
 def _plain_text_to_blocks(text: str) -> List[Dict]:
     """Convert plain text to blocks. Double newline = paragraph; single newline = line break. No HTML/Markdown parsing."""
     if not text or not text.strip():

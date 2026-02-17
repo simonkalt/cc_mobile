@@ -10,11 +10,11 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status  # type: ignore[import-untyped]
 
 # Try to import colorama for better color support in WSL/Windows
 try:
-    import colorama
+    import colorama  # type: ignore[import-untyped]
 
     colorama.init(autoreset=True)
     COLORAMA_AVAILABLE = True
@@ -26,6 +26,7 @@ from app.utils.html_normalizer import html_p_to_br, collapse_br_pairs, double_br
 from app.utils.template_loader import get_template_for_profile
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
+# from app.utils.docx_generator import insert_line_breaks_in_long_paragraphs
 from app.utils.llm_utils import (
     load_system_prompt,
     normalize_llm_name,
@@ -39,6 +40,64 @@ from app.services.user_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _write_llm_prompt_log(
+    llm: str,
+    *,
+    full_text: Optional[str] = None,
+    messages: Optional[list] = None,
+    system: Optional[str] = None,
+    user_content_list: Optional[list] = None,
+) -> None:
+    """
+    Write the exact payload sent to the LLM to tmp/llm_prompt_sent.txt for manual analysis
+    (e.g. to debug line-break behavior). Overwrites on each generation.
+    """
+    try:
+        _service_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _path = os.path.join(_tmp_dir, "llm_prompt_sent.txt")
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            "=" * 80,
+            f"LLM: {llm}",
+            f"Timestamp: {ts}",
+            "=" * 80,
+            "",
+        ]
+        if full_text is not None:
+            lines.append("--- FULL MESSAGE SENT (e.g. Gemini/OCI) ---")
+            lines.append("")
+            lines.append(full_text)
+        elif messages is not None:
+            lines.append("--- MESSAGES SENT (e.g. OpenAI/Grok/Llama) ---")
+            for i, m in enumerate(messages, 1):
+                role = m.get("role", "?")
+                content = m.get("content", "")
+                lines.append("")
+                lines.append(f"--- Message {i} (role={role}) ---")
+                lines.append(content)
+        elif system is not None and user_content_list is not None:
+            lines.append("--- SYSTEM (Claude) ---")
+            lines.append("")
+            lines.append(system)
+            lines.append("")
+            lines.append("--- USER CONTENT (Claude) ---")
+            for i, block in enumerate(user_content_list, 1):
+                text = block.get("text", "") if isinstance(block, dict) else str(block)
+                lines.append("")
+                lines.append(f"--- Block {i} ---")
+                lines.append(text)
+        lines.append("")
+        lines.append("=" * 80)
+        with open(_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        logger.info("Wrote exact LLM prompt to %s for analysis", _path)
+    except Exception as e:
+        logger.warning("Could not write LLM prompt log: %s", e)
 
 
 # Try to import LLM libraries
@@ -441,25 +500,31 @@ Apply this personality throughout the entire cover letter. This instruction take
         f"Personality instruction prepared ({len(critical_instructions)} chars): {selected_profile[:100]}..."
     )
 
-    # Build template structure instruction - align letter layout with template
-    template_content = get_template_for_profile(matched_profile_name or tone)
+    # Build template structure instruction - align letter layout with template (pinned: set USE_TEMPLATE_IN_PROMPT=false to revert)
     template_instruction = ""
-    if template_content:
-        template_instruction = f"""
-=== TEMPLATE STRUCTURE - EXACT LINE BREAKS REQUIRED ===
-Your cover letter MUST follow this structure. Preserve every line break exactly as shown in your "content" output.
-- One newline between each header line in the template.
-- Single blank line in template = one newline between blocks.
-- Double blank line in template = two newlines (blank line) between blocks.
-- The order, placement, and phrasing cues (Re:, salutation, closing) must match the template.
+    if settings.USE_TEMPLATE_IN_PROMPT:
+        template_content = get_template_for_profile(matched_profile_name or tone)
+        if template_content:
+            template_instruction = f"""
+=== TEMPLATE STRUCTURE - MATCH LINE BREAKS EXACTLY ===
+Your "content" output MUST follow this template line-for-line so paragraph and line breaks are consistent.
 
-TEMPLATE:
+RULES:
+- Each non-blank line in the template = one line in your content (use one newline (\\n) after it before the next line).
+- Each blank line in the template = exactly two newlines (\\n\\n) in your content — that is the paragraph separator.
+- Do not merge lines or skip blank lines. The number of lines and blank lines in your output must match the template.
+
+TEMPLATE (copy its structure; replace placeholders with real data):
+---
 {template_content}
+---
 
-Placeholders: <<date>>, <<name>>, <<phone>>, <<email>>, <<hiring manager>>, <<company name>>, <<position title>>, <<salutation>>, <<body>>, <<signature>> — replace with actual resume/job data. The <<body>> section is the main letter content you generate.
+Placeholders: <<date>>, <<name>>, <<phone>>, <<email>>, <<address>>, <<city, state, zip>>, <<hiring manager>>, <<company name>>, <<company address>>, <<position title>>, <<salutation>>, <<body paragraph>> (repeat for each body paragraph), <<complimentary close>> — replace with actual resume/job data. Generate the right number of <<body paragraph>> blocks.
 === END TEMPLATE STRUCTURE ===
 """
-        logger.info("Template structure instruction added to prompt")
+            logger.info("Template structure instruction added to prompt (USE_TEMPLATE_IN_PROMPT=true)")
+    if not template_instruction and not settings.USE_TEMPLATE_IN_PROMPT:
+        logger.debug("Template omitted from prompt (USE_TEMPLATE_IN_PROMPT=false)")
     critical_instructions = critical_instructions + template_instruction
 
     # Typography baseline: when user selects a non-default font, pass as baseline for body; LLM may vary for lists/tables
@@ -646,6 +711,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                 "max_output_tokens": 8192,  # Increase max tokens to prevent truncation
             }
 
+            _write_llm_prompt_log(llm, full_text=msg)
             response = model.generate_content(contents=msg, generation_config=generation_config)
             r = response.text
             logger.info(f"Gemini response length: {len(r)} characters")
@@ -681,6 +747,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                         "Additional instructions appended to ChatGPT messages (ENHANCEMENT MODE)"
                     )
             # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
+            _write_llm_prompt_log(llm, messages=messages)
             if gpt_model == "gpt-5.2":
                 response = client.chat.completions.create(
                     model=gpt_model,
@@ -731,6 +798,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                     logger.debug(
                         "Additional instructions appended to Grok messages (ENHANCEMENT MODE)"
                     )
+            _write_llm_prompt_log(llm, messages=messages_list)
             data = {"model": xai_model, "messages": messages_list}
             response = requests.post(
                 "https://api.x.ai/v1/chat/completions",
@@ -745,6 +813,7 @@ Please incorporate these instructions while maintaining consistency with all oth
         elif llm == "OCI" or llm == "oci-generative-ai":
             # Include personality instruction prominently at the start
             full_prompt = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            _write_llm_prompt_log(llm, full_text=full_prompt)
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
 
@@ -778,6 +847,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                     logger.debug(
                         "Additional instructions appended to Llama messages (ENHANCEMENT MODE)"
                     )
+            _write_llm_prompt_log(llm, messages=messages)
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response["message"]["content"]
 
@@ -811,6 +881,9 @@ Please incorporate these instructions while maintaining consistency with all oth
                         "Additional instructions appended to Claude messages (ENHANCEMENT MODE)"
                     )
             messages = [{"role": "user", "content": content_list}]
+            _write_llm_prompt_log(
+                llm, system=system_message, user_content_list=content_list
+            )
             response = client.messages.create(
                 model=claude_model,
                 system=system_message,
@@ -950,6 +1023,8 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info("Removed 'content ' prefix from LLM response")
             if today_date_iso and today_date and today_date != today_date_iso:
                 letter_content = letter_content.replace(today_date_iso, today_date)
+            # Insert line breaks in long paragraphs so .docx has readable lines (not one block)
+            # letter_content = insert_line_breaks_in_long_paragraphs(letter_content, max_chars=80)
             return {"content": letter_content}
 
         # Legacy flow: markdown + html

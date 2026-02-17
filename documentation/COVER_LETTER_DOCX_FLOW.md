@@ -18,6 +18,15 @@ The **document** the user gets has all the formatting requested—paragraphs, sp
 
 ---
 
+## Templates in the prompt (line-break consistency)
+
+Templates under `templates/{creative,formal,informal}/*.template` are included in the LLM prompt so the model matches the template structure line-for-line (same number of lines and blank lines). This is intended to make paragraph and line breaks more consistent in the generated .docx.
+
+- **Config:** `USE_TEMPLATE_IN_PROMPT` (env: `USE_TEMPLATE_IN_PROMPT`, default `true`).
+- **To revert** (omit template from prompt): set `USE_TEMPLATE_IN_PROMPT=false` in the environment or `.env`.
+
+---
+
 ## Desired Regimen
 
 1. **LLM prompts** are sent to the server; the server processes them and produces a **.docx** document (the “fully adorned” cover letter).
