@@ -100,6 +100,32 @@ def _write_llm_prompt_log(
         logger.warning("Could not write LLM prompt log: %s", e)
 
 
+def _write_llm_response_log(llm: str, response_text: str) -> None:
+    """
+    Write the exact raw response from the LLM to tmp/llm_response_received.txt
+    for manual analysis (e.g. to debug line-break behavior). Overwrites on each generation.
+    """
+    try:
+        _service_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _path = os.path.join(_tmp_dir, "llm_response_received.txt")
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(_path, "w", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write(f"LLM: {llm}\n")
+            f.write(f"Timestamp: {ts}\n")
+            f.write(f"Length: {len(response_text)} characters\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(response_text)
+            if response_text and not response_text.endswith("\n"):
+                f.write("\n")
+        logger.info("Wrote exact LLM response to %s for analysis", _path)
+    except Exception as e:
+        logger.warning("Could not write LLM response log: %s", e)
+
+
 # Try to import LLM libraries
 try:
     from openai import OpenAI
@@ -894,6 +920,8 @@ Please incorporate these instructions while maintaining consistency with all oth
             r = response.content[0].text
         else:
             raise ValueError(f"Unsupported LLM: {llm}")
+
+        _write_llm_response_log(llm, r)
 
         # Increment LLM usage count for the user (after successful LLM call)
         if user_id:

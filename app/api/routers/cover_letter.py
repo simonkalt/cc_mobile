@@ -3,6 +3,7 @@ Cover letter generation API routes
 """
 
 import base64
+import datetime
 import json
 import logging
 import os
@@ -28,6 +29,47 @@ from app.utils.docx_generator import build_docx_from_generation_result
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _write_client_payload_log(payload: Dict[str, Any]) -> None:
+    """
+    Write the exact payload sent to the client to tmp/client_payload_sent.txt
+    for manual analysis (e.g. to verify line breaks in content). docxBase64 is
+    summarized so the file stays readable.
+    """
+    try:
+        _router_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_router_dir, "..", "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _path = os.path.join(_tmp_dir, "client_payload_sent.txt")
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            "=" * 80,
+            "Payload sent to client (cover letter generation response)",
+            f"Timestamp: {ts}",
+            "=" * 80,
+            "",
+        ]
+        for key in sorted(payload.keys()):
+            val = payload[key]
+            if key == "docxBase64" and isinstance(val, str):
+                lines.append(f"[{key}] (BASE64, {len(val)} characters)")
+                lines.append("")
+                continue
+            lines.append(f"--- {key} ---")
+            if isinstance(val, dict):
+                lines.append(json.dumps(val, indent=2, ensure_ascii=False))
+            else:
+                lines.append(str(val) if val is not None else "")
+            lines.append("")
+        lines.append("=" * 80)
+        with open(_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        logger.info("Wrote client payload to %s for analysis", _path)
+    except Exception as e:
+        logger.warning("Could not write client payload log: %s", e)
+
 
 router = APIRouter(
     prefix="/api",
@@ -206,6 +248,7 @@ async def handle_job_info(request: JobInfoRequest):
     # Docx-only contract: return docx + hints + optional content; no markdown/html
     payload.pop("html", None)
     payload.pop("markdown", None)
+    _write_client_payload_log(payload)
     return payload
 
 
@@ -250,6 +293,7 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
     _attach_docx_to_payload(payload, request)
     payload.pop("html", None)
     payload.pop("markdown", None)
+    _write_client_payload_log(payload)
     return payload
 
 
@@ -363,6 +407,7 @@ async def handle_chat(request: Request):
             _attach_docx_to_payload(payload, job_request)
             payload.pop("html", None)
             payload.pop("markdown", None)
+            _write_client_payload_log(payload)
             return payload
         else:
             # Handle as regular chat request
