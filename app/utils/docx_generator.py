@@ -418,7 +418,8 @@ def _plain_line_to_runs(line: str) -> List[Dict]:
                 if "font_family" in style_dict:
                     run["font_family"] = style_dict["font_family"]
             runs.append(run)
-    return runs if runs else [{"text": line, "bold": False, "italic": False}]
+    # If no segments (e.g. line is only tags like "[font:Calibri][size:11pt]" or "[/size][/font]"), use stripped line so we never emit raw tags
+    return runs if runs else [{"text": _strip_style_tags_from_plain(line), "bold": False, "italic": False}]
 
 
 def _plain_text_to_blocks(text: str) -> List[Dict]:
@@ -545,6 +546,19 @@ def build_docx_from_content(
         blocks = _html_to_blocks(content)
     else:
         blocks = _markdown_to_blocks(content or "")
+
+    # Strip any [font:...], [size:...], [color:...] and [/font], [/size], [/color] that ended up as literal run text
+    # (e.g. parser edge cases, or when content came from a path that doesn't parse these tags). Keeps docx clean.
+    for block in blocks:
+        for run in block.get("runs", []):
+            if "text" in run and run["text"]:
+                t = run["text"]
+                while True:
+                    t2 = _strip_style_tags_from_plain(t)
+                    if t2 == t:
+                        break
+                    t = t2
+                run["text"] = t
 
     # Heuristic: paragraphs whose first run starts with • or - or * become list items (LLM may not use <ul><li>)
     for block in blocks:
