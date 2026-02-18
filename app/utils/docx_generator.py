@@ -298,50 +298,67 @@ def _strip_style_tags_from_plain(text: str) -> str:
 
 def _parse_style_segments(line: str) -> List[tuple]:
     """
-    Split line by [color:#xxx]...[/color], [size:Npt]...[/size], [font:Name]...[/font].
-    Returns list of (style_dict, text). style_dict may have color_hex, font_size_pt, font_family.
-    Revert: remove this and have _plain_line_to_runs ignore style tags.
+    Split line by [color:#xxx], [size:Npt], [font:Name] and [/color], [/size], [/font].
+    Supports adjacent tags like [font:Calibri][size:22pt][color:#1f4e79]text[/color][/size][/font]
+    by merging styles with a stack. Returns list of (style_dict, text).
     """
-    segments = []
-    rest = line
-    # Match [tag:value]...[/tag] with optional whitespace so LLM output is matched
-    pattern = re.compile(
-        r"\[\s*(color|size|font)\s*:\s*([^\]]+)\]\s*(.*?)\s*\[\s*/\s*\1\s*\]",
-        re.DOTALL | re.IGNORECASE,
+    open_re = re.compile(
+        r"\[\s*(color|size|font)\s*:\s*([^\]]+)\]\s*",
+        re.IGNORECASE,
     )
-    while rest:
-        m = pattern.search(rest)
-        if not m:
-            # Strip any remaining tag-like spans so they never show in the doc
-            rest = _strip_style_tags_from_plain(rest)
-            segments.append(({}, rest))
-            break
-        tag_type, tag_value, content = m.group(1).lower(), m.group(2), m.group(3)
-        before = rest[: m.start()]
-        if before:
-            before = _strip_style_tags_from_plain(before)
-            if before:
-                segments.append(({}, before))
-        style = {}
-        if tag_type == "color":
-            hex_val = tag_value.strip().lstrip("#")
-            if len(hex_val) == 3:
-                hex_val = "".join(c * 2 for c in hex_val)
-            if len(hex_val) >= 6:
-                style["color_hex"] = "#" + hex_val[:6]
-        elif tag_type == "size":
-            try:
-                num = re.match(r"[\d.]+", tag_value.strip())
-                if num:
-                    style["font_size_pt"] = float(num.group())
-            except (TypeError, ValueError):
-                pass
-        elif tag_type == "font":
-            style["font_family"] = tag_value.strip()
-        # Strip any nested/adjacent tags from content so they never show as literal text
-        content = _strip_style_tags_from_plain(content)
-        segments.append((style, content))
-        rest = rest[m.end() :]
+    close_re = re.compile(
+        r"\[\s*/\s*(color|size|font)\s*\]\s*",
+        re.IGNORECASE,
+    )
+    segments = []
+    style_stack: List[Dict] = [{}]
+    pos = 0
+
+    def current_style() -> Dict:
+        merged = {}
+        for d in style_stack:
+            merged.update(d)
+        return merged
+
+    while pos < len(line):
+        mo = open_re.match(line, pos)
+        if mo:
+            tag_type = mo.group(1).lower()
+            tag_value = (mo.group(2) or "").strip()
+            new_style = {}
+            if tag_type == "color":
+                hex_val = tag_value.lstrip("#")
+                if len(hex_val) == 3:
+                    hex_val = "".join(c * 2 for c in hex_val)
+                if len(hex_val) >= 6:
+                    new_style["color_hex"] = "#" + hex_val[:6]
+            elif tag_type == "size":
+                try:
+                    num = re.match(r"[\d.]+", tag_value)
+                    if num:
+                        new_style["font_size_pt"] = float(num.group())
+                except (TypeError, ValueError):
+                    pass
+            elif tag_type == "font":
+                if tag_value:
+                    new_style["font_family"] = tag_value
+            style_stack.append(dict(current_style(), **new_style))
+            pos = mo.end()
+            continue
+        mc = close_re.match(line, pos)
+        if mc:
+            if len(style_stack) > 1:
+                style_stack.pop()
+            pos = mc.end()
+            continue
+        end = pos
+        while end < len(line) and line[end] != "[":
+            end += 1
+        text = line[pos:end]
+        if text:
+            segments.append((current_style(), text))
+        pos = end if end < len(line) else len(line)
+
     return segments
 
 

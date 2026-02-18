@@ -5,6 +5,7 @@ venv/
 debug/
 playwright-browsers/
 tmp/
+tmp-from-docker/
 
 # Python cache files
 __pycache__/

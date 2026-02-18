@@ -100,6 +100,51 @@ def _write_llm_prompt_log(
         logger.warning("Could not write LLM prompt log: %s", e)
 
 
+def _write_additional_instructions_debug(
+    additional_instructions: Optional[str],
+    letter_content: Optional[str],
+) -> None:
+    """
+    Write tmp/debug_additional_instructions.txt to trace where additional instructions
+    (e.g. 'Make my name huge') were lost: prompt, LLM response, or our pipeline.
+    """
+    try:
+        _service_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _path = os.path.join(_tmp_dir, "debug_additional_instructions.txt")
+        content = letter_content or ""
+        has_style_tags = (
+            "[size:" in content or "[font:" in content or "[color:" in content
+        )
+        lines = [
+            "=== Additional instructions trace (docx-only flow) ===",
+            "",
+            "1. ADDITIONAL_INSTRUCTIONS (raw from request):",
+            repr(additional_instructions or ""),
+            "   (If empty: request did not send additional_instructions; check frontend/API payload.)",
+            "",
+            "2. CONTENT_CONTAINS_STYLE_TAGS (did LLM add [size:], [font:], [color:]?):",
+            str(has_style_tags),
+            "",
+            "3. CONTENT_PREVIEW (first 1200 chars of content used for docx):",
+            repr(content[:1200]) if content else "(empty)",
+            "",
+            "4. WHERE IT CAN FAIL:",
+            "   A) Not in prompt -> See tmp/llm_prompt_sent.txt, search for 'ADDITIONAL INSTRUCTIONS' or your note.",
+            "   B) LLM ignored it -> See tmp/llm_response_received.txt, search for your name or [size: or [font:.",
+            "   C) Content has tags but docx does not -> Our pipeline (docx_generator) stripped or did not apply.",
+            "   D) Content has no style tags -> LLM did not add the styling.",
+            "",
+        ]
+        with open(_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        logger.info("Wrote additional instructions debug trace to %s", _path)
+    except Exception as e:
+        logger.warning("Could not write debug_additional_instructions.txt: %s", e)
+
+
 def _write_llm_response_log(llm: str, response_text: str) -> None:
     """
     Write the exact raw response from the LLM to tmp/llm_response_received.txt
@@ -1051,6 +1096,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.info("Removed 'content ' prefix from LLM response")
             if today_date_iso and today_date and today_date != today_date_iso:
                 letter_content = letter_content.replace(today_date_iso, today_date)
+            _write_additional_instructions_debug(additional_instructions, letter_content)
             return {"content": letter_content}
 
         # Legacy flow: markdown + html
