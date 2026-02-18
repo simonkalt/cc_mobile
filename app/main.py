@@ -570,6 +570,45 @@ async def debug_static_paths():
     }
 
 
+# Debug endpoint to verify tmp/ is writable (e.g. in Docker: curl http://localhost:PORT/debug/docx-tmp)
+@app.get("/debug/docx-tmp", dependencies=[])
+async def debug_docx_tmp():
+    """
+    Try to write a test file under tmp/ and return paths and results.
+    Use from host: curl http://localhost:PORT/debug/docx-tmp
+    Then: docker exec cc-mobile-api ls -la /app/tmp  (use paths from response)
+    """
+    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cwd = os.getcwd()
+    results = []
+    for label, base in [("project_root", app_dir), ("cwd", cwd)]:
+        tmp_dir = os.path.join(base, "tmp")
+        abs_tmp = os.path.abspath(tmp_dir)
+        try:
+            os.makedirs(tmp_dir, exist_ok=True)
+            test_path = os.path.join(tmp_dir, "docx-tmp-test.txt")
+            with open(test_path, "w", encoding="utf-8") as f:
+                f.write("debug test write\n")
+            listing = os.listdir(tmp_dir)
+            results.append({
+                "base": label,
+                "tmp_abs": abs_tmp,
+                "writable": True,
+                "listing": listing,
+            })
+        except Exception as e:
+            results.append({
+                "base": label,
+                "tmp_abs": abs_tmp,
+                "writable": False,
+                "error": str(e),
+            })
+    return {
+        "message": "Check tmp writability; in Docker use paths below with docker exec CONTAINER ls -la PATH",
+        "results": results,
+    }
+
+
 # Fallback route handler for website (if mount doesn't work)
 @app.get("/website", response_class=HTMLResponse)
 @app.get("/website/", response_class=HTMLResponse)

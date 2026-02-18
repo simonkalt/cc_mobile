@@ -100,15 +100,14 @@ def load_system_prompt() -> str:
 
 
 def _default_system_prompt() -> str:
-    """Default system prompt when JSON is missing or invalid. Uses only the single allowed page-formatting paragraph."""
+    """Default system prompt when JSON is missing or invalid. Asks for 'content' (plain text) for docx-only flow."""
     return (
         "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. "
-        "Return a one-field JSON object: 'markdown'. Do not return HTML. "
-        "HEADER LAYOUT (required): First group: your address (one line) then your phone (one line). Second group: hiring manager (one line) then company (one line). After that, two line breaks before the date/Re:/Dear. "
-        "PAGE FORMATTING (for DOCX output): All attempts to fit the resulting letter to one 8 1/2 x 11\" page must be made. "
-        "Consider all of these factors: page size, font sizes, margins, important job alignments when calculating what and how much text to put on the page. "
-        "If content suffers due to lack of job and resume alignment, you may continue to a 2nd page. "
-        "Output markdown that converts cleanly to DOCX."
+        "Return a JSON object with exactly one field: \"content\". The value of \"content\" is the full cover letter as plain text. "
+        "Do not use HTML or full Markdown. Use only newlines for layout. For emphasis use **text** for bold and *text* for italic. "
+        "HEADER LAYOUT: Your address, phone, then hiring manager, company, then date, Re:, salutation (e.g. Dear X,). Two newlines before the first body paragraph. "
+        "Between every body paragraph use two newlines. Before the closing (e.g. Sincerely,) use two newlines. After Sincerely, one newline then the signature line. "
+        "PAGE LENGTH: Fit the letter on one 8.5 x 11\" page when possible; if content would suffer, you may continue to a second page."
     )
 
 

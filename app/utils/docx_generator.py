@@ -99,7 +99,11 @@ class _HTMLToBlocksParser(HTMLParser):
         tag = tag.lower()
         if tag in ("p", "div", "br"):
             if tag == "br":
-                self._current_runs.append({"line_break": True})
+                # Double <br/> = paragraph break (new <w:p>); single <br/> = line break
+                if self._current_runs and self._current_runs[-1].get("line_break"):
+                    self._emit_block()
+                else:
+                    self._current_runs.append({"line_break": True})
             else:
                 self._emit_block()
         elif tag in ("strong", "b"):
@@ -234,22 +238,174 @@ def _html_to_plain_paragraphs(html: str) -> list:
 #     return "\n\n".join(out)
 
 
+def _strip_html_from_plain(text: str) -> str:
+    """Remove HTML tags and decode entities from plain-text content so the docx never shows raw HTML."""
+    if not text:
+        return ""
+    s = re.sub(r"<[^>]+>", "", text)
+    s = htmllib.unescape(s)
+    return s
+
+
 def _ensure_paragraph_breaks(text: str) -> str:
     """
-    If content has no double newlines but has single newlines, insert \\n\\n at likely
-    paragraph boundaries (sentence end . ? ! followed by newline and capital letter)
-    so the docx gets multiple <w:p> instead of one.
+    Ensure we have \\n\\n at paragraph boundaries so the docx gets multiple <w:p>.
+    If content already has \\n\\n, keep it. Otherwise insert \\n\\n at every sentence
+    boundary: . ? ! followed by (newline or space) and then a capital letter.
+    Avoids splitting after abbreviations (Mr., Dr.) by requiring 3+ chars before .?!
+    for inline boundaries.
     """
-    if not text or "\n\n" in text:
-        return text or ""
+    if not text:
+        return ""
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    # After sentence-ending punctuation + optional space, newline, then capital letter → paragraph break
-    normalized = re.sub(r"([.?!])\s*\n(\s*[A-Z])", r"\1\n\n\2", normalized)
+    if "\n\n" in normalized:
+        return normalized
+    # 1) .?! then newline(s) then capital — likely real paragraph break
+    normalized = re.sub(r"([.?!])\s*\n+\s*([A-Z])", r"\1\n\n\2", normalized)
+    if "\n\n" in normalized:
+        return normalized
+    # 2) Inline: .?! then space(s) or no space, then capital. Require 3+ chars before .?!
+    # so we don't split "Mr. Smith" or "Dr. Jones"
+    normalized = re.sub(r"(?<=.{3})([.?!])\s{2,}([A-Z])", r"\1\n\n\2", normalized)
+    normalized = re.sub(r"(?<=.{3})([.?!])\s+([A-Z])", r"\1\n\n\2", normalized)
+    normalized = re.sub(r"(?<=.{3})([.?!])([A-Z])", r"\1\n\n\2", normalized)
     return normalized
 
 
+def _strip_style_tags_from_plain(text: str) -> str:
+    """
+    Remove only the tag delimiters [tag:value] and [/tag], leaving all content in place.
+    So tags never appear in output and we never remove or replace content.
+    """
+    if not text:
+        return text
+    # Remove opening tags: [color:#x], [ size : 14pt ], [font: Arial]
+    text = re.sub(
+        r"\[\s*(?:color|size|font)\s*:\s*[^\]]+\]",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Remove closing tags: [/color], [ / size ]
+    text = re.sub(
+        r"\[\s*/\s*(?:color|size|font)\s*\]",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text
+
+
+def _parse_style_segments(line: str) -> List[tuple]:
+    """
+    Split line by [color:#xxx]...[/color], [size:Npt]...[/size], [font:Name]...[/font].
+    Returns list of (style_dict, text). style_dict may have color_hex, font_size_pt, font_family.
+    Revert: remove this and have _plain_line_to_runs ignore style tags.
+    """
+    segments = []
+    rest = line
+    # Match [tag:value]...[/tag] with optional whitespace so LLM output is matched
+    pattern = re.compile(
+        r"\[\s*(color|size|font)\s*:\s*([^\]]+)\]\s*(.*?)\s*\[\s*/\s*\1\s*\]",
+        re.DOTALL | re.IGNORECASE,
+    )
+    while rest:
+        m = pattern.search(rest)
+        if not m:
+            # Strip any remaining tag-like spans so they never show in the doc
+            rest = _strip_style_tags_from_plain(rest)
+            segments.append(({}, rest))
+            break
+        tag_type, tag_value, content = m.group(1).lower(), m.group(2), m.group(3)
+        before = rest[: m.start()]
+        if before:
+            before = _strip_style_tags_from_plain(before)
+            if before:
+                segments.append(({}, before))
+        style = {}
+        if tag_type == "color":
+            hex_val = tag_value.strip().lstrip("#")
+            if len(hex_val) == 3:
+                hex_val = "".join(c * 2 for c in hex_val)
+            if len(hex_val) >= 6:
+                style["color_hex"] = "#" + hex_val[:6]
+        elif tag_type == "size":
+            try:
+                num = re.match(r"[\d.]+", tag_value.strip())
+                if num:
+                    style["font_size_pt"] = float(num.group())
+            except (TypeError, ValueError):
+                pass
+        elif tag_type == "font":
+            style["font_family"] = tag_value.strip()
+        # Strip any nested/adjacent tags from content so they never show as literal text
+        content = _strip_style_tags_from_plain(content)
+        segments.append((style, content))
+        rest = rest[m.end() :]
+    return segments
+
+
+def _bold_italic_to_runs(text: str) -> List[Dict]:
+    """Parse **bold**, *italic*, __bold__, _italic_ only; return list of runs (text, bold, italic)."""
+    runs = []
+    rest = text
+    while rest:
+        m = re.search(r"\*\*(.+?)\*\*", rest)
+        if m:
+            before = rest[: m.start()]
+            if before:
+                runs.append({"text": before, "bold": False, "italic": False})
+            runs.append({"text": m.group(1), "bold": True, "italic": False})
+            rest = rest[m.end() :]
+            continue
+        m = re.search(r"\*(.+?)\*", rest)
+        if m:
+            before = rest[: m.start()]
+            if before:
+                runs.append({"text": before, "bold": False, "italic": False})
+            runs.append({"text": m.group(1), "bold": False, "italic": True})
+            rest = rest[m.end() :]
+            continue
+        m = re.search(r"__(.+?)__", rest)
+        if m:
+            before = rest[: m.start()]
+            if before:
+                runs.append({"text": before, "bold": False, "italic": False})
+            runs.append({"text": m.group(1), "bold": True, "italic": False})
+            rest = rest[m.end() :]
+            continue
+        m = re.search(r"_(.+?)_", rest)
+        if m:
+            before = rest[: m.start()]
+            if before:
+                runs.append({"text": before, "bold": False, "italic": False})
+            runs.append({"text": m.group(1), "bold": False, "italic": True})
+            rest = rest[m.end() :]
+            continue
+        runs.append({"text": rest, "bold": False, "italic": False})
+        break
+    return runs if runs else [{"text": text, "bold": False, "italic": False}]
+
+
+def _plain_line_to_runs(line: str) -> List[Dict]:
+    """Parse one line: [color:#x][/color], [size:Npt][/size], [font:Name][/font] plus **bold** and *italic*."""
+    runs = []
+    for style_dict, segment_text in _parse_style_segments(line):
+        for run in _bold_italic_to_runs(segment_text):
+            run = dict(run)
+            if style_dict:
+                if "color_hex" in style_dict:
+                    run["color_hex"] = style_dict["color_hex"]
+                if "font_size_pt" in style_dict:
+                    run["font_size_pt"] = style_dict["font_size_pt"]
+                if "font_family" in style_dict:
+                    run["font_family"] = style_dict["font_family"]
+            runs.append(run)
+    return runs if runs else [{"text": line, "bold": False, "italic": False}]
+
+
 def _plain_text_to_blocks(text: str) -> List[Dict]:
-    """One rule only: \\n\\n = new paragraph (<w:p>); \\n = line break (<w:br/>) within paragraph."""
+    """\\n\\n = new paragraph (<w:p>); \\n = line break within paragraph. ** and * = bold/italic."""
     if not text:
         return []
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -260,7 +416,7 @@ def _plain_text_to_blocks(text: str) -> List[Dict]:
         lines = para.split("\n")
         runs = []
         for i, line in enumerate(lines):
-            runs.append({"text": line, "bold": False, "italic": False})
+            runs.extend(_plain_line_to_runs(line))
             if i < len(lines) - 1:
                 runs.append({"line_break": True})
         blocks.append({"type": "p", "runs": runs})
@@ -366,7 +522,8 @@ def build_docx_from_content(
         line_height = 1.6
 
     if from_plain_text:
-        blocks = _plain_text_to_blocks(content or "")
+        content = _strip_html_from_plain(content or "")
+        blocks = _plain_text_to_blocks(content)
     elif from_html:
         blocks = _html_to_blocks(content)
     else:
@@ -437,26 +594,35 @@ def build_docx_from_content(
     buf.seek(0)
     docx_bytes = buf.read()
 
-    # Debug: write first docx from content to tmp/ for inspection (paragraph structure)
-    if from_plain_text and content:
+    # Debug: always write docx + info to tmp/ after every build (so we see which path ran: plain_text vs html vs markdown).
+    _source = "plain_text" if from_plain_text else ("html" if from_html else "markdown")
+    _written = []
+    _bases = [
+        os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")),
+        os.getcwd(),
+    ]
+    for _base in _bases:
+        _tmp = os.path.join(_base, "tmp")
+        _docx_path = os.path.join(_tmp, "raw-debug.docx")
+        _info_path = os.path.join(_tmp, "raw-debug-info.txt")
         try:
-            _dir = os.path.dirname(os.path.abspath(__file__))
-            _root = os.path.normpath(os.path.join(_dir, "..", ".."))
-            _tmp = os.path.join(_root, "tmp")
             os.makedirs(_tmp, exist_ok=True)
-            _docx_path = os.path.join(_tmp, "raw-debug.docx")
-            _info_path = os.path.join(_tmp, "raw-debug-info.txt")
             with open(_docx_path, "wb") as f:
                 f.write(docx_bytes)
             with open(_info_path, "w", encoding="utf-8") as f:
+                f.write(f"source={_source}\n")
                 f.write(f"block_count={len(blocks)}\n")
-                has_double = "\n\n" in (content or "")
+                raw = (content or "")[:1200]
+                has_double = "\n\n" in raw
                 f.write(f"content_has_double_newline={has_double}\n")
-                preview = (content or "")[:1200]
-                f.write(f"content_preview (repr)=\n{repr(preview)}\n")
-            logger.debug("Wrote tmp/raw-debug.docx and tmp/raw-debug-info.txt for conversion check")
+                f.write(f"content_preview (repr)=\n{repr(raw)}\n")
+            _written.append(os.path.abspath(_tmp))
         except Exception as e:
-            logger.debug("Could not write tmp debug docx: %s", e)
+            logger.warning("Docx debug: could not write to %s: %s", os.path.abspath(_tmp), e)
+    if _written:
+        logger.info("Docx debug: wrote raw-debug.docx, raw-debug-info.txt (source=%s, blocks=%s) to %s", _source, len(blocks), _written)
+    else:
+        logger.warning("Docx debug: no tmp dir was writable")
 
     return docx_bytes
 

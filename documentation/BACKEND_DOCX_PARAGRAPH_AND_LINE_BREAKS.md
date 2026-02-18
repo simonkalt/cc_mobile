@@ -121,3 +121,17 @@ This document tells the **backend** how to generate cover-letter .docx files so 
 | Verify                         | Unzip the .docx, inspect `word/document.xml`, and confirm multiple `<w:p>` in the body.                  |
 
 The frontend uses only `docxBase64` for display and does not use `content` for the letter body. Ensuring the .docx has this structure will fix missing paragraph and line breaks in the app (and in Word and in docx-to-pdf output).
+
+---
+
+## Optional: Style tags in plain-text content (revertable)
+
+When building from **plain-text** `content`, the pipeline supports optional tags so the LLM can set color, font size, and font family without HTML:
+
+- `[color:#RRGGBB]text[/color]` — e.g. `[color:#1f4e79]Company Name[/color]`
+- `[size:Npt]text[/size]` — e.g. `[size:14pt]heading[/size]`
+- `[font:Name]text[/font]` — e.g. `[font:Arial]text[/font]`
+
+Bold/italic remain `**text**` and `*text*`. Implemented in `app/utils/docx_generator.py`: `_parse_style_segments`, `_bold_italic_to_runs`, and `_plain_line_to_runs` (which composes them).
+
+**To revert:** Remove `_parse_style_segments` and `_bold_italic_to_runs`; restore `_plain_line_to_runs` to a single loop that only parses `**`/`*`/`__`/`_` and does not call `_parse_style_segments`. Remove the style-tag sentence from `system_prompt.json`.
