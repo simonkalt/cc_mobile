@@ -28,6 +28,7 @@ class JobInfoRequest(BaseModel):
     phone_number: str = ""
     user_id: Optional[str] = None  # Optional user ID to access custom personality profiles
     user_email: Optional[str] = None  # Optional user email to access custom personality profiles
+    print_properties: Optional[Dict[str, Any]] = None  # Optional: margins (inches), fontFamily, fontSize, lineHeight, pageSize; applied when building .docx
 
 
 class CoverLetterWithTextResumeRequest(BaseModel):
@@ -45,6 +46,7 @@ class CoverLetterWithTextResumeRequest(BaseModel):
     phone_number: str = ""
     user_id: Optional[str] = None  # Optional user ID to access custom personality profiles
     user_email: Optional[str] = None  # Optional user email to access custom personality profiles
+    print_properties: Optional[Dict[str, Any]] = None  # Optional: margins (inches), fontFamily, fontSize, lineHeight, pageSize; applied when building .docx
 
 
 class SaveCoverLetterRequest(BaseModel):

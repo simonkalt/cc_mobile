@@ -61,6 +61,7 @@ Generate a cover letter based on job information. This endpoint accepts resume c
 - `phone_number` (optional): Phone number (default: "")
 - `user_id` (optional): User ID for accessing custom personality profiles
 - `user_email` (optional): User email for accessing custom personality profiles (will be resolved to user_id)
+- `print_properties` (optional): User print/layout settings. **If provided, the backend applies these when creating the .docx** so the first-run letter has the correct margins and font. See [print_properties shape](#print_properties-shape-request) below.
 
 **Response (200 OK):**
 
@@ -111,7 +112,7 @@ Generate a cover letter using explicitly pasted resume text. This endpoint is de
 - Address and phone number
 - Job description
 
-The only difference is that this endpoint uses `resume_text` (plain text) instead of `resume` (which can be text, S3 key, or base64 PDF).
+The only difference is that this endpoint uses `resume_text` (plain text) instead of `resume` (which can be text, S3 key, or base64 PDF). The frontend may also send `print_properties` (margins, fontFamily, fontSize, etc.) so the server can apply user margins when creating the .docx.
 
 **Use this endpoint when:**
 
@@ -156,6 +157,7 @@ All fields are identical to `/api/job-info` except for the resume field:
 - `phone_number` (optional): Phone number (default: "")
 - `user_id` (optional): User ID for accessing custom personality profiles and user preferences
 - `user_email` (optional): User email for accessing custom personality profiles (will be resolved to user_id)
+- `print_properties` (optional): Same as `/api/job-info`. See [print_properties shape](#print_properties-shape-request) below.
 
 **Response (200 OK):** Same as `/api/job-info`: `docxBase64`, `docxTemplateHints`, optional `content`. No `html` or `markdown`.
 
@@ -164,6 +166,45 @@ All fields are identical to `/api/job-info` except for the resume field:
 - `400 Bad Request`: Missing required fields or invalid request format
 - `500 Internal Server Error`: Error generating cover letter
 - `503 Service Unavailable`: LLM service unavailable
+
+---
+
+### print_properties shape (request)
+
+The client may send `print_properties` on **POST /api/job-info** and **POST /api/cover-letter/generate-with-text-resume**. The backend applies it when building the .docx so the first-run letter has the correct margins and font.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `margins` | `{ top, right, bottom, left }` | Page margins in **inches** (e.g. `0.75`). All optional. |
+| `fontFamily` | string | Optional. Default font (e.g. `"Times New Roman"`). |
+| `fontSize` | number | Optional. Default font size in points (e.g. `12`). |
+| `lineHeight` | number | Optional. Line height multiplier (e.g. `1.6`). |
+| `pageSize` | `{ width, height }` | Optional. Page size in **inches** (e.g. `8.5`, `11`). |
+
+Example request fragment:
+
+```json
+"print_properties": {
+  "margins": { "top": 0.75, "right": 0.75, "bottom": 0.75, "left": 0.75 },
+  "fontFamily": "Times New Roman",
+  "fontSize": 12,
+  "lineHeight": 1.6,
+  "pageSize": { "width": 8.5, "height": 11 }
+}
+```
+
+If the server does not support `print_properties`, it ignores the field; the client can still apply margins on load when the WebView parse/serialize succeeds.
+
+---
+
+### Expected response to the client
+
+- **Request:** The backend accepts optional `print_properties` in the JSON body for **POST /api/job-info** and **POST /api/cover-letter/generate-with-text-resume**, with the shape above. Request body `print_properties` takes precedence over user preferences when building the .docx.
+- **Response:** Unchanged. The server returns:
+  - `docxBase64`: base64-encoded .docx (with margins and font applied when `print_properties` was sent)
+  - `docxTemplateHints`: metadata (version, fields, style profile)
+  - `content`: optional plain text of the letter
+- No `html` or `markdown` in the response (docx-only contract). Once the server applies margins and optional font/pageSize when generating the .docx, the "initial generation not applying user margins on first run" issue is addressed at the source.
 
 ---
 

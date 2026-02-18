@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from docx import Document
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Pt, RGBColor, Inches
     from docx.enum.text import WD_BREAK
 
     DOCX_AVAILABLE = True
@@ -26,6 +26,7 @@ except ImportError:
     DOCX_AVAILABLE = False
     Document = None
     RGBColor = None
+    Inches = None
     WD_BREAK = None
 
 
@@ -573,6 +574,32 @@ def build_docx_from_content(
             first_run["text"] = re.sub(r"^[•\-*]\s+", "", first_text)
 
     doc = Document()
+    # Apply section margins and page size from print_properties (client sends margins in inches)
+    if DOCX_AVAILABLE and Inches is not None:
+        section = doc.sections[0]
+        margins = props.get("margins")
+        if isinstance(margins, dict):
+            for key, attr in (("top", "top_margin"), ("right", "right_margin"), ("bottom", "bottom_margin"), ("left", "left_margin")):
+                val = margins.get(key)
+                if val is not None:
+                    try:
+                        setattr(section, attr, Inches(float(val)))
+                    except (TypeError, ValueError):
+                        pass
+        page_size = props.get("pageSize")
+        if isinstance(page_size, dict):
+            w = page_size.get("width")
+            h = page_size.get("height")
+            if w is not None:
+                try:
+                    section.page_width = Inches(float(w))
+                except (TypeError, ValueError):
+                    pass
+            if h is not None:
+                try:
+                    section.page_height = Inches(float(h))
+                except (TypeError, ValueError):
+                    pass
     style = doc.styles["Normal"]
     style.font.name = font_family
     style.font.size = Pt(font_size_pt)

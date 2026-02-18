@@ -177,8 +177,9 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
     Docx-only flow: use payload["content"] with use_plain_text=True.
     """
     try:
-        print_properties = None
-        if getattr(req, "user_id", None):
+        # Prefer print_properties from request body (client send); fall back to user preferences
+        print_properties = getattr(req, "print_properties", None)
+        if not print_properties and getattr(req, "user_id", None):
             try:
                 user = get_user_by_id(req.user_id)
                 if user and user.preferences:
