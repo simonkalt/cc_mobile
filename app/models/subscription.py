@@ -7,15 +7,19 @@ from datetime import datetime
 
 
 class SubscriptionResponse(BaseModel):
-    """Subscription information response"""
+    """Subscription information response. Includes generation_credits/max_credits for free tier (per BACKEND_STRIPE_REQUIREMENTS).
+    Frontend matches current plan by product_id and/or price_id (BACKEND_SUBSCRIPTION_IDS_REQUIREMENT)."""
     subscriptionId: Optional[str] = None
     subscriptionStatus: str = "free"  # free, active, canceled, past_due, trialing
-    subscriptionPlan: str = "free"  # free, basic, premium, enterprise
-    productId: Optional[str] = None  # Stripe Product ID
+    subscriptionPlan: Optional[str] = None  # "monthly", "annual", or "free" — frontend expects monthly/annual for paid
+    productId: Optional[str] = None  # Stripe Product ID (for plan matching)
+    priceId: Optional[str] = None  # Stripe Price ID (for plan matching; app matches by product_id or price_id)
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
     subscriptionEndedAt: Optional[datetime] = None  # When subscription actually ended (for canceled subscriptions)
     lastPaymentDate: Optional[datetime] = None
     stripeCustomerId: Optional[str] = None
+    generation_credits: Optional[int] = None  # Remaining credits (free and paid)
+    max_credits: Optional[int] = None  # Max credits for tier
 
 
 class CreatePaymentIntentRequest(BaseModel):

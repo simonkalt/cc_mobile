@@ -101,6 +101,17 @@ else:
     logger.warning("Stripe library not available - subscription features will not work")
 
 
+def _price_id_to_plan_name(price_id: Optional[str]) -> str:
+    """Map Stripe price_id to frontend plan name 'monthly' | 'annual' per BACKEND_STRIPE_REQUIREMENTS."""
+    if not price_id:
+        return "free"
+    if settings.STRIPE_PRICE_ID_MONTHLY and price_id == settings.STRIPE_PRICE_ID_MONTHLY:
+        return "monthly"
+    if settings.STRIPE_PRICE_ID_ANNUAL and price_id == settings.STRIPE_PRICE_ID_ANNUAL:
+        return "annual"
+    return price_id
+
+
 def get_user_subscription(user_id: str) -> SubscriptionResponse:
     """
     Get user's subscription information from database, automatically syncing with Stripe.
@@ -145,6 +156,9 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     mongo_status = user.get("subscriptionStatus", "free")
     mongo_plan = user.get("subscriptionPlan", "free")
     product_id = user.get("subscriptionProductId")
+    price_id = user.get("subscriptionPriceId") or (
+        mongo_plan if mongo_plan and str(mongo_plan).startswith("price_") else None
+    )
     stripe_customer_id = user.get("stripeCustomerId")
     current_period_end = user.get("subscriptionCurrentPeriodEnd")
     subscription_ended_at = user.get("subscriptionEndedAt")
@@ -193,14 +207,16 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                         else None
                     )
 
-                    # Get product ID from subscription if we don't have it
-                    if not product_id:
-                        items_data = (
-                            subscription.items.data if hasattr(subscription.items, "data") else []
-                        )
-                        if items_data and len(items_data) > 0:
-                            price_obj = items_data[0].price
+                    # Get product_id and price_id from subscription (for frontend plan matching)
+                    items_data = (
+                        subscription.items.data if hasattr(subscription.items, "data") else []
+                    )
+                    if items_data and len(items_data) > 0:
+                        price_obj = items_data[0].price
+                        if not price_id and hasattr(price_obj, "id"):
+                            price_id = price_obj.id if isinstance(price_obj.id, str) else str(price_obj)
 
+                        if not product_id:
                             # Try to get product ID from expanded price object
                             if hasattr(price_obj, "product") and price_obj.product:
                                 if isinstance(price_obj.product, str):
@@ -209,10 +225,7 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                                     product_id = price_obj.product.id
 
                             # If not expanded, retrieve price separately
-                            if not product_id:
-                                price_id = (
-                                    price_obj.id if hasattr(price_obj, "id") else str(price_obj)
-                                )
+                            if not product_id and price_id:
                                 try:
                                     price = stripe_to_use.Price.retrieve(
                                         price_id, expand=["product"]
@@ -240,6 +253,7 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                             subscription_status=expected_status,
                             subscription_plan=mongo_plan,  # Keep existing plan name
                             subscription_product_id=product_id,
+                            subscription_price_id=price_id,
                             current_period_end=stripe_period_end,
                             subscription_ended_at=stripe_ended_at,
                         )
@@ -249,11 +263,20 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                         current_period_end = stripe_period_end
                         subscription_ended_at = stripe_ended_at
 
-                    # Update product_id if we found it
+                    # Always use Stripe's current_period_end for response (BACKEND_SUBSCRIPTION_IDS_REQUIREMENT §4)
+                    if stripe_period_end is not None:
+                        current_period_end = stripe_period_end
+                    if stripe_ended_at is not None:
+                        subscription_ended_at = stripe_ended_at
+
+                    # Persist product_id and price_id if we found them (for frontend plan matching)
+                    updates = {}
                     if product_id and not user.get("subscriptionProductId"):
-                        collection.update_one(
-                            {"_id": user_id_obj}, {"$set": {"subscriptionProductId": product_id}}
-                        )
+                        updates["subscriptionProductId"] = product_id
+                    if price_id and not user.get("subscriptionPriceId"):
+                        updates["subscriptionPriceId"] = price_id
+                    if updates:
+                        collection.update_one({"_id": user_id_obj}, {"$set": updates})
 
                 except Exception as e:
                     # Check if subscription doesn't exist in Stripe
@@ -320,6 +343,8 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                         )
                         if items_data and len(items_data) > 0:
                             price_obj = items_data[0].price
+                            if not price_id and hasattr(price_obj, "id"):
+                                price_id = price_obj.id if isinstance(price_obj.id, str) else str(price_obj)
                             if hasattr(price_obj, "product") and price_obj.product:
                                 if isinstance(price_obj.product, str):
                                     product_id = price_obj.product
@@ -344,6 +369,7 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                             subscription_status=map_stripe_status(subscription.status),
                             subscription_plan=mongo_plan,  # Keep existing plan or could try to determine from product
                             subscription_product_id=product_id,
+                            subscription_price_id=price_id,
                             current_period_end=stripe_period_end,
                             subscription_ended_at=stripe_ended_at,
                         )
@@ -360,16 +386,36 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                         f"Error checking Stripe subscriptions for customer {stripe_customer_id}: {e}"
                     )
 
-    # Return the (potentially updated) subscription data
+    # Map stored plan (may be price_id) to frontend-friendly "monthly" | "annual" per BACKEND_STRIPE_REQUIREMENTS
+    display_plan = mongo_plan
+    if mongo_plan and mongo_plan not in ("free", "monthly", "annual"):
+        if settings.STRIPE_PRICE_ID_MONTHLY and mongo_plan == settings.STRIPE_PRICE_ID_MONTHLY:
+            display_plan = "monthly"
+        elif settings.STRIPE_PRICE_ID_ANNUAL and mongo_plan == settings.STRIPE_PRICE_ID_ANNUAL:
+            display_plan = "annual"
+    if mongo_status == "free":
+        display_plan = None  # Doc: free tier returns subscriptionPlan null
+
+    # Credits: include for free and paid so frontend can show them (BACKEND_STRIPE_REQUIREMENTS)
+    generation_credits = user.get("generation_credits")
+    max_credits = user.get("max_credits")
+    if generation_credits is None:
+        generation_credits = 10
+    if max_credits is None:
+        max_credits = 10
+
     return SubscriptionResponse(
         subscriptionId=mongo_subscription_id,
         subscriptionStatus=mongo_status,
-        subscriptionPlan=mongo_plan,
+        subscriptionPlan=display_plan,
         productId=product_id,
+        priceId=price_id,
         subscriptionCurrentPeriodEnd=current_period_end,
         subscriptionEndedAt=subscription_ended_at,
         lastPaymentDate=last_payment_date,
         stripeCustomerId=stripe_customer_id,
+        generation_credits=generation_credits,
+        max_credits=max_credits,
     )
 
 
@@ -379,6 +425,7 @@ def update_user_subscription(
     subscription_status: str = "free",
     subscription_plan: str = "free",
     subscription_product_id: Optional[str] = None,
+    subscription_price_id: Optional[str] = None,
     stripe_customer_id: Optional[str] = None,
     current_period_end: Optional[datetime] = None,
     subscription_ended_at: Optional[datetime] = None,
@@ -393,6 +440,7 @@ def update_user_subscription(
         subscription_status: Subscription status
         subscription_plan: Subscription plan name
         subscription_product_id: Stripe Product ID
+        subscription_price_id: Stripe Price ID (for frontend plan matching)
         stripe_customer_id: Stripe customer ID
         current_period_end: Current period end date
         subscription_ended_at: When subscription actually ended (for canceled subscriptions)
@@ -423,6 +471,7 @@ def update_user_subscription(
         "subscriptionStatus": subscription_status,
         "subscriptionPlan": subscription_plan,
         "subscriptionProductId": subscription_product_id,
+        "subscriptionPriceId": subscription_price_id,
         "subscriptionCurrentPeriodEnd": current_period_end,
         "subscriptionEndedAt": subscription_ended_at,
         "lastPaymentDate": last_payment_date,
@@ -1226,14 +1275,15 @@ def create_subscription(
                         f"ℹ️ Invoice PaymentIntent {invoice_pi_id} status: {invoice_payment_intent.status}"
                     )
 
-        # Update user subscription info
+        # Update user subscription info (store "monthly"/"annual" for frontend per BACKEND_STRIPE_REQUIREMENTS)
         current_period_end = datetime.fromtimestamp(subscription.current_period_end)
         update_user_subscription(
             user_id=user_id,
             subscription_id=subscription.id,
             subscription_status=subscription.status,
-            subscription_plan=price_id,  # Store price_id as plan identifier
+            subscription_plan=_price_id_to_plan_name(price_id),
             subscription_product_id=product_id,  # Store product ID
+            subscription_price_id=price_id,  # For frontend plan matching (BACKEND_SUBSCRIPTION_IDS_REQUIREMENT)
             stripe_customer_id=customer_id,
             current_period_end=current_period_end,
         )
@@ -1314,14 +1364,15 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             metadata={"user_id": user_id},
         )
 
-        # Update user subscription info
+        # Update user subscription info (store "monthly"/"annual" for frontend per BACKEND_STRIPE_REQUIREMENTS)
         current_period_end = datetime.fromtimestamp(updated_subscription.current_period_end)
         update_user_subscription(
             user_id=user_id,
             subscription_id=updated_subscription.id,
             subscription_status=updated_subscription.status,
-            subscription_plan=new_price_id,
+            subscription_plan=_price_id_to_plan_name(new_price_id),
             subscription_product_id=product_id,  # Store product ID
+            subscription_price_id=new_price_id,  # For frontend plan matching (BACKEND_SUBSCRIPTION_IDS_REQUIREMENT)
             current_period_end=current_period_end,
         )
 
@@ -1867,53 +1918,51 @@ def get_subscription_plans(force_refresh: bool = False) -> dict:
             plans = []
             stripe_fetch_successful = False
 
-    # FALLBACK COMMENTED OUT FOR DEBUGGING - Remove fallback to environment variables
-    # This makes it easier to see what Stripe is actually returning
-    # if not plans and not stripe_fetch_successful:
-    #     logger.warning(
-    #         "⚠️ No plans found from Stripe and fetch failed, falling back to environment variables (STRIPE_PRICE_ID_MONTHLY, STRIPE_PRICE_ID_ANNUAL)"
-    #     )
-    #     monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
-    #     annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
-    #
-    #     if monthly_price_id:
-    #         plans.append(
-    #             {
-    #                 "id": "monthly",
-    #                 "name": "Monthly",
-    #                 "interval": "month",
-    #                 "interval_count": 1,
-    #                 "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
-    #                 "priceId": monthly_price_id,
-    #                 "features": [
-    #                     "Unlimited cover letter generations",
-    #                     "All AI models available",
-    #                     "Priority support",
-    #                     "Cancel anytime",
-    #                 ],
-    #                 "popular": False,
-    #             }
-    #         )
-    #
-    #     if annual_price_id:
-    #         plans.append(
-    #             {
-    #                 "id": "annual",
-    #                 "name": "Annual",
-    #                 "interval": "year",
-    #                 "interval_count": 1,
-    #                 "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
-    #                 "priceId": annual_price_id,
-    #                 "features": [
-    #                     "Unlimited cover letter generations",
-    #                     "All AI models available",
-    #                     "Priority support",
-    #                     "Best value - save with annual billing",
-    #                     "Cancel anytime",
-    #                 ],
-    #                 "popular": True,
-    #             }
-    #         )
+    # Fallback to env when Stripe returns no plans (per BACKEND_STRIPE_REQUIREMENTS)
+    if not plans:
+        if not stripe_fetch_successful:
+            logger.warning(
+                "No plans from Stripe (fetch failed), falling back to STRIPE_PRICE_ID_MONTHLY / STRIPE_PRICE_ID_ANNUAL"
+            )
+        monthly_price_id = settings.STRIPE_PRICE_ID_MONTHLY
+        annual_price_id = settings.STRIPE_PRICE_ID_ANNUAL
+        if monthly_price_id:
+            plans.append(
+                {
+                    "id": "monthly",
+                    "name": "Monthly",
+                    "interval": "month",
+                    "interval_count": 1,
+                    "description": "Perfect for ongoing job applications. Unlimited cover letter generations.",
+                    "priceId": monthly_price_id,
+                    "features": [
+                        "Unlimited cover letter generations",
+                        "All AI models available",
+                        "Priority support",
+                        "Cancel anytime",
+                    ],
+                    "popular": False,
+                }
+            )
+        if annual_price_id:
+            plans.append(
+                {
+                    "id": "annual",
+                    "name": "Annual",
+                    "interval": "year",
+                    "interval_count": 1,
+                    "description": "Best value! Save with annual billing. Unlimited cover letter generations.",
+                    "priceId": annual_price_id,
+                    "features": [
+                        "Unlimited cover letter generations",
+                        "All AI models available",
+                        "Priority support",
+                        "Best value - save with annual billing",
+                        "Cancel anytime",
+                    ],
+                    "popular": True,
+                }
+            )
 
     # Update cache
     result = {"plans": plans}
