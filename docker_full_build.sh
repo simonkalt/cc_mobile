@@ -15,5 +15,4 @@ docker build -t cc-mobile-api .
 # Run the container (single line so -p 8000:8000 is never dropped by shell line-continuation)
 docker run -d --name cc-mobile-api -p 8675:8675 -v "${PWD}:/app" --env-file .env cc-mobile-api python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8675
 
-echo "Port mapping:"
-docker port cc-mobile-api
+docker logs -f cc-mobile-api
