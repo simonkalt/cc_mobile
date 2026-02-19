@@ -31,7 +31,6 @@ RUN apt-get update && apt-get install -y \
     libjpeg62-turbo \
     libffi-dev \
     libssl-dev \
-    default-jre \ 
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -53,4 +52,4 @@ EXPOSE 8000
 
 # ---- Run FastAPI ----
 # CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port $PORT"]
+CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
