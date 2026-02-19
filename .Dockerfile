@@ -5,7 +5,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
-ENV PORT=8000
+# ENV PORT=8000
 
 # ---- System dependencies ----
 # LibreOffice + PDF + WeasyPrint + Playwright deps
@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     libjpeg62-turbo \
     libffi-dev \
     libssl-dev \
-    default-jre \   
+    default-jre \ 
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -52,4 +52,5 @@ COPY . .
 EXPOSE 8000
 
 # ---- Run FastAPI ----
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port $PORT"]
