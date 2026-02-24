@@ -1,8 +1,8 @@
 """
-SMS verification API routes
+SMS verification API routes and Telnyx webhook endpoint
 """
 import logging
-from fastapi import APIRouter, status, HTTPException
+from fastapi import APIRouter, Request, status, HTTPException
 from bson import ObjectId
 
 from app.models.sms import (
@@ -31,10 +31,41 @@ from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password
 from app.utils.user_helpers import USERS_COLLECTION
 from app.utils.sms_utils import normalize_phone_number
+from app.services.telnyx_webhook_service import store_telnyx_message
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sms", tags=["sms"])
+
+
+@router.post("/webhook/telnyx")
+async def telnyx_webhook(request: Request):
+    """
+    Webhook endpoint for Telnyx messaging events (message.received, message.sent, message.finalized).
+    Receives the webhook payload, stores it in the MongoDB 'sms' collection, and returns 200.
+    Telnyx requires a 2xx response within ~2 seconds to acknowledge receipt.
+    """
+    try:
+        body = await request.json()
+    except Exception as e:
+        logger.warning("Telnyx webhook invalid JSON: %s", e)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+    try:
+        inserted_id = store_telnyx_message(body)
+        if inserted_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database unavailable",
+            )
+        return {"ok": True, "id": inserted_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Telnyx webhook store failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to store message",
+        )
 
 
 @router.post("/send-code", response_model=SendVerificationCodeResponse)
