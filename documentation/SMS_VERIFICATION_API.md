@@ -1,6 +1,6 @@
 # SMS Verification API Documentation
 
-RESTful API endpoints for SMS-based verification codes using Twilio integration. Supports password reset, password change, and registration completion workflows.
+RESTful API endpoints for SMS-based verification codes using Telnyx integration. Supports password reset, password change, and registration completion workflows.
 
 ## Base URL
 
@@ -808,7 +808,7 @@ While not implemented in the API, consider implementing rate limiting on the fro
 | 200         | Success               | Request completed successfully                |
 | 400         | Bad Request           | Invalid purpose, missing fields, invalid code |
 | 404         | Not Found             | User not found (except forgot_password)       |
-| 500         | Internal Server Error | Twilio API error, SMS sending failed          |
+| 500         | Internal Server Error | Telnyx API error, SMS sending failed          |
 | 503         | Service Unavailable   | Database connection unavailable               |
 
 ---
@@ -857,9 +857,8 @@ While not implemented in the API, consider implementing rate limiting on the fro
 Ensure these are set in your `.env` file:
 
 ```env
-TWILIO_ACCOUNT_SID=your_account_sid_here
-TWILIO_AUTH_TOKEN=your_auth_token_here
-TWILIO_PHONE_NUMBER=+1234567890
+TELNYX_API_KEY=your_telnyx_api_key_here
+TELNYX_PHONE_NUMBER=+1234567890
 ```
 
 ---
@@ -879,6 +878,6 @@ TWILIO_PHONE_NUMBER=+1234567890
 For issues or questions:
 
 1. Check the error response `detail` field for specific error messages
-2. Verify Twilio credentials are correctly configured
+2. Verify Telnyx API key and phone number are correctly configured
 3. Ensure user has a phone number in their profile
 4. Check server logs for detailed error information

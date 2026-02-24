@@ -74,10 +74,9 @@ class Settings:
     # Optional: where to send user after successful LinkedIn connect (e.g. myapp://linkedin/connected)
     LINKEDIN_SUCCESS_REDIRECT: Optional[str] = os.getenv("LINKEDIN_SUCCESS_REDIRECT")
 
-    # Twilio Configuration
-    TWILIO_ACCOUNT_SID: Optional[str] = os.getenv("TWILIO_ACCOUNT_SID")
-    TWILIO_AUTH_TOKEN: Optional[str] = os.getenv("TWILIO_AUTH_TOKEN")
-    TWILIO_PHONE_NUMBER: Optional[str] = os.getenv("TWILIO_PHONE_NUMBER")
+    # Telnyx SMS Configuration
+    TELNYX_API_KEY: Optional[str] = os.getenv("TELNYX_API_KEY")
+    TELNYX_PHONE_NUMBER: Optional[str] = os.getenv("TELNYX_PHONE_NUMBER")
 
     # Redis Configuration
     REDIS_HOST: Optional[str] = os.getenv("REDIS_HOST")
