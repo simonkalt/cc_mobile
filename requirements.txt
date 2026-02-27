@@ -25,7 +25,7 @@ bcrypt
 uvicorn
 email-validator
 markdown
-# DOCX generation/manipulation for cover letter .docx pipeline
+# DOCX generation/manipulation for cover letter .docx pipeline (incl. OOXML list numbering: numPr, numbering.xml)
 python-docx>=1.1.0
 # System dependency for POST /api/files/docx-to-pdf (not a pip package):
 #   Local: see documentation/LIBREOFFICE_SETUP.md

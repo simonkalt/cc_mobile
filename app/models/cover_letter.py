@@ -78,4 +78,8 @@ class CoverLetterGenerationResponse(BaseModel):
     docxBase64: Optional[str] = None  # .docx file (base64); display/edit this; print preview = docx-to-pdf with this file
     docxTemplateHints: DocxTemplateHints
     content: Optional[str] = None  # Plain text of the letter (optional; frontend uses docx)
+    # When USE_DOCX_COMPONENTS=true, LLM returns these; we assemble .docx from them and may echo in response
+    document_xml: Optional[str] = None
+    numbering_xml: Optional[str] = None
+    styles_xml: Optional[str] = None
 

@@ -623,6 +623,27 @@ You may creatively vary font size, color, and style for lists, tables, headings,
                         f"Added typography baseline to prompt: fontFamily={font_family}, fontSize={font_size}pt"
                     )
 
+    # When USE_DOCX_COMPONENTS: ask LLM to return document as three OOXML components (word/document.xml, numbering.xml, styles.xml)
+    if getattr(settings, "USE_DOCX_COMPONENTS", False):
+        docx_components_instruction = """
+=== OUTPUT FORMAT: DOCX AS XML COMPONENTS (required when this section is present) ===
+Return a JSON object with exactly three string fields. The values must be valid XML for a Word document.
+
+1. "document_xml": Full content of word/document.xml. Root: <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body> ... </w:body></w:document>
+   - Paragraph: <w:p><w:r><w:t>Your text here</w:t></w:r></w:p>
+   - Bullet list item: <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>List item text</w:t></w:r></w:p>
+   - End the body with <w:sectPr/> before </w:body>.
+
+2. "numbering_xml": (optional) Full content of word/numbering.xml defining list/bullet numbering. If you omit or leave empty, the system uses a default.
+
+3. "styles_xml": (optional) Full content of word/styles.xml. If you omit or leave empty, the system uses a default.
+
+Escape quotes inside JSON strings (use \\" for a literal quote). Newlines inside the XML strings are allowed.
+=== END DOCX COMPONENTS ===
+"""
+        critical_instructions = critical_instructions + docx_components_instruction
+        logger.info("DOCX components output format added to prompt (USE_DOCX_COMPONENTS=true)")
+
     # Additional Instructions are passed to the LLM only (below); no parsing or post/pre adorning of the letter here.
 
     # Build message payload (without additional_instructions - it will be appended last to override)
@@ -1091,6 +1112,17 @@ Please incorporate these instructions while maintaining consistency with all oth
             if json_r is None:
                 logger.warning("JSON parse still failed after all fix attempts; re-raising error")
                 raise e
+
+        # Docx components flow: LLM returns document_xml, numbering_xml, styles_xml (when USE_DOCX_COMPONENTS)
+        doc_xml = json_r.get("document_xml")
+        if doc_xml is not None and isinstance(doc_xml, str) and doc_xml.strip():
+            num_xml = json_r.get("numbering_xml")
+            sty_xml = json_r.get("styles_xml")
+            return {
+                "document_xml": doc_xml.strip(),
+                "numbering_xml": (num_xml.strip() if num_xml and isinstance(num_xml, str) else None),
+                "styles_xml": (sty_xml.strip() if sty_xml and isinstance(sty_xml, str) else None),
+            }
 
         # Docx-only flow: LLM returns single field "content" (plain text)
         letter_content = json_r.get("content")

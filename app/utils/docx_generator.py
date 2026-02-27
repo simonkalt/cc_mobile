@@ -4,10 +4,15 @@ Generate a .docx (Word) document from cover letter content (markdown or HTML).
 Preserves bold, italic, and lists in the output. Used so the server can return
 a fully adorned .docx to the client for editing; print preview then uses
 POST /api/files/docx-to-pdf with that (possibly edited) .docx.
+
+When USE_DOCX_COMPONENTS is True, the LLM may return three XML components
+(document_xml, numbering_xml, styles_xml) which we assemble into a .docx via
+build_docx_from_components().
 """
 
 import io
 import os
+import zipfile
 import html as htmllib
 import logging
 import re
@@ -20,6 +25,8 @@ try:
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
     from docx.enum.text import WD_BREAK
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
 
     DOCX_AVAILABLE = True
 except ImportError:
@@ -28,6 +35,8 @@ except ImportError:
     RGBColor = None
     Inches = None
     WD_BREAK = None
+    OxmlElement = None
+    qn = None
 
 
 def _parse_span_style(style_attr: str) -> Dict:
@@ -583,6 +592,85 @@ def _markdown_to_blocks(markdown: str) -> List[Dict]:
     return blocks
 
 
+def _set_paragraph_num_pr(paragraph, ilvl: int, num_id: int) -> None:
+    """Set w:numPr (ilvl, numId) on a paragraph so Word renders it as a list item."""
+    if not DOCX_AVAILABLE or OxmlElement is None or qn is None:
+        return
+    pPr = paragraph._p.get_or_add_pPr()
+    numPr = OxmlElement("w:numPr")
+    ilvl_el = OxmlElement("w:ilvl")
+    ilvl_el.set(qn("w:val"), str(ilvl))
+    numId_el = OxmlElement("w:numId")
+    numId_el.set(qn("w:val"), str(num_id))
+    numPr.append(ilvl_el)
+    numPr.append(numId_el)
+    pPr.append(numPr)
+
+
+def _ensure_docx_list_numbering(doc) -> tuple:
+    """
+    Ensure the document has bullet (numId 100) and decimal (numId 101) list definitions
+    in word/numbering.xml per OOXML. Returns (bullet_num_id, number_num_id) or (None, None).
+    Build elements with OxmlElement to avoid parse_xml attribute escaping issues.
+    """
+    if not DOCX_AVAILABLE or OxmlElement is None or qn is None:
+        return (None, None)
+    try:
+        numbering_part = doc.part.numbering_part
+    except AttributeError:
+        logger.debug("DOCX: no numbering part on document")
+        return (None, None)
+    try:
+        root = numbering_part.element
+    except AttributeError:
+        root = getattr(
+            getattr(numbering_part, "numbering_definitions", None), "_numbering", None
+        )
+    if root is None:
+        return (None, None)
+    # Use high IDs to avoid clashing with template's built-in numbering
+    BULLET_ABSTRACT_ID, BULLET_NUM_ID = 100, 100
+    NUMBER_ABSTRACT_ID, NUMBER_NUM_ID = 101, 101
+
+    def _el(tag: str, attrs: Optional[Dict[str, str]] = None):
+        e = OxmlElement(tag)
+        if attrs:
+            for k, v in attrs.items():
+                e.set(qn(k), str(v))
+        return e
+
+    def _abstract_num(abstract_num_id: int, num_fmt: str, lvl_text: str):
+        abstract = _el("w:abstractNum", {"w:abstractNumId": str(abstract_num_id)})
+        abstract.append(_el("w:multiLevelType", {"w:val": "singleLevel"}))
+        lvl = _el("w:lvl", {"w:ilvl": "0"})
+        lvl.append(_el("w:numFmt", {"w:val": num_fmt}))
+        lvl.append(_el("w:lvlText", {"w:val": lvl_text}))
+        lvl.append(_el("w:lvlJc", {"w:val": "left"}))
+        pPr = OxmlElement("w:pPr")
+        pPr.append(_el("w:ind", {"w:left": "720", "w:hanging": "360"}))
+        lvl.append(pPr)
+        rPr = OxmlElement("w:rPr")
+        rPr.append(_el("w:rFonts", {"w:ascii": "Symbol", "w:hAnsi": "Symbol"}))
+        lvl.append(rPr)
+        abstract.append(lvl)
+        return abstract
+
+    def _num(num_id: int, abstract_num_id: int):
+        num = _el("w:num", {"w:numId": str(num_id)})
+        num.append(_el("w:abstractNumId", {"w:val": str(abstract_num_id)}))
+        return num
+
+    bullet_abstract = _abstract_num(BULLET_ABSTRACT_ID, "bullet", "\u2022")
+    bullet_num = _num(BULLET_NUM_ID, BULLET_ABSTRACT_ID)
+    number_abstract = _abstract_num(NUMBER_ABSTRACT_ID, "decimal", "%1.")
+    number_num = _num(NUMBER_NUM_ID, NUMBER_ABSTRACT_ID)
+    root.append(bullet_abstract)
+    root.append(bullet_num)
+    root.append(number_abstract)
+    root.append(number_num)
+    return (BULLET_NUM_ID, NUMBER_NUM_ID)
+
+
 def build_docx_from_content(
     content: str,
     *,
@@ -612,6 +700,7 @@ def build_docx_from_content(
         raise ImportError("python-docx is not installed. Install with: pip install python-docx")
 
     props = print_properties or {}
+    use_default_fonts = props.get("useDefaultFonts", False)
     font_family = props.get("fontFamily", "Times New Roman")
     font_size_pt = props.get("fontSize", 12)
     try:
@@ -639,6 +728,7 @@ def build_docx_from_content(
 
     # Strip any [font:...], [size:...], [color:...] and [/font], [/size], [/color] that ended up as literal run text
     # (e.g. parser edge cases, or when content came from a path that doesn't parse these tags). Keeps docx clean.
+    # Also strip any raw ** or __ that slipped through (e.g. "**             **" when inner is whitespace-only).
     for block in blocks:
         for run in block.get("runs", []):
             if "text" in run and run["text"]:
@@ -648,22 +738,58 @@ def build_docx_from_content(
                     if t2 == t:
                         break
                     t = t2
+                t = t.replace("**", "").replace("__", "")
                 run["text"] = t
 
-    # Heuristic: paragraphs whose first run starts with • or - or * become list items (LLM may not use <ul><li>)
+    # Convert bullet/number prefixes to Word native list styles (List Bullet / List Number)
+    # Markdown bullets: - * + (with space after). Unicode: • ◦ ▪ ▸ U+2022
+    _BULLET_CHARS = ("\u2022", "•", "-", "*", "+", "\u25E6", "\u25AA", "\u25B8")
+    _BULLET_REQUIRE_SPACE = ("-", "*", "+")  # require space/tab after so "non-profit", "5*4", "C++" aren't bullets
     for block in blocks:
         if block.get("type") != "p" or not block.get("runs"):
             continue
-        first_run = block["runs"][0]
-        if first_run.get("line_break"):
+        # Use first run that has non-empty text (bullet may not be in runs[0] if paragraph starts with blank line)
+        first_run = None
+        for r in block["runs"]:
+            if r.get("line_break"):
+                continue
+            t = (r.get("text") or "").strip()
+            if t:
+                first_run = r
+                break
+        if first_run is None:
             continue
-        first_text = first_run.get("text", "")
-        if re.match(r"^[•\-*]\s+", first_text):
+        first_text = first_run.get("text", "") or ""
+        stripped = first_text.lstrip()
+        if not stripped:
+            continue
+        # Numbered list: "1. ", "2. ", "10. " etc. -> Word List Number
+        num_match = re.match(r"^(\d+)\.\s+", stripped)
+        if num_match:
+            block["type"] = "li_number"
+            first_run["text"] = stripped[num_match.end() :]
+            # Remove leading line-break/empty runs so list item doesn't start with a blank line
+            while block["runs"] and (block["runs"][0].get("line_break") or not (block["runs"][0].get("text") or "").strip()):
+                block["runs"].pop(0)
+            continue
+        # Bullet list: bullet char + optional whitespace -> Word List Bullet
+        for bullet in _BULLET_CHARS:
+            if not stripped.startswith(bullet):
+                continue
+            if bullet in _BULLET_REQUIRE_SPACE and len(stripped) > len(bullet) and stripped[len(bullet)] not in " \t":
+                continue
+            rest = stripped[len(bullet) :].lstrip()
             block["type"] = "li"
-            first_run["text"] = re.sub(r"^[•\-*]\s+", "", first_text)
+            first_run["text"] = rest
+            # Remove leading line-break/empty runs so list item doesn't start with a blank line
+            while block["runs"] and (block["runs"][0].get("line_break") or not (block["runs"][0].get("text") or "").strip()):
+                block["runs"].pop(0)
+            break
 
     logger.info("DOCX: creating Document and applying styles")
     doc = Document()
+    bullet_num_id, number_num_id = _ensure_docx_list_numbering(doc)
+    use_numbering_part = bullet_num_id is not None and number_num_id is not None
     # Apply section margins and page size from print_properties (client sends margins in inches)
     if DOCX_AVAILABLE and Inches is not None:
         section = doc.sections[0]
@@ -691,21 +817,45 @@ def build_docx_from_content(
                 except (TypeError, ValueError):
                     pass
     style = doc.styles["Normal"]
-    style.font.name = font_family
-    style.font.size = Pt(font_size_pt)
+    # Always apply user's line height (line spacing)
+    style.paragraph_format.line_spacing = line_height
+    # Apply font/size only when user has not chosen default fonts
+    if not use_default_fonts and font_family and str(font_family).strip().lower() != "default":
+        style.font.name = font_family
+        style.font.size = Pt(font_size_pt)
+    else:
+        font_family = font_family or "Times New Roman"
+        font_size_pt = font_size_pt if font_size_pt else 12
 
     space_after = Pt(round(font_size_pt * line_height * 0.4))
 
+    # List formatting: either OOXML numbering (numPr + numbering.xml) or fallback (indent + text bullet/number).
+    _LIST_LEFT = Inches(0.25)
+    _LIST_HANG = Inches(-0.25)
+
     # One <w:p> per block (see BACKEND_DOCX_PARAGRAPH_AND_LINE_BREAKS.md)
     logger.info("DOCX: starting paragraph/run construction")
+    list_number = 0
     for block in blocks:
         p = doc.add_paragraph()
         if block["type"] == "li":
-            p.style = "List Bullet"
-            # Don't set space_after; let Word's list style control bullet spacing
+            if use_numbering_part:
+                _set_paragraph_num_pr(p, 0, bullet_num_id)
+            else:
+                p.paragraph_format.left_indent = _LIST_LEFT
+                p.paragraph_format.first_line_indent = _LIST_HANG
+        elif block["type"] == "li_number":
+            list_number += 1
+            if use_numbering_part:
+                _set_paragraph_num_pr(p, 0, number_num_id)
+            else:
+                p.paragraph_format.left_indent = _LIST_LEFT
+                p.paragraph_format.first_line_indent = _LIST_HANG
         else:
+            list_number = 0
             p.paragraph_format.space_after = space_after
         last_ended_with_space = True  # avoid leading space before first run
+        first_text_run = True  # prepend bullet/number only when not using numbering part
         for run_spec in block["runs"]:
             if run_spec.get("line_break"):
                 if WD_BREAK is not None:
@@ -715,15 +865,23 @@ def build_docx_from_content(
             text = run_spec.get("text", "")
             if not text:
                 continue
+            # Prepend visible bullet/number only when not using OOXML numbering
+            if first_text_run and block["type"] in ("li", "li_number") and not use_numbering_part:
+                first_text_run = False
+                if block["type"] == "li":
+                    text = "\u2022 " + text
+                else:
+                    text = f"{list_number}. " + text
             # Preserve space around inline/spans: add space if previous run didn't end with space and this doesn't start with one
             if not last_ended_with_space and not (text.startswith(" ") or text.startswith("\t")):
                 text = " " + text
             last_ended_with_space = text.endswith(" ") or text.endswith("\t")
             run = p.add_run(text)
             run_font = run.font
-            run_font.name = (run_spec.get("font_family") or "").strip() or font_family
-            size_pt = run_spec.get("font_size_pt")
-            run_font.size = Pt(size_pt if size_pt is not None and size_pt > 0 else font_size_pt)
+            if not use_default_fonts:
+                run_font.name = (run_spec.get("font_family") or "").strip() or font_family
+                size_pt = run_spec.get("font_size_pt")
+                run_font.size = Pt(size_pt if size_pt is not None and size_pt > 0 else font_size_pt)
             run.bold = run_spec.get("bold", False)
             run.italic = run_spec.get("italic", False)
             color_hex = run_spec.get("color_hex")
@@ -782,6 +940,132 @@ def build_docx_from_content(
 
     logger.info("DOCX: build_docx_from_content finished successfully")
     return docx_bytes
+
+
+# Minimal OOXML skeletons for build_docx_from_components when LLM omits numbering or styles
+_MINIMAL_CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>"""
+
+_MINIMAL_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+_MINIMAL_DOCUMENT_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"""
+
+_MINIMAL_NUMBERING = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="0">
+    <w:multiLevelType w:val="singleLevel"/>
+    <w:lvl w:ilvl="0">
+      <w:numFmt w:val="bullet"/>
+      <w:lvlText w:val="&#x2022;"/>
+      <w:lvlJc w:val="left"/>
+      <w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>
+      <w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol"/></w:rPr>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>"""
+
+_MINIMAL_STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault/><w:pPrDefault/></w:docDefaults>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:qFormat/>
+  </w:style>
+</w:styles>"""
+
+
+def build_docx_from_components(
+    document_xml: str,
+    numbering_xml: Optional[str] = None,
+    styles_xml: Optional[str] = None,
+) -> bytes:
+    """
+    Assemble a .docx (ZIP) from the three Word OOXML components returned by the LLM.
+
+    Args:
+        document_xml: Full content of word/document.xml (root <w:document> with <w:body> and <w:sectPr/>).
+        numbering_xml: Optional content of word/numbering.xml; if missing, minimal bullet numbering is used.
+        styles_xml: Optional content of word/styles.xml; if missing, minimal styles are used.
+
+    Returns:
+        .docx file as bytes.
+    """
+    doc_xml = (document_xml or "").strip()
+    if not doc_xml:
+        raise ValueError("document_xml is required and must be non-empty")
+    num_xml = (numbering_xml or "").strip() or _MINIMAL_NUMBERING
+    sty_xml = (styles_xml or "").strip() or _MINIMAL_STYLES
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", _MINIMAL_CONTENT_TYPES)
+        zf.writestr("_rels/.rels", _MINIMAL_RELS)
+        zf.writestr("word/_rels/document.xml.rels", _MINIMAL_DOCUMENT_RELS)
+        zf.writestr("word/document.xml", doc_xml)
+        zf.writestr("word/numbering.xml", num_xml)
+        zf.writestr("word/styles.xml", sty_xml)
+    buf.seek(0)
+    out = buf.read()
+    logger.info("DOCX: assembled from components (document=%s bytes, numbering=%s, styles=%s)", len(doc_xml), bool(numbering_xml), bool(styles_xml))
+    return out
+
+
+def apply_print_properties_to_docx(
+    docx_bytes: bytes,
+    print_properties: Optional[Dict] = None,
+) -> bytes:
+    """
+    Apply user print settings to an existing .docx (e.g. one built from components).
+    - Line height: always applied to Normal style.
+    - Font family/size: applied only when useDefaultFonts is False (same rule as elsewhere).
+    """
+    if not DOCX_AVAILABLE or Document is None or Pt is None:
+        return docx_bytes
+    props = print_properties or {}
+    use_default_fonts = props.get("useDefaultFonts", False)
+    line_height = props.get("lineHeight", 1.6)
+    try:
+        line_height = float(line_height)
+    except (TypeError, ValueError):
+        line_height = 1.6
+    font_family = props.get("fontFamily", "Times New Roman")
+    font_size_pt = props.get("fontSize", 12)
+    try:
+        font_size_pt = float(font_size_pt)
+    except (TypeError, ValueError):
+        font_size_pt = 12
+
+    try:
+        doc = Document(io.BytesIO(docx_bytes))
+        style = doc.styles["Normal"]
+        # Always apply line spacing (user's line height setting)
+        style.paragraph_format.line_spacing = line_height
+        # Apply font only when user has not chosen "default fonts"
+        if not use_default_fonts and font_family and str(font_family).strip().lower() != "default":
+            style.font.name = (font_family or "Times New Roman").strip()
+            style.font.size = Pt(font_size_pt)
+        out = io.BytesIO()
+        doc.save(out)
+        out.seek(0)
+        logger.info("DOCX: applied print_properties (line_height=%.2f, font=%s)", line_height, "default" if use_default_fonts else font_family)
+        return out.read()
+    except Exception as e:
+        logger.warning("DOCX: could not apply print_properties to docx: %s", e)
+        return docx_bytes
 
 
 def build_docx_from_generation_result(

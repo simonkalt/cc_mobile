@@ -154,6 +154,12 @@ class Settings:
         os.getenv("USE_TEMPLATE_IN_PROMPT", "true").lower() == "true"
     )
 
+    # When True, prompt LLM to return docx as three XML components (document_xml, numbering_xml, styles_xml);
+    # we assemble the .docx from those. When False, LLM returns plain "content" and we build .docx from it.
+    USE_DOCX_COMPONENTS: bool = (
+        os.getenv("USE_DOCX_COMPONENTS", "true").lower() == "true"
+    )
+
 
 # Global settings instance
 settings = Settings()

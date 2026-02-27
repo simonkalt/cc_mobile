@@ -25,7 +25,11 @@ from app.services.cover_letter_service import get_job_info
 from app.services.user_service import get_user_by_id, get_user_by_email
 from app.utils.pdf_utils import read_pdf_from_bytes
 from app.utils.s3_utils import download_pdf_from_s3, get_s3_client, S3_AVAILABLE
-from app.utils.docx_generator import build_docx_from_generation_result
+from app.utils.docx_generator import (
+    apply_print_properties_to_docx,
+    build_docx_from_components,
+    build_docx_from_generation_result,
+)
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -145,6 +149,12 @@ def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
         payload = {"content": str(result) if result is not None else ""}
 
     payload.pop("docxStyleHints", None)
+    # When we have docx components (document_xml), keep them for assembly
+    if payload.get("document_xml") is not None:
+        payload["docxTemplateHints"] = _docx_template_hints_from_request(
+            req, result if isinstance(result, dict) else payload
+        )
+        return payload
     # When we have "content" (docx-only flow), keep it as-is; docx is built from plain text
     if payload.get("content") is not None:
         payload["docxTemplateHints"] = _docx_template_hints_from_request(
@@ -173,11 +183,11 @@ def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
 
 def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
     """
-    Build a .docx from content (plain text) or legacy markdown/html and attach as docxBase64.
-    Docx-only flow: use payload["content"] with use_plain_text=True.
+    Build a .docx from docx components (document_xml, numbering_xml, styles_xml),
+    or from content (plain text) / legacy markdown/html, and attach as docxBase64.
     """
     try:
-        # Prefer print_properties from request body (client send); fall back to user preferences
+        # Resolve print_properties once (request body or user preferences) for both components and content paths
         logger.info("DOCX: determining print_properties for request")
         print_properties = getattr(req, "print_properties", None)
         if not print_properties and getattr(req, "user_id", None):
@@ -199,6 +209,20 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
             except Exception as e:
                 logger.debug("Could not get user print properties by email: %s", e)
 
+        # Docx components path: assemble .docx from LLM-returned XML, then apply line height (and font if not default)
+        if payload.get("document_xml") is not None:
+            logger.info("DOCX: building .docx from components (document_xml, numbering_xml, styles_xml)")
+            docx_bytes = build_docx_from_components(
+                document_xml=payload["document_xml"],
+                numbering_xml=payload.get("numbering_xml"),
+                styles_xml=payload.get("styles_xml"),
+            )
+            docx_bytes = apply_print_properties_to_docx(docx_bytes, print_properties)
+            payload["docxBase64"] = base64.b64encode(docx_bytes).decode("utf-8")
+            logger.info("Attached .docx from components (%s bytes)", len(docx_bytes))
+            return
+
+        # Content/markdown/html path (print_properties already resolved above)
         use_plain_text = "content" in payload
         logger.info("DOCX: building .docx (sync, simplified parser)")
         docx_bytes = build_docx_from_generation_result(
