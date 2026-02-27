@@ -2,7 +2,7 @@
   "llms": [
     {
       "value": "gpt-5.2",
-      "label": "GPT-5.2",
+      "label": "GPT-5.2 (Recommended)",
       "description": "Latest GPT model with enhanced capabilities"
     },
     {
