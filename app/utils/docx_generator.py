@@ -297,23 +297,40 @@ def _strip_style_tags_from_plain(text: str) -> str:
     return text
 
 
+def _strip_plain_text_formatting(line: str) -> str:
+    """
+    Lightweight cleanup for plain-text content:
+    - remove [font:], [size:], [color:] style tags
+    - strip basic markdown emphasis markers (**bold**, *italic*, __bold__, _italic_)
+    without doing heavy segmentation.
+    """
+    if not line:
+        return ""
+    s = _strip_style_tags_from_plain(line)
+    # Remove markdown-style emphasis while keeping inner text
+    for pattern in (
+        r"\*\*(.+?)\*\*",  # **bold**
+        r"__(.+?)__",      # __bold__
+        r"\*(.+?)\*",      # *italic*
+        r"_(.+?)_",        # _italic_
+    ):
+        s = re.sub(pattern, r"\1", s)
+    return s.strip()
+
+
+# Max length of a single tag [...] we will parse; beyond this we treat as literal (no hang).
+_MAX_TAG_LEN = 120
+
+
 def _parse_style_segments(line: str) -> List[tuple]:
     """
     Split line by [color:#xxx], [size:Npt], [font:Name] and [/color], [/size], [/font].
-    Supports adjacent tags like [font:Calibri][size:22pt][color:#1f4e79]text[/color][/size][/font]
-    by merging styles with a stack. Returns list of (style_dict, text).
+    Uses only str.find() and short slices — no regex on unbounded input. Safe and linear.
     """
-    open_re = re.compile(
-        r"\[\s*(color|size|font)\s*:\s*([^\]]+)\]\s*",
-        re.IGNORECASE,
-    )
-    close_re = re.compile(
-        r"\[\s*/\s*(color|size|font)\s*\]\s*",
-        re.IGNORECASE,
-    )
     segments = []
     style_stack: List[Dict] = [{}]
     pos = 0
+    n = len(line)
 
     def current_style() -> Dict:
         merged = {}
@@ -321,95 +338,143 @@ def _parse_style_segments(line: str) -> List[tuple]:
             merged.update(d)
         return merged
 
-    while pos < len(line):
-        mo = open_re.match(line, pos)
-        if mo:
-            tag_type = mo.group(1).lower()
-            tag_value = (mo.group(2) or "").strip()
+    while pos < n:
+        lb = line.find("[", pos)
+        if lb == -1:
+            if pos < n:
+                segments.append((current_style(), line[pos:]))
+            break
+        if lb > pos:
+            segments.append((current_style(), line[pos:lb]))
+        rb = line.find("]", lb + 1)
+        if rb == -1 or (rb - lb) > _MAX_TAG_LEN:
+            segments.append((current_style(), line[lb : lb + 1]))
+            pos = lb + 1
+            continue
+        tag_inner = line[lb + 1 : rb].strip().lower()
+        pos = rb + 1
+        if tag_inner.startswith("/"):
+            closer = tag_inner[1:].strip()
+            if len(style_stack) > 1 and closer in ("color", "size", "font"):
+                style_stack.pop()
+            continue
+        if ":" in tag_inner:
+            kind, _, value = tag_inner.partition(":")
+            value = value.strip()
+            kind = kind.strip()
             new_style = {}
-            if tag_type == "color":
-                hex_val = tag_value.lstrip("#")
+            if kind == "color" and value:
+                hex_val = value.lstrip("#")[:8]
                 if len(hex_val) == 3:
                     hex_val = "".join(c * 2 for c in hex_val)
                 if len(hex_val) >= 6:
                     new_style["color_hex"] = "#" + hex_val[:6]
-            elif tag_type == "size":
-                try:
-                    num = re.match(r"[\d.]+", tag_value)
-                    if num:
-                        new_style["font_size_pt"] = float(num.group())
-                except (TypeError, ValueError):
-                    pass
-            elif tag_type == "font":
-                if tag_value:
-                    new_style["font_family"] = tag_value
-            style_stack.append(dict(current_style(), **new_style))
-            pos = mo.end()
-            continue
-        mc = close_re.match(line, pos)
-        if mc:
-            if len(style_stack) > 1:
-                style_stack.pop()
-            pos = mc.end()
-            continue
-        end = pos
-        while end < len(line) and line[end] != "[":
-            end += 1
-        text = line[pos:end]
-        if text:
-            segments.append((current_style(), text))
-        pos = end if end < len(line) else len(line)
-
+            elif kind == "size" and value:
+                num_str = ""
+                for c in value:
+                    if c.isdigit() or c == ".":
+                        num_str += c
+                    else:
+                        break
+                if num_str:
+                    try:
+                        new_style["font_size_pt"] = float(num_str)
+                    except ValueError:
+                        pass
+            elif kind == "font" and value:
+                new_style["font_family"] = value[:80]
+            if new_style:
+                style_stack.append(dict(current_style(), **new_style))
     return segments
 
 
+def _find_next_bold_italic_open(text: str, start: int):
+    """
+    Find the earliest opening delimiter **, __, *, or _ after start.
+    For * and _ we require they are not the start of ** or __.
+    Returns (position, pattern_len, is_bold) or None if none found.
+    """
+    n = len(text)
+    best = None  # (pos, pattern_len, is_bold)
+    i = text.find("**", start)
+    if i != -1 and (best is None or i < best[0]):
+        best = (i, 2, True)
+    i = text.find("__", start)
+    if i != -1 and (best is None or i < best[0]):
+        best = (i, 2, True)
+    i = text.find("*", start)
+    if i != -1 and (i + 1 >= n or text[i + 1] != "*") and (best is None or i < best[0]):
+        best = (i, 1, False)  # italic
+    i = text.find("_", start)
+    if i != -1 and (i + 1 >= n or text[i + 1] != "_") and (best is None or i < best[0]):
+        best = (i, 1, False)  # italic
+    return best
+
+
+def _find_bold_italic_close(text: str, open_pos: int, pattern_len: int, is_double: bool) -> int:
+    """Find the closing delimiter. For double (** or __) next occurrence. For single (* or _) next occurrence not part of double."""
+    n = len(text)
+    search_start = open_pos + pattern_len
+    if is_double:
+        i = text.find(text[open_pos : open_pos + pattern_len], search_start)
+        return i
+    needle = text[open_pos]
+    j = search_start
+    while j < n:
+        j = text.find(needle, j)
+        if j == -1:
+            return -1
+        if j + 1 >= n or text[j + 1] != needle:
+            return j
+        j += 2
+    return -1
+
+
 def _bold_italic_to_runs(text: str) -> List[Dict]:
-    """Parse **bold**, *italic*, __bold__, _italic_ only; return list of runs (text, bold, italic)."""
+    """
+    Parse **bold**, *italic*, __bold__, _italic_ with linear scan (str.find only).
+    No backtracking regex, so safe from catastrophic hang on bad input.
+    """
+    if not text:
+        return [{"text": "", "bold": False, "italic": False}]
     runs = []
-    rest = text
-    while rest:
-        m = re.search(r"\*\*(.+?)\*\*", rest)
-        if m:
-            before = rest[: m.start()]
-            if before:
-                runs.append({"text": before, "bold": False, "italic": False})
-            runs.append({"text": m.group(1), "bold": True, "italic": False})
-            rest = rest[m.end() :]
+    pos = 0
+    n = len(text)
+    while pos < n:
+        best = _find_next_bold_italic_open(text, pos)
+        if best is None:
+            runs.append({"text": text[pos:], "bold": False, "italic": False})
+            break
+        open_pos, pattern_len, is_bold = best
+        is_double = pattern_len == 2
+        if open_pos > pos:
+            runs.append({"text": text[pos:open_pos], "bold": False, "italic": False})
+        close_pos = _find_bold_italic_close(text, open_pos, pattern_len, is_double)
+        if close_pos == -1:
+            runs.append({"text": text[open_pos : open_pos + 1], "bold": False, "italic": False})
+            pos = open_pos + 1
             continue
-        m = re.search(r"\*(.+?)\*", rest)
-        if m:
-            before = rest[: m.start()]
-            if before:
-                runs.append({"text": before, "bold": False, "italic": False})
-            runs.append({"text": m.group(1), "bold": False, "italic": True})
-            rest = rest[m.end() :]
-            continue
-        m = re.search(r"__(.+?)__", rest)
-        if m:
-            before = rest[: m.start()]
-            if before:
-                runs.append({"text": before, "bold": False, "italic": False})
-            runs.append({"text": m.group(1), "bold": True, "italic": False})
-            rest = rest[m.end() :]
-            continue
-        m = re.search(r"_(.+?)_", rest)
-        if m:
-            before = rest[: m.start()]
-            if before:
-                runs.append({"text": before, "bold": False, "italic": False})
-            runs.append({"text": m.group(1), "bold": False, "italic": True})
-            rest = rest[m.end() :]
-            continue
-        runs.append({"text": rest, "bold": False, "italic": False})
-        break
+        inner = text[open_pos + pattern_len : close_pos]
+        runs.append({"text": inner, "bold": is_bold, "italic": not is_bold})
+        pos = close_pos + pattern_len
     return runs if runs else [{"text": text, "bold": False, "italic": False}]
+
+
+_MAX_RUNS_PER_LINE = 300  # Cap so we never build huge run lists (safety and perf)
 
 
 def _plain_line_to_runs(line: str) -> List[Dict]:
     """Parse one line: [color:#x][/color], [size:Npt][/size], [font:Name][/font] plus **bold** and *italic*."""
     runs = []
-    for style_dict, segment_text in _parse_style_segments(line):
+    segments = _parse_style_segments(line)
+    if not segments:
+        return [{"text": _strip_style_tags_from_plain(line), "bold": False, "italic": False}]
+    for style_dict, segment_text in segments:
+        if len(runs) >= _MAX_RUNS_PER_LINE:
+            break
         for run in _bold_italic_to_runs(segment_text):
+            if len(runs) >= _MAX_RUNS_PER_LINE:
+                break
             run = dict(run)
             if style_dict:
                 if "color_hex" in style_dict:
@@ -419,23 +484,36 @@ def _plain_line_to_runs(line: str) -> List[Dict]:
                 if "font_family" in style_dict:
                     run["font_family"] = style_dict["font_family"]
             runs.append(run)
-    # If no segments (e.g. line is only tags like "[font:Calibri][size:11pt]" or "[/size][/font]"), use stripped line so we never emit raw tags
-    return runs if runs else [{"text": _strip_style_tags_from_plain(line), "bold": False, "italic": False}]
+    if not runs:
+        return [{"text": _strip_style_tags_from_plain(line), "bold": False, "italic": False}]
+    return runs
+
+
+# Max line length for full style/markdown parsing. Longer lines use stripped plain text only.
+_SAFE_LINE_LENGTH = 12000
 
 
 def _plain_text_to_blocks(text: str) -> List[Dict]:
-    """\\n\\n = new paragraph (<w:p>); \\n = line break within paragraph. ** and * = bold/italic."""
+    """
+    \\n\\n = new paragraph (<w:p>); \\n = line break within paragraph.
+    Full parsing: [font:...], [size:...], [color:...] and **bold** / *italic* (linear-time, no hang).
+    Lines longer than _SAFE_LINE_LENGTH are stripped only to avoid edge cases.
+    """
     if not text:
         return []
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    normalized = _ensure_paragraph_breaks(normalized)
     paragraphs = re.split(r"\n\s*\n", normalized.strip() if normalized else "")
     blocks = []
     for para in paragraphs:
         lines = para.split("\n")
         runs = []
         for i, line in enumerate(lines):
-            runs.extend(_plain_line_to_runs(line))
+            if len(line) <= _SAFE_LINE_LENGTH:
+                runs.extend(_plain_line_to_runs(line))
+            else:
+                clean = _strip_plain_text_formatting(line)
+                if clean:
+                    runs.append({"text": clean, "bold": False, "italic": False})
             if i < len(lines) - 1:
                 runs.append({"line_break": True})
         blocks.append({"type": "p", "runs": runs})
@@ -524,7 +602,13 @@ def build_docx_from_content(
     Returns:
         .docx file as bytes.
     """
+    logger.info(
+        "DOCX: build_docx_from_content start (from_html=%s, from_plain_text=%s)",
+        from_html,
+        from_plain_text,
+    )
     if not DOCX_AVAILABLE or Document is None:
+        logger.error("DOCX: python-docx not available; cannot build .docx")
         raise ImportError("python-docx is not installed. Install with: pip install python-docx")
 
     props = print_properties or {}
@@ -543,10 +627,15 @@ def build_docx_from_content(
     if from_plain_text:
         content = _strip_html_from_plain(content or "")
         blocks = _plain_text_to_blocks(content)
+        logger.info("DOCX: using plain-text path; content length=%s", len(content or ""))
     elif from_html:
+        logger.info("DOCX: using HTML path; content length=%s", len(content or ""))
         blocks = _html_to_blocks(content)
     else:
+        logger.info("DOCX: using markdown path; content length=%s", len(content or ""))
         blocks = _markdown_to_blocks(content or "")
+
+    logger.info("DOCX: blocks parsed (count=%s)", len(blocks))
 
     # Strip any [font:...], [size:...], [color:...] and [/font], [/size], [/color] that ended up as literal run text
     # (e.g. parser edge cases, or when content came from a path that doesn't parse these tags). Keeps docx clean.
@@ -573,6 +662,7 @@ def build_docx_from_content(
             block["type"] = "li"
             first_run["text"] = re.sub(r"^[•\-*]\s+", "", first_text)
 
+    logger.info("DOCX: creating Document and applying styles")
     doc = Document()
     # Apply section margins and page size from print_properties (client sends margins in inches)
     if DOCX_AVAILABLE and Inches is not None:
@@ -607,6 +697,7 @@ def build_docx_from_content(
     space_after = Pt(round(font_size_pt * line_height * 0.4))
 
     # One <w:p> per block (see BACKEND_DOCX_PARAGRAPH_AND_LINE_BREAKS.md)
+    logger.info("DOCX: starting paragraph/run construction")
     for block in blocks:
         p = doc.add_paragraph()
         if block["type"] == "li":
@@ -647,10 +738,12 @@ def build_docx_from_content(
                     except (ValueError, TypeError):
                         pass
 
+    logger.info("DOCX: writing document to bytes buffer")
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
     docx_bytes = buf.read()
+    logger.info("DOCX: document built (size=%s bytes)", len(docx_bytes))
 
     # Debug: always write docx + info to tmp/ after every build (so we see which path ran: plain_text vs html vs markdown).
     _source = "plain_text" if from_plain_text else ("html" if from_html else "markdown")
@@ -678,10 +771,16 @@ def build_docx_from_content(
         except Exception as e:
             logger.warning("Docx debug: could not write to %s: %s", os.path.abspath(_tmp), e)
     if _written:
-        logger.info("Docx debug: wrote raw-debug.docx, raw-debug-info.txt (source=%s, blocks=%s) to %s", _source, len(blocks), _written)
+        logger.info(
+            "Docx debug: wrote raw-debug.docx, raw-debug-info.txt (source=%s, blocks=%s) to %s",
+            _source,
+            len(blocks),
+            _written,
+        )
     else:
         logger.warning("Docx debug: no tmp dir was writable")
 
+    logger.info("DOCX: build_docx_from_content finished successfully")
     return docx_bytes
 
 
@@ -698,13 +797,24 @@ def build_docx_from_generation_result(
     When use_plain_text is True (docx-only flow), content is plain text only.
     Otherwise: prefers content as plain text if use_plain_text; else prefers html, then markdown.
     """
+    logger.info(
+        "DOCX: build_docx_from_generation_result start (use_plain_text=%s, has_content=%s, has_markdown=%s, has_html=%s)",
+        use_plain_text,
+        bool(content),
+        bool(markdown),
+        bool(html and html.strip()),
+    )
     if use_plain_text and content:
+        logger.info("DOCX: generation_result using plain-text content path")
         return build_docx_from_content(
             content, from_plain_text=True, print_properties=print_properties
         )
     if html and html.strip():
+        logger.info("DOCX: generation_result using HTML path")
         return build_docx_from_content(html, from_html=True, print_properties=print_properties)
     raw = content or markdown or ""
     if use_plain_text:
+        logger.info("DOCX: generation_result using raw plain-text path (no HTML/markdown)")
         return build_docx_from_content(raw, from_plain_text=True, print_properties=print_properties)
+    logger.info("DOCX: generation_result using markdown/plain fallback path")
     return build_docx_from_content(raw, from_html=False, print_properties=print_properties)

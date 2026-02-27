@@ -178,6 +178,7 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
     """
     try:
         # Prefer print_properties from request body (client send); fall back to user preferences
+        logger.info("DOCX: determining print_properties for request")
         print_properties = getattr(req, "print_properties", None)
         if not print_properties and getattr(req, "user_id", None):
             try:
@@ -199,6 +200,7 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
                 logger.debug("Could not get user print properties by email: %s", e)
 
         use_plain_text = "content" in payload
+        logger.info("DOCX: building .docx (sync, simplified parser)")
         docx_bytes = build_docx_from_generation_result(
             content=payload.get("content"),
             markdown=payload.get("markdown"),
@@ -211,7 +213,8 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
     except ImportError as e:
         logger.warning("python-docx not available, skipping docx generation: %s", e)
     except Exception as e:
-        logger.warning("Failed to build .docx for generation response: %s", e, exc_info=True)
+        # Critical: do NOT fail the whole request; just log and continue without docx
+        logger.error("Failed to build .docx for generation response: %s", e, exc_info=True)
 
 
 @router.post("/job-info", response_model=CoverLetterGenerationResponse)
@@ -229,28 +232,44 @@ async def handle_job_info(request: JobInfoRequest):
     logger.info(
         f"Received job info request for LLM: {request.llm}, Company: {request.company_name}"
     )
-    result = get_job_info(
-        llm=request.llm,
-        date_input=request.date_input,
-        company_name=request.company_name,
-        hiring_manager=request.hiring_manager,
-        ad_source=request.ad_source,
-        resume=request.resume,
-        jd=request.jd,
-        additional_instructions=request.additional_instructions,
-        tone=request.tone,
-        address=request.address,
-        phone_number=request.phone_number,
-        user_id=request.user_id,
-        user_email=request.user_email,
-    )
-    payload = _normalize_generation_response(result, request)
-    _attach_docx_to_payload(payload, request)
-    # Docx-only contract: return docx + hints + optional content; no markdown/html
-    payload.pop("html", None)
-    payload.pop("markdown", None)
-    _write_client_payload_log(payload)
-    return payload
+    try:
+        logger.info("Starting get_job_info() for /api/job-info")
+        result = get_job_info(
+            llm=request.llm,
+            date_input=request.date_input,
+            company_name=request.company_name,
+            hiring_manager=request.hiring_manager,
+            ad_source=request.ad_source,
+            resume=request.resume,
+            jd=request.jd,
+            additional_instructions=request.additional_instructions,
+            tone=request.tone,
+            address=request.address,
+            phone_number=request.phone_number,
+            user_id=request.user_id,
+            user_email=request.user_email,
+        )
+        logger.info("get_job_info() completed for /api/job-info")
+        payload = _normalize_generation_response(result, request)
+        logger.info("Starting DOCX attachment for /api/job-info")
+        _attach_docx_to_payload(payload, request)
+        logger.info("DOCX attachment completed for /api/job-info")
+        # Docx-only contract: return docx + hints + optional content; no markdown/html
+        payload.pop("html", None)
+        payload.pop("markdown", None)
+        _write_client_payload_log(payload)
+        logger.info("handle_job_info completed, returning payload")
+        return payload
+    except HTTPException:
+        # Already has appropriate status/detail; just log with stack
+        logger.error("HTTPException in /api/job-info pipeline", exc_info=True)
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in /api/job-info pipeline: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while generating cover letter",
+        )
 
 
 @router.post("/cover-letter/generate-with-text-resume", response_model=CoverLetterGenerationResponse)
@@ -272,30 +291,51 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
         f"Received cover letter request with text resume for LLM: {request.llm}, Company: {request.company_name}"
     )
 
-    # Pass resume_text directly as resume to get_job_info
-    # Set is_plain_text=True to skip file processing (S3, local files, base64)
-    result = get_job_info(
-        llm=request.llm,
-        date_input=request.date_input,
-        company_name=request.company_name,
-        hiring_manager=request.hiring_manager,
-        ad_source=request.ad_source,
-        resume=request.resume_text,  # Pass as resume parameter
-        jd=request.jd,
-        additional_instructions=request.additional_instructions,
-        tone=request.tone,
-        address=request.address,
-        phone_number=request.phone_number,
-        user_id=request.user_id,
-        user_email=request.user_email,
-        is_plain_text=True,  # Skip file processing for pasted text
-    )
-    payload = _normalize_generation_response(result, request)
-    _attach_docx_to_payload(payload, request)
-    payload.pop("html", None)
-    payload.pop("markdown", None)
-    _write_client_payload_log(payload)
-    return payload
+    try:
+        logger.info("Starting get_job_info() for /api/cover-letter/generate-with-text-resume")
+        # Pass resume_text directly as resume to get_job_info
+        # Set is_plain_text=True to skip file processing (S3, local files, base64)
+        result = get_job_info(
+            llm=request.llm,
+            date_input=request.date_input,
+            company_name=request.company_name,
+            hiring_manager=request.hiring_manager,
+            ad_source=request.ad_source,
+            resume=request.resume_text,  # Pass as resume parameter
+            jd=request.jd,
+            additional_instructions=request.additional_instructions,
+            tone=request.tone,
+            address=request.address,
+            phone_number=request.phone_number,
+            user_id=request.user_id,
+            user_email=request.user_email,
+            is_plain_text=True,  # Skip file processing for pasted text
+        )
+        logger.info("get_job_info() completed for /api/cover-letter/generate-with-text-resume")
+        payload = _normalize_generation_response(result, request)
+        logger.info("Starting DOCX attachment for /api/cover-letter/generate-with-text-resume")
+        _attach_docx_to_payload(payload, request)
+        logger.info("DOCX attachment completed for /api/cover-letter/generate-with-text-resume")
+        payload.pop("html", None)
+        payload.pop("markdown", None)
+        _write_client_payload_log(payload)
+        logger.info("generate_cover_letter_with_text_resume completed, returning payload")
+        return payload
+    except HTTPException:
+        logger.error(
+            "HTTPException in /api/cover-letter/generate-with-text-resume pipeline", exc_info=True
+        )
+        raise
+    except Exception as e:
+        logger.error(
+            "Unexpected error in /api/cover-letter/generate-with-text-resume pipeline: %s",
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error while generating cover letter",
+        )
 
 
 @router.post("/chat")

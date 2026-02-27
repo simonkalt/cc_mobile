@@ -1007,6 +1007,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                 logger.warning(f"Failed to increment LLM usage count from email: {e}")
 
         # Clean and parse the response
+        logger.info("Cleaning and parsing LLM response text")
         r = r.replace("```json", "").replace("```", "").strip()
 
         # Try to extract JSON if it's embedded in text
@@ -1020,8 +1021,10 @@ Please incorporate these instructions while maintaining consistency with all oth
         else:
             json_str = r
 
+        logger.info("Attempting to parse JSON from LLM response")
         try:
             json_r = json.loads(json_str)
+            logger.info("JSON parse of LLM response succeeded")
         except json.JSONDecodeError as e:
             # If parsing fails, try to fix common issues
             logger.warning(f"Initial JSON parse failed: {e}, attempting to fix...")
@@ -1086,6 +1089,7 @@ Please incorporate these instructions while maintaining consistency with all oth
                         pass
 
             if json_r is None:
+                logger.warning("JSON parse still failed after all fix attempts; re-raising error")
                 raise e
 
         # Docx-only flow: LLM returns single field "content" (plain text)
