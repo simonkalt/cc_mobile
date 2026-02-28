@@ -629,12 +629,15 @@ You may creatively vary font size, color, and style for lists, tables, headings,
 === OUTPUT FORMAT: DOCX AS XML COMPONENTS (required when this section is present) ===
 Return a JSON object with exactly three string fields. The values must be valid XML for a Word document.
 
-1. "document_xml": Full content of word/document.xml. Root: <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body> ... </w:body></w:document>
-   - Paragraph: <w:p><w:r><w:t>Your text here</w:t></w:r></w:p>
-   - Bullet list item: <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>List item text</w:t></w:r></w:p>
+1. "document_xml": Full content of word/document.xml.
+   Root: <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body> ... </w:body></w:document>
+   - Ordinary paragraph: <w:p><w:r><w:t>Your text here</w:t></w:r></w:p>
+   - BULLET LISTS (mandatory): Do NOT put bullet characters (•, -, *, etc.) inside <w:t>. For every bullet list item you MUST use this exact structure so the document gets proper hanging indents:
+     <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>List item text only</w:t></w:r></w:p>
+     The <w:numPr> block (with ilvl 0 and numId 1) is what makes Word show the bullet and hanging indent. The text inside <w:t> must be the list item content only—no leading bullet character.
    - End the body with <w:sectPr/> before </w:body>.
 
-2. "numbering_xml": (optional) Full content of word/numbering.xml defining list/bullet numbering. If you omit or leave empty, the system uses a default.
+2. "numbering_xml": (optional) Full content of word/numbering.xml. If you omit or leave empty, the system uses a default (numId 1 = bullet with hanging indent).
 
 3. "styles_xml": (optional) Full content of word/styles.xml. If you omit or leave empty, the system uses a default.
 
