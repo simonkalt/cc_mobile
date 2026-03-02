@@ -316,6 +316,7 @@ def _strip_plain_text_formatting(line: str) -> str:
     if not line:
         return ""
     s = _strip_style_tags_from_plain(line)
+    s = _normalize_spaced_markdown_emphasis(s)
     # Remove markdown-style emphasis while keeping inner text
     for pattern in (
         r"\*\*(.+?)\*\*",  # **bold**
@@ -325,6 +326,21 @@ def _strip_plain_text_formatting(line: str) -> str:
     ):
         s = re.sub(pattern, r"\1", s)
     return s.strip()
+
+
+def _normalize_spaced_markdown_emphasis(text: str) -> str:
+    """
+    Normalize loose LLM emphasis markers like "* * text * *" into "**text**".
+    Supports both asterisk and underscore variants.
+    """
+    if not text:
+        return ""
+    s = text
+    # Convert "* * text * *" -> "**text**"
+    s = re.sub(r"(?<!\*)\*\s+\*(.+?)\*\s+\*(?!\*)", r"**\1**", s)
+    # Convert "_ _ text _ _" -> "__text__"
+    s = re.sub(r"(?<!_)_\s+_(.+?)_\s+_(?!_)", r"__\1__", s)
+    return s
 
 
 # Max length of a single tag [...] we will parse; beyond this we treat as literal (no hang).
@@ -475,7 +491,8 @@ _MAX_RUNS_PER_LINE = 300  # Cap so we never build huge run lists (safety and per
 def _plain_line_to_runs(line: str) -> List[Dict]:
     """Parse one line: [color:#x][/color], [size:Npt][/size], [font:Name][/font] plus **bold** and *italic*."""
     runs = []
-    segments = _parse_style_segments(line)
+    normalized_line = _normalize_spaced_markdown_emphasis(line)
+    segments = _parse_style_segments(normalized_line)
     if not segments:
         return [{"text": _strip_style_tags_from_plain(line), "bold": False, "italic": False}]
     for style_dict, segment_text in segments:
@@ -538,6 +555,7 @@ def _markdown_to_blocks(markdown: str) -> List[Dict]:
     raw_paras = re.split(r"\n\s*\n", markdown.strip())
     for raw in raw_paras:
         line = " ".join(raw.splitlines()).strip()
+        line = _normalize_spaced_markdown_emphasis(line)
         if not line:
             continue
         # Detect list item
@@ -1051,6 +1069,37 @@ def apply_print_properties_to_docx(
 
     try:
         doc = Document(io.BytesIO(docx_bytes))
+        # Apply section margins and page size so component-built docs honor user settings on first open.
+        if Inches is not None and doc.sections:
+            section = doc.sections[0]
+            margins = props.get("margins")
+            if isinstance(margins, dict):
+                for key, attr in (
+                    ("top", "top_margin"),
+                    ("right", "right_margin"),
+                    ("bottom", "bottom_margin"),
+                    ("left", "left_margin"),
+                ):
+                    val = margins.get(key)
+                    if val is not None:
+                        try:
+                            setattr(section, attr, Inches(float(val)))
+                        except (TypeError, ValueError):
+                            pass
+            page_size = props.get("pageSize")
+            if isinstance(page_size, dict):
+                w = page_size.get("width")
+                h = page_size.get("height")
+                if w is not None:
+                    try:
+                        section.page_width = Inches(float(w))
+                    except (TypeError, ValueError):
+                        pass
+                if h is not None:
+                    try:
+                        section.page_height = Inches(float(h))
+                    except (TypeError, ValueError):
+                        pass
         style = doc.styles["Normal"]
         # Always apply line spacing (user's line height setting)
         style.paragraph_format.line_spacing = line_height

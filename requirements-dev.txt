@@ -1,0 +1,10 @@
+-r requirements.txt
+
+# Test tooling
+pytest>=9.0
+pytest-asyncio>=0.21.0
+
+# Common local quality tools
+black>=23.0
+flake8>=6.0
+mypy>=1.0

@@ -110,12 +110,19 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
 
         # Generate PDF (lazy import so router registers even if pdf_service fails at import)
         from app.services.pdf_service import generate_pdf_from_markdown
-        pdf_base64 = generate_pdf_from_markdown(request.markdownContent, print_props_dict)
+        pdf_base64, cache_hit = generate_pdf_from_markdown(
+            request.markdownContent,
+            print_props_dict,
+            user_id=request.user_id,
+            user_email=request.user_email,
+            return_debug=True,
+        )
 
         logger.info("PDF generated successfully")
         return {
             "success": True,
             "pdfBase64": pdf_base64,
+            "cacheHit": cache_hit,  # Temporary debug field to verify server-side PDF caching.
             "message": "PDF generated successfully",
         }
 
@@ -180,16 +187,27 @@ async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
     try:
         from app.services.pdf_service import generate_pdf_from_html, generate_pdf_from_markdown
         if has_html:
-            pdf_base64 = await generate_pdf_from_html(
-                request.htmlContent, print_props_dict, user_id=request.user_id
+            pdf_base64, cache_hit = await generate_pdf_from_html(
+                request.htmlContent,
+                print_props_dict,
+                user_id=request.user_id,
+                user_email=request.user_email,
+                return_debug=True,
             )
         else:
-            pdf_base64 = generate_pdf_from_markdown(request.markdownContent, print_props_dict)
+            pdf_base64, cache_hit = generate_pdf_from_markdown(
+                request.markdownContent,
+                print_props_dict,
+                user_id=request.user_id,
+                user_email=request.user_email,
+                return_debug=True,
+            )
 
         logger.info("Print Preview PDF generated successfully")
         return {
             "success": True,
             "pdfBase64": pdf_base64,
+            "cacheHit": cache_hit,  # Temporary debug field to verify server-side PDF caching.
             "message": "PDF generated successfully",
         }
     except HTTPException:

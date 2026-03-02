@@ -11,8 +11,9 @@ import os
 import re
 import subprocess
 import tempfile
+import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union, Tuple
 
 import requests
 
@@ -371,27 +372,46 @@ def _pdf_cache_dir() -> Path:
     return cache_dir
 
 
-def _safe_user_id(user_id: str) -> str:
-    """Safe filename segment from user_id (no path separators or special chars)."""
-    if not user_id:
+def _safe_cache_identity(cache_identity: str) -> str:
+    """Safe filename segment from cache identity (user_id or user_email)."""
+    if not cache_identity:
         return ""
-    safe = re.sub(r"[^\w\-]", "_", user_id)
-    return safe or hashlib.sha256(user_id.encode()).hexdigest()[:16]
+    safe = re.sub(r"[^\w\-]", "_", cache_identity)
+    return safe or hashlib.sha256(cache_identity.encode()).hexdigest()[:16]
 
 
-def _content_hash(html_content: str) -> str:
-    """SHA256 hash of normalized HTML for cache key."""
-    return hashlib.sha256(html_content.encode("utf-8")).hexdigest()
+def _resolve_cache_identity(user_id: Optional[str], user_email: Optional[str]) -> str:
+    """Prefer user_id; fallback to user_email so cache works when only email is provided."""
+    if user_id and str(user_id).strip():
+        return f"id:{str(user_id).strip()}"
+    if user_email and str(user_email).strip():
+        # Lowercase for stable matching regardless of email casing from client
+        return f"email:{str(user_email).strip().lower()}"
+    return ""
 
 
-def get_cached_pdf(user_id: str, content_hash: str) -> Optional[bytes]:
+def _content_hash(
+    html_content: str,
+    print_properties: Optional[Dict] = None,
+) -> str:
+    """SHA256 hash of normalized HTML + print properties for cache key."""
+    payload = {
+        "html": html_content,
+        # Include print properties so margin/font/page changes invalidate cache
+        "print_properties": print_properties or {},
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def get_cached_pdf(cache_identity: str, content_hash: str) -> Optional[bytes]:
     """
     Return cached PDF bytes if we have a stored PDF for this user and its hash matches.
     Otherwise return None.
     """
-    if not user_id or not content_hash:
+    if not cache_identity or not content_hash:
         return None
-    safe_id = _safe_user_id(user_id)
+    safe_id = _safe_cache_identity(cache_identity)
     if not safe_id:
         return None
     cache_dir = _pdf_cache_dir()
@@ -408,13 +428,13 @@ def get_cached_pdf(user_id: str, content_hash: str) -> Optional[bytes]:
         return None
 
 
-def set_cached_pdf(user_id: str, content_hash: str, pdf_bytes: bytes) -> None:
+def set_cached_pdf(cache_identity: str, content_hash: str, pdf_bytes: bytes) -> None:
     """
     Store PDF and content hash for this user. Deletes any existing cached PDF for this user first.
     """
-    if not user_id or not content_hash:
+    if not cache_identity or not content_hash:
         return
-    safe_id = _safe_user_id(user_id)
+    safe_id = _safe_cache_identity(cache_identity)
     if not safe_id:
         return
     cache_dir = _pdf_cache_dir()
@@ -622,7 +642,13 @@ async def _generate_pdf_via_nutrient(html_content: str, print_properties: Dict) 
     )
 
 
-def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) -> str:
+def generate_pdf_from_markdown(
+    markdown_content: str,
+    print_properties: Dict,
+    user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    return_debug: bool = False,
+) -> Union[str, Tuple[str, bool]]:
     """
     Generate a PDF from Markdown content with proper formatting support.
     Uses WeasyPrint for PDF generation.
@@ -663,12 +689,26 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
         html_content = html_content.replace("\r", "").replace("\n", " ")
         html_content = re.sub(r" +", " ", html_content)
 
+        cache_identity = _resolve_cache_identity(user_id, user_email)
+        content_hash = _content_hash(html_content, print_properties)
+        if cache_identity:
+            cached = get_cached_pdf(cache_identity, content_hash)
+            if cached is not None:
+                logger.info(
+                    "Markdown PDF cache hit for key=%s",
+                    _safe_cache_identity(cache_identity),
+                )
+                cached_base64 = base64.b64encode(cached).decode("utf-8")
+                return (cached_base64, True) if return_debug else cached_base64
+
         # Use same template as get_print_template for consistency; then LibreOffice HTML→PDF
         full_html = get_print_template(print_properties, html_content)["html"]
         pdf_bytes = _generate_pdf_via_libreoffice_html(full_html)
+        if cache_identity:
+            set_cached_pdf(cache_identity, content_hash, pdf_bytes)
         pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
         logger.info(_yellow("PDF writer: LibreOffice (from markdown) (%s bytes)"), len(pdf_bytes))
-        return pdf_base64
+        return (pdf_base64, False) if return_debug else pdf_base64
 
     except Exception as e:
         logger.error(f"Error generating PDF from Markdown: {str(e)}")
@@ -700,8 +740,12 @@ def generate_pdf_from_markdown(markdown_content: str, print_properties: Dict) ->
 
 
 async def generate_pdf_from_html(
-    html_content: str, print_properties: Dict, user_id: Optional[str] = None
-) -> str:
+    html_content: str,
+    print_properties: Dict,
+    user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    return_debug: bool = False,
+) -> Union[str, Tuple[str, bool]]:
     """
     Generate a PDF from HTML content using user print preferences.
     Uses LibreOffice (soffice) as the PDF engine: HTML → temp file → soffice --convert-to pdf.
@@ -726,12 +770,14 @@ async def generate_pdf_from_html(
     html_content = _strip_newlines_adjacent_to_br(html_content)
     html_content = _normalize_line_breaks_in_html(html_content)
 
-    content_hash = _content_hash(html_content)
-    if user_id:
-        cached = get_cached_pdf(user_id, content_hash)
+    cache_identity = _resolve_cache_identity(user_id, user_email)
+    content_hash = _content_hash(html_content, print_properties)
+    if cache_identity:
+        cached = get_cached_pdf(cache_identity, content_hash)
         if cached is not None:
-            logger.info("Print preview PDF cache hit for user_id=%s", _safe_user_id(user_id))
-            return base64.b64encode(cached).decode("utf-8")
+            logger.info("Print preview PDF cache hit for key=%s", _safe_cache_identity(cache_identity))
+            cached_base64 = base64.b64encode(cached).decode("utf-8")
+            return (cached_base64, True) if return_debug else cached_base64
 
     # LibreOffice only: HTML → temp file → soffice --convert-to pdf
     template_result = get_print_template(print_properties, html_content)
@@ -741,8 +787,8 @@ async def generate_pdf_from_html(
         None,
         lambda: _generate_pdf_via_libreoffice_html(html_doc),
     )
-    if user_id:
-        set_cached_pdf(user_id, content_hash, pdf_bytes)
+    if cache_identity:
+        set_cached_pdf(cache_identity, content_hash, pdf_bytes)
     pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
     logger.info(
         _yellow("PDF writer: LibreOffice (%s bytes, font=%s, size=%spt)"),
@@ -750,7 +796,7 @@ async def generate_pdf_from_html(
         font_family,
         font_size,
     )
-    return pdf_base64
+    return (pdf_base64, False) if return_debug else pdf_base64
 
     # --- Remarked out: other PDF engines (using LibreOffice only for now) ---
     # # Raw HTML: minimal wrapper (WeasyPrint only)
