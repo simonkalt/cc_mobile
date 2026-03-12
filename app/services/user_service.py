@@ -3,6 +3,11 @@ User service - business logic for user operations
 """
 import logging
 import time
+import os
+import json
+import base64
+import hmac
+import hashlib
 from datetime import datetime
 from typing import Dict
 from bson import ObjectId
@@ -24,6 +29,26 @@ from app.utils.user_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _b64url(data: bytes) -> str:
+    """Base64 URL-safe encoding without padding."""
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+
+def _make_signed_token(payload: dict, secret: str) -> str:
+    """
+    Create a compact JWT-like HMAC token.
+    This project currently does not verify bearer tokens server-side; this is for
+    frontend contract compatibility (access_token/refresh_token fields).
+    """
+    header = {"alg": "HS256", "typ": "JWT"}
+    header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+    signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    signature_b64 = _b64url(signature)
+    return f"{header_b64}.{payload_b64}.{signature_b64}"
 
 
 def register_user(user_data: UserRegisterRequest) -> UserResponse:
@@ -509,10 +534,41 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     )
     
     logger.info(f"User logged in: {login_data.email}")
+
+    # Generate token fields expected by existing frontend contract.
+    # NOTE: Tokens are currently not validated by backend routes in this repo.
+    now = int(time.time())
+    access_ttl_seconds = 24 * 60 * 60
+    refresh_ttl_seconds = 30 * 24 * 60 * 60
+    jwt_secret = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
+    user_id = str(user["_id"])
+
+    access_payload = {
+        "sub": user_id,
+        "email": user.get("email"),
+        "type": "access",
+        "iat": now,
+        "exp": now + access_ttl_seconds,
+    }
+    refresh_payload = {
+        "sub": user_id,
+        "email": user.get("email"),
+        "type": "refresh",
+        "iat": now,
+        "exp": now + refresh_ttl_seconds,
+    }
+
+    access_token = _make_signed_token(access_payload, jwt_secret)
+    refresh_token = _make_signed_token(refresh_payload, jwt_secret)
+
     return UserLoginResponse(
         success=True,
         user=user_doc_to_response(user),
-        message="Login successful"
+        message="Login successful",
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        expires_in=access_ttl_seconds,
     )
 
 

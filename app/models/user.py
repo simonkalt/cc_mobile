@@ -102,4 +102,8 @@ class UserLoginResponse(BaseModel):
     success: bool
     user: Optional[UserResponse] = None
     message: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    token_type: Optional[str] = "bearer"
+    expires_in: Optional[int] = 86400
 
