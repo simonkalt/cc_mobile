@@ -643,3 +643,59 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
         logger.error(f"Error incrementing LLM usage count: {e}")
         return False
 
+
+def decrement_generation_credits(user_id: str) -> bool:
+    """
+    Decrement generation credits for free users if the field exists.
+    This is best-effort and intentionally non-fatal for generation flow.
+    """
+    if not is_connected():
+        logger.warning("Database connection unavailable. Cannot decrement generation credits.")
+        return False
+
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        logger.warning("Failed to access users collection. Cannot decrement generation credits.")
+        return False
+
+    try:
+        user_id_obj = ObjectId(user_id)
+    except Exception:
+        logger.warning(f"Invalid user ID format: {user_id}")
+        return False
+
+    try:
+        user = collection.find_one({"_id": user_id_obj})
+        if not user:
+            logger.warning(f"User {user_id} not found. Cannot decrement generation credits.")
+            return False
+
+        # Only apply to free users when generation_credits is tracked.
+        if "generation_credits" not in user:
+            logger.debug(f"User {user_id} has no generation_credits field; skipping decrement.")
+            return True
+
+        subscription_status = str(user.get("subscriptionStatus", "")).lower()
+        if subscription_status == "active":
+            logger.debug(f"User {user_id} has active subscription; skipping credit decrement.")
+            return True
+
+        current_credits = int(user.get("generation_credits", 0) or 0)
+        if current_credits <= 0:
+            logger.info(f"User {user_id} has no remaining generation credits.")
+            return True
+
+        result = collection.update_one(
+            {"_id": user_id_obj, "generation_credits": {"$gt": 0}},
+            {"$inc": {"generation_credits": -1}, "$set": {"dateUpdated": datetime.utcnow()}},
+        )
+        if result.matched_count == 0:
+            logger.info(f"No generation credit decrement applied for user {user_id}.")
+            return True
+
+        logger.info(f"Decremented generation credits for user {user_id}: {current_credits} -> {current_credits - 1}")
+        return True
+    except Exception as e:
+        logger.error(f"Error decrementing generation credits for user {user_id}: {e}")
+        return False
+

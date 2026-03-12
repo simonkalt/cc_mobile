@@ -91,6 +91,11 @@ class Settings:
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     PERSONALITY_PROFILES_PATH: Path = Path(__file__).parent.parent.parent / "personality_profiles.json"
+    TEMPLATES_DIR: Path = Path(__file__).parent.parent.parent / "templates"
+
+    # Cover-letter generation feature flags (Word-integration compatibility)
+    USE_TEMPLATE_IN_PROMPT: bool = os.getenv("USE_TEMPLATE_IN_PROMPT", "false").lower() == "true"
+    USE_DOCX_COMPONENTS: bool = os.getenv("USE_DOCX_COMPONENTS", "false").lower() == "true"
 
 
 # Global settings instance

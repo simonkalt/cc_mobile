@@ -530,8 +530,35 @@ def _plain_text_to_blocks(text: str) -> List[Dict]:
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     paragraphs = re.split(r"\n\s*\n", normalized.strip() if normalized else "")
     blocks = []
+
+    # Accept common ordered-list prefixes from LLMs.
+    # Examples: "1. item", "1) item", "(1) item"
+    list_number_re = re.compile(r"^\s*(?:\(?\d+\)?[.)])\s+")
+    # Accept common bullet prefixes.
+    # Examples: "- item", "* item", "+ item", "• item", "◦ item", "▪ item", "▸ item"
+    list_bullet_re = re.compile(r"^\s*(?:[•◦▪▸\-\*\+])\s+")
+
     for para in paragraphs:
         lines = para.split("\n")
+        # If every non-empty line is a list item, force one DOCX paragraph per line.
+        non_empty = [ln for ln in lines if ln.strip()]
+        is_all_list_lines = bool(non_empty) and all(
+            list_number_re.match(ln) or list_bullet_re.match(ln) for ln in non_empty
+        )
+
+        if is_all_list_lines:
+            for line in lines:
+                if not line.strip():
+                    continue
+                if len(line) <= _SAFE_LINE_LENGTH:
+                    runs = _plain_line_to_runs(line)
+                else:
+                    clean = _strip_plain_text_formatting(line)
+                    runs = [{"text": clean, "bold": False, "italic": False}] if clean else []
+                if runs:
+                    blocks.append({"type": "p", "runs": runs})
+            continue
+
         runs = []
         for i, line in enumerate(lines):
             if len(line) <= _SAFE_LINE_LENGTH:
@@ -782,7 +809,7 @@ def build_docx_from_content(
         if not stripped:
             continue
         # Numbered list: "1. ", "2. ", "10. " etc. -> Word List Number
-        num_match = re.match(r"^(\d+)\.\s+", stripped)
+        num_match = re.match(r"^(?:\(?(\d+)\)?[.)])\s+", stripped)
         if num_match:
             block["type"] = "li_number"
             first_run["text"] = stripped[num_match.end() :]

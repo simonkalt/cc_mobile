@@ -10,7 +10,7 @@ import os
 import re
 import html as htmllib
 from typing import Any, Dict
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException, Depends, status
 from fastapi.responses import JSONResponse
 from app.core.auth import get_current_user
 from app.models.user import UserResponse
