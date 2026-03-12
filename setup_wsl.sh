@@ -47,8 +47,9 @@ sudo apt install -y \
     libgirepository-1.0-1 \
     gir1.2-pango-1.0
 
-# Navigate to project directory
-cd /mnt/t/Python/cc_mobile
+# Resolve project directory (directory containing this script)
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR"
 
 # Create virtual environment if it doesn't exist
 echo -e "${YELLOW}Setting up virtual environment...${NC}"
@@ -89,8 +90,8 @@ echo -e "${GREEN}To activate the virtual environment in the future, run:${NC}"
 echo "  source .venv/bin/activate"
 echo ""
 echo -e "${GREEN}To start the server, run:${NC}"
-echo "  python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+echo "  python -m uvicorn main:app --reload --host 0.0.0.0 --port 8675"
 echo ""
 echo -e "${GREEN}Or use the start script:${NC}"
-echo "  bash start.sh"
+echo "  bash start_wsl.sh"
 

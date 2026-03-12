@@ -6,21 +6,22 @@ set -e
 
 echo "🚀 Setting up WSL environment and starting server..."
 
-# Navigate to project
-cd /mnt/t/Python/cc_mobile
+# Resolve project directory (directory containing this script)
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR"
+VENV_DIR="$PROJECT_DIR/.venv"
 
-# Step 1: Create venv in Linux filesystem if it doesn't exist
-if [ ! -d ~/venvs/cc_mobile ]; then
+# Step 1: Create project-root venv if it doesn't exist
+if [ ! -d "$VENV_DIR" ]; then
     echo "📦 Creating virtual environment..."
-    mkdir -p ~/venvs
-    python3 -m venv ~/venvs/cc_mobile
+    python3 -m venv "$VENV_DIR"
     echo "✓ Virtual environment created"
 else
     echo "✓ Virtual environment already exists"
 fi
 
 # Step 2: Activate venv
-source ~/venvs/cc_mobile/bin/activate
+source "$VENV_DIR/bin/activate"
 
 # Step 3: Upgrade pip
 echo "📦 Upgrading pip..."
@@ -73,8 +74,8 @@ fi
 # Step 7: Start server
 echo ""
 echo "🚀 Starting FastAPI server..."
-echo "   Access at: http://localhost:8000"
-echo "   Docs at: http://localhost:8000/docs"
+echo "   Access at: http://localhost:8675"
+echo "   Docs at: http://localhost:8675/docs"
 echo ""
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8675
 
