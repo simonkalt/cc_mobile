@@ -1,0 +1,465 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  line-height: 1;
+  color: #333;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 90vh;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 10px;
+}
+
+header {
+  text-align: center;
+  color: white;
+  margin-bottom: 60px;
+}
+
+h1 {
+  font-size: 3.5rem;
+  font-weight: 700;
+  margin-bottom: 20px;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.tagline {
+  font-size: 1.5rem;
+  font-weight: 300;
+  opacity: 0.95;
+  margin-bottom: 10px;
+}
+
+.main-content {
+  background: white;
+  border-radius: 20px;
+  padding: 40px 40px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  margin-bottom: 40px;
+}
+
+.product-title {
+  font-size: 2.5rem;
+  color: #667eea;
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.ai-logo-container-container {
+  text-align: center;
+  width: 100%;
+  justify-content: baseline;
+  vertical-align: baseline;
+}
+
+.ai-logo-container {
+  display: flex;
+  align-items: baseline;
+  /* 🔑 aligns image + text baseline */
+  justify-content: center;
+  /* centers the entire line */
+  text-align: center;
+  gap: 0;
+  /* no unwanted spacing */
+}
+.carrer-helper-title {
+  font-size: 2.5rem;
+  color: #1739d3;
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.ai-logo {
+  height: 1.05em;
+  /* 🔑 match font height */
+  width: auto;
+  /* preserve aspect ratio */
+  vertical-align: baseline;
+  /* extra safety */
+  margin: 0 0.00em;
+  /* subtle spacing if needed */
+  transform: translateY(0.15em);
+      /* tweak up/down if needed */
+}
+
+.product-description {
+  font-size: 1.2rem;
+  font-weight: 400;
+  color: #555;
+  text-align: center;
+  margin-bottom: 50px;
+  line-height: 1.8;
+}
+
+.screenshot-carousel {
+  margin: 40px 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.carousel-viewport {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  padding: 0;
+  min-height: 400px;
+}
+
+.carousel-track {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+  padding: 0;
+}
+
+.carousel-image-wrapper {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 140px; /* 150px image + 10px gap */
+  height: 340px;
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-top: 10px;
+}
+
+.carousel-image-wrapper.center {
+  width: 250px; /* 240px image + 10px gap */
+  height: 380px;
+}
+
+.carousel-image {
+  border-radius: 15px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+  transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  object-fit: contain;
+  padding: 10px 10px 10px 10px;
+  display: block;
+}
+
+.carousel-image.side {
+  width: 150px;
+  height: 250px;
+  opacity: 0.5;
+  filter: blur(2px);
+}
+
+.carousel-image.center {
+  width: 240px;
+  height: 360px;
+  opacity: 1;
+  filter: blur(0);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.carousel-image.off-screen {
+  opacity: 0;
+  filter: blur(3px);
+}
+
+.carousel-nav {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 30px;
+}
+
+.carousel-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ddd;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.carousel-dot.active {
+  background: #667eea;
+  transform: scale(1.3);
+}
+
+.carousel-arrow {
+  position: absolute;
+  top: calc(50% + 5px);
+  transform: translateY(-50%);
+  background: rgba(102, 126, 234, 0.8);
+  color: white;
+  border: none;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  cursor: pointer;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+.carousel-arrow:hover {
+  background: rgba(102, 126, 234, 1);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.carousel-arrow.prev {
+  left: 20px;
+}
+
+.carousel-arrow.next {
+  right: 20px;
+}
+
+/* Modal zoom styles */
+.carousel-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.carousel-modal.active {
+  display: flex;
+}
+
+.carousel-modal-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 15px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  cursor: default;
+  pointer-events: none;
+}
+
+.carousel-modal-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  border: none;
+  color: #333;
+  font-size: 1.5rem;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 1001;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.carousel-modal-close:hover {
+  background: rgba(255, 255, 255, 1);
+  transform: scale(1.1);
+}
+
+@media (max-width: 768px) {
+  .carousel-modal-close {
+    width: 40px;
+    height: 40px;
+    font-size: 1.2rem;
+    top: 10px;
+    right: 10px;
+  }
+}
+
+@media (max-width: 768px) {
+  .carousel-image.center {
+    width: 180px;
+    height: 270px;
+  }
+
+  .carousel-image-wrapper.center {
+    width: 190px;
+    height: 280px;
+  }
+
+  .carousel-image.side {
+    width: 100px;
+    height: 150px;
+  }
+
+  .carousel-image-wrapper {
+    width: 110px;
+    height: 270px;
+  }
+
+  .carousel-arrow {
+    width: 40px;
+    height: 40px;
+    font-size: 1.2rem;
+  }
+
+  .carousel-arrow.prev {
+    left: 10px;
+  }
+
+  .carousel-arrow.next {
+    right: 10px;
+  }
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 30px;
+  margin: 50px 0;
+}
+
+.feature {
+  text-align: center;
+  padding: 30px;
+  background: #f8f9fa;
+  border-radius: 15px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.feature:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.feature-icon {
+  font-size: 3rem;
+  margin-bottom: 20px;
+}
+
+.feature h3 {
+  color: #667eea;
+  margin-bottom: 15px;
+  font-size: 1.5rem;
+}
+
+.feature p {
+  color: #666;
+  line-height: 1.6;
+}
+
+.cta-section {
+  text-align: center;
+  margin: 50px 0;
+}
+
+.cta-label {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #667eea;
+  margin-bottom: 25px;
+  display: block;
+}
+
+.app-store-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.app-store-button {
+  display: inline-block;
+  cursor: pointer;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  height: 60px;
+}
+
+.app-store-button:hover {
+  transform: translateY(-3px) scale(1.05);
+  opacity: 0.9;
+}
+
+.app-store-button img {
+  height: 100%;
+  width: auto;
+  display: block;
+}
+
+footer {
+  background: white;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.footer-links a {
+  color: #667eea;
+  text-decoration: none;
+  font-size: 1.1rem;
+  font-weight: 500;
+  transition: color 0.3s ease;
+  padding: 10px 20px;
+  border-radius: 8px;
+  transition: background-color 0.3s ease;
+}
+
+.footer-links a:hover {
+  color: #764ba2;
+  background-color: #f8f9fa;
+}
+
+.copyright {
+  color: #999;
+  margin-top: 20px;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  h1 {
+    font-size: 2.5rem;
+  }
+
+  .tagline {
+    font-size: 1.2rem;
+    text-align: left;
+  }
+
+  .product-title {
+    font-size: 2rem;
+  }
+
+  .main-content {
+    padding: 20px 20px;
+  }
+
+  .features {
+    grid-template-columns: 1fr;
+  }
+}
+

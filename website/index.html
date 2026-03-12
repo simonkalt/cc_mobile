@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sAImon Software - Career Helper: AI Cover Letter Generator</title>
+    <link rel="stylesheet" href="/website/styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1 class="ai-logo-container">
+          s<img src="/website/images/ai-hero.gif" alt="AI" class="ai-logo" />mon
+          Software
+        </h1>
+        <p class="tagline">AI-Powered Solutions for Your Career</p>
+      </header>
+
+      <div class="main-content">
+        <h2 class="product-title"><span class="carrer-helper-title">Career Helper</span>: AI Cover Letter Generator</span></h2>
+        <p class="product-description">
+          Transform your job applications with AI-powered cover letters tailored
+          to each position.<br />Save time, stand out from the crowd, and land
+          your dream job faster.
+        </p>
+
+        <div class="screenshot-carousel">
+          <div class="carousel-viewport">
+            <div class="carousel-track" id="carouselTrack">
+              <!-- Images will be loaded dynamically -->
+            </div>
+          </div>
+          <button
+            class="carousel-arrow prev"
+            id="prevBtn"
+            aria-label="Previous image"
+          >
+            ‹
+          </button>
+          <button
+            class="carousel-arrow next"
+            id="nextBtn"
+            aria-label="Next image"
+          >
+            ›
+          </button>
+          <div class="carousel-nav" id="carouselNav">
+            <!-- Dots will be loaded dynamically -->
+          </div>
+        </div>
+
+        <!-- Modal for zoomed image -->
+        <div class="carousel-modal" id="carouselModal">
+          <button
+            class="carousel-modal-close"
+            id="modalCloseBtn"
+            aria-label="Close"
+          >
+            ×
+          </button>
+          <img
+            class="carousel-modal-image"
+            id="modalImage"
+            src=""
+            alt="Zoomed screenshot"
+          />
+        </div>
+
+        <div class="features">
+          <div class="feature">
+            <div class="feature-icon">🤖</div>
+            <h3>AI-Powered</h3>
+            <p>
+              Leverage advanced AI to generate personalized cover letters that
+              match your style and the job requirements.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">⚡</div>
+            <h3>Fast & Efficient</h3>
+            <p>
+              Create professional cover letters in minutes, not hours. Focus on
+              what matters most - your career.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">🎯</div>
+            <h3>Tailored to You</h3>
+            <p>
+              Each cover letter is customized to match the specific job posting
+              and your unique background.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">📄</div>
+            <h3>Editable in or outside of the app</h3>
+            <p>
+              Edit the cover letter in the app or outside of the app using a DOCX editor (Word, Google Docs, etc.).
+            </p>
+          </div>
+          
+        </div>
+
+        <div class="cta-section">
+          <span class="cta-label">Get Started</span>
+          <div class="app-store-buttons">
+            <div
+              class="app-store-button"
+              id="googlePlayBtn"
+              onclick="alert('Coming soon.')"
+            >
+              <img
+                src="/website/images/footer-google-play.avif"
+                alt="Get it on Google Play"
+              />
+            </div>
+            <div
+              class="app-store-button"
+              id="appStoreBtn"
+              onclick="alert('Coming soon.')"
+            >
+              <img
+                src="/website/images/footer-app-store.avif"
+                alt="Download on the App Store"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer>
+        <div class="footer-links">
+          <a
+            href="/documents/sAImon Software - Terms of Service.pdf"
+            target="_blank"
+            >Terms of Service</a
+          >
+          <a
+            href="/documents/sAImon Software - Privacy Policy.pdf"
+            target="_blank"
+            >Privacy Policy</a
+          >
+          <a href="/delete-account.html">Delete account</a>
+        </div>
+        <p class="copyright">
+          &copy; 2024 sAImon Software. All rights reserved.
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      // Image carousel functionality
+      const imageCount = 19; // Images numbered 1-19
+      let currentIndex = 0;
+      const images = [];
+
+      // Load images
+      for (let i = 1; i <= imageCount; i++) {
+        images.push(`/website/images/${i}.png`);
+      }
+
+      const carouselNav = document.getElementById("carouselNav");
+      const prevBtn = document.getElementById("prevBtn");
+      const nextBtn = document.getElementById("nextBtn");
+      const carouselTrack = document.getElementById("carouselTrack");
+      let isAnimating = false;
+
+      // Create carousel dots
+      images.forEach((_, index) => {
+        const dot = document.createElement("button");
+        dot.className = "carousel-dot" + (index === 0 ? " active" : "");
+        dot.setAttribute("aria-label", `Go to image ${index + 1}`);
+        dot.addEventListener("click", () => goToImage(index));
+        carouselNav.appendChild(dot);
+      });
+
+      function renderCarousel() {
+        carouselTrack.innerHTML = "";
+
+        // Create all image wrappers
+        images.forEach((imageSrc, index) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "carousel-image-wrapper";
+
+          const img = document.createElement("img");
+          img.src = imageSrc;
+          img.alt = `Screenshot ${index + 1}`;
+          img.className = "carousel-image";
+
+          // Determine position relative to center
+          const distanceFromCenter = index - currentIndex;
+
+          if (distanceFromCenter === 0) {
+            // Center image - make it clickable to zoom
+            wrapper.classList.add("center");
+            img.classList.add("center");
+            img.style.cursor = "zoom-in";
+            img.addEventListener("click", (e) => {
+              e.stopPropagation();
+              openModal(imageSrc);
+            });
+          } else if (Math.abs(distanceFromCenter) <= 2) {
+            // Side images (within 2 positions)
+            img.classList.add("side");
+            img.addEventListener("click", () => goToImage(index));
+          } else {
+            // Off-screen images
+            img.classList.add("off-screen");
+            img.classList.add("side");
+          }
+
+          wrapper.appendChild(img);
+          carouselTrack.appendChild(wrapper);
+        });
+
+        // Update track position
+        updateTrackPosition();
+
+        // Update dots
+        document.querySelectorAll(".carousel-dot").forEach((dot, index) => {
+          dot.classList.toggle("active", index === currentIndex);
+        });
+      }
+
+      function updateTrackPosition() {
+        const viewportWidth = carouselTrack.parentElement.offsetWidth;
+        const centerWrapperWidth = 250;
+        const sideWrapperWidth = 140;
+        const gap = 10;
+
+        // Calculate position to center the current image
+        // All images before currentIndex are side images
+        // Each takes sideWrapperWidth, with gap between them
+        // The center image is wider (centerWrapperWidth)
+        let positionBeforeCenter = 0;
+        for (let i = 0; i < currentIndex; i++) {
+          positionBeforeCenter += sideWrapperWidth + gap;
+        }
+
+        // Center of current image = positionBeforeCenter + centerWrapperWidth/2
+        // We want this to be at viewportWidth/2
+        // So: trackPosition + positionBeforeCenter + centerWrapperWidth/2 = viewportWidth/2
+        const trackPosition =
+          viewportWidth / 2 - positionBeforeCenter - centerWrapperWidth / 2;
+
+        carouselTrack.style.transform = `translateX(${trackPosition}px)`;
+      }
+
+      function goToImage(index) {
+        if (isAnimating || index === currentIndex) return;
+        isAnimating = true;
+        currentIndex = index;
+        updateTrackPosition();
+
+        // Update image classes after transition starts
+        setTimeout(() => {
+          renderCarousel();
+          setTimeout(() => {
+            isAnimating = false;
+          }, 50);
+        }, 50);
+      }
+
+      function nextImage() {
+        if (isAnimating) return;
+        isAnimating = true;
+        currentIndex = (currentIndex + 1) % images.length;
+        updateTrackPosition();
+
+        setTimeout(() => {
+          renderCarousel();
+          setTimeout(() => {
+            isAnimating = false;
+          }, 50);
+        }, 50);
+      }
+
+      function prevImage() {
+        if (isAnimating) return;
+        isAnimating = true;
+        currentIndex = (currentIndex - 1 + images.length) % images.length;
+        updateTrackPosition();
+
+        setTimeout(() => {
+          renderCarousel();
+          setTimeout(() => {
+            isAnimating = false;
+          }, 50);
+        }, 50);
+      }
+
+      prevBtn.addEventListener("click", prevImage);
+      nextBtn.addEventListener("click", nextImage);
+
+      // Keyboard navigation
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft") prevImage();
+        if (e.key === "ArrowRight") nextImage();
+      });
+
+      // Modal functionality
+      const carouselModal = document.getElementById("carouselModal");
+      const modalImage = document.getElementById("modalImage");
+      const modalCloseBtn = document.getElementById("modalCloseBtn");
+
+      function openModal(imageSrc) {
+        modalImage.src = imageSrc;
+        carouselModal.classList.add("active");
+        document.body.style.overflow = "hidden"; // Prevent background scrolling
+      }
+
+      function closeModal() {
+        carouselModal.classList.remove("active");
+        document.body.style.overflow = ""; // Restore scrolling
+      }
+
+      // Close modal when clicking the X button
+      modalCloseBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeModal();
+      });
+
+      // Close modal when clicking outside the image (on the dark background)
+      carouselModal.addEventListener("click", (e) => {
+        if (e.target === carouselModal) {
+          closeModal();
+        }
+      });
+
+      // Close modal with Escape key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && carouselModal.classList.contains("active")) {
+          closeModal();
+        }
+      });
+
+      // Initialize carousel
+      renderCarousel();
+    </script>
+  </body>
+</html>
