@@ -1,6 +1,7 @@
 """
 PDF generation related Pydantic models
 """
+
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -32,3 +33,21 @@ class GeneratePDFRequest(BaseModel):
     user_id: Optional[str] = None
     user_email: Optional[str] = None
 
+
+class PrintPreviewPDFRequest(BaseModel):
+    """Request body for Print Preview. HTML is source of truth: send htmlContent. markdownContent accepted for backward compatibility."""
+
+    htmlContent: Optional[str] = None
+    markdownContent: Optional[str] = None
+    printProperties: (
+        PrintProperties  # User settings: margins, font (if not default), page size, line height
+    )
+    user_id: Optional[str] = None
+    user_email: Optional[str] = None
+
+
+class PrintTemplateRequest(BaseModel):
+    """Request body for Print Template. Returns exact HTML/CSS wrapper used for PDF."""
+
+    printProperties: PrintProperties
+    htmlContent: Optional[str] = None

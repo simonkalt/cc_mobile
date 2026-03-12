@@ -1,6 +1,7 @@
 """
 Cover letter generation service
 """
+
 import os
 import json
 import datetime
@@ -9,11 +10,23 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status  # type: ignore[import-untyped]
+
+# Try to import colorama for better color support in WSL/Windows
+try:
+    import colorama  # type: ignore[import-untyped]
+
+    colorama.init(autoreset=True)
+    COLORAMA_AVAILABLE = True
+except ImportError:
+    COLORAMA_AVAILABLE = False
 
 from app.core.config import settings
+from app.utils.html_normalizer import html_p_to_br, collapse_br_pairs, double_break_after_groups
+from app.utils.template_loader import get_template_for_profile
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
+# from app.utils.docx_generator import insert_line_breaks_in_long_paragraphs
 from app.utils.llm_utils import (
     load_system_prompt,
     normalize_llm_name,
@@ -23,37 +36,173 @@ from app.services.user_service import (
     get_user_by_id,
     get_user_by_email,
     increment_llm_usage_count,
+    decrement_generation_credits,
 )
 
 logger = logging.getLogger(__name__)
 
+
+def _write_llm_prompt_log(
+    llm: str,
+    *,
+    full_text: Optional[str] = None,
+    messages: Optional[list] = None,
+    system: Optional[str] = None,
+    user_content_list: Optional[list] = None,
+) -> None:
+    """
+    Write the exact payload sent to the LLM to tmp/llm_prompt_sent.txt for manual analysis
+    (e.g. to debug line-break behavior). Overwrites on each generation.
+    """
+    try:
+        _service_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _path = os.path.join(_tmp_dir, "llm_prompt_sent.txt")
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            "=" * 80,
+            f"LLM: {llm}",
+            f"Timestamp: {ts}",
+            "=" * 80,
+            "",
+        ]
+        if full_text is not None:
+            lines.append("--- FULL MESSAGE SENT (e.g. Gemini/OCI) ---")
+            lines.append("")
+            lines.append(full_text)
+        elif messages is not None:
+            lines.append("--- MESSAGES SENT (e.g. OpenAI/Grok/Llama) ---")
+            for i, m in enumerate(messages, 1):
+                role = m.get("role", "?")
+                content = m.get("content", "")
+                lines.append("")
+                lines.append(f"--- Message {i} (role={role}) ---")
+                lines.append(content)
+        elif system is not None and user_content_list is not None:
+            lines.append("--- SYSTEM (Claude) ---")
+            lines.append("")
+            lines.append(system)
+            lines.append("")
+            lines.append("--- USER CONTENT (Claude) ---")
+            for i, block in enumerate(user_content_list, 1):
+                text = block.get("text", "") if isinstance(block, dict) else str(block)
+                lines.append("")
+                lines.append(f"--- Block {i} ---")
+                lines.append(text)
+        lines.append("")
+        lines.append("=" * 80)
+        with open(_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        logger.info("Wrote exact LLM prompt to %s for analysis", _path)
+    except Exception as e:
+        logger.warning("Could not write LLM prompt log: %s", e)
+
+
+def _write_additional_instructions_debug(
+    additional_instructions: Optional[str],
+    letter_content: Optional[str],
+) -> None:
+    """
+    Write tmp/debug_additional_instructions.txt to trace where additional instructions
+    (e.g. 'Make my name huge') were lost: prompt, LLM response, or our pipeline.
+    """
+    try:
+        _service_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _path = os.path.join(_tmp_dir, "debug_additional_instructions.txt")
+        content = letter_content or ""
+        has_style_tags = (
+            "[size:" in content or "[font:" in content or "[color:" in content
+        )
+        lines = [
+            "=== Additional instructions trace (docx-only flow) ===",
+            "",
+            "1. ADDITIONAL_INSTRUCTIONS (raw from request):",
+            repr(additional_instructions or ""),
+            "   (If empty: request did not send additional_instructions; check frontend/API payload.)",
+            "",
+            "2. CONTENT_CONTAINS_STYLE_TAGS (did LLM add [size:], [font:], [color:]?):",
+            str(has_style_tags),
+            "",
+            "3. CONTENT_PREVIEW (first 1200 chars of content used for docx):",
+            repr(content[:1200]) if content else "(empty)",
+            "",
+            "4. WHERE IT CAN FAIL:",
+            "   A) Not in prompt -> See tmp/llm_prompt_sent.txt, search for 'ADDITIONAL INSTRUCTIONS' or your note.",
+            "   B) LLM ignored it -> See tmp/llm_response_received.txt, search for your name or [size: or [font:.",
+            "   C) Content has tags but docx does not -> Our pipeline (docx_generator) stripped or did not apply.",
+            "   D) Content has no style tags -> LLM did not add the styling.",
+            "",
+        ]
+        with open(_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        logger.info("Wrote additional instructions debug trace to %s", _path)
+    except Exception as e:
+        logger.warning("Could not write debug_additional_instructions.txt: %s", e)
+
+
+def _write_llm_response_log(llm: str, response_text: str) -> None:
+    """
+    Write the exact raw response from the LLM to tmp/llm_response_received.txt
+    for manual analysis (e.g. to debug line-break behavior). Overwrites on each generation.
+    """
+    try:
+        _service_dir = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+        _tmp_dir = os.path.join(_project_root, "tmp")
+        os.makedirs(_tmp_dir, exist_ok=True)
+        _path = os.path.join(_tmp_dir, "llm_response_received.txt")
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(_path, "w", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write(f"LLM: {llm}\n")
+            f.write(f"Timestamp: {ts}\n")
+            f.write(f"Length: {len(response_text)} characters\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(response_text)
+            if response_text and not response_text.endswith("\n"):
+                f.write("\n")
+        logger.info("Wrote exact LLM response to %s for analysis", _path)
+    except Exception as e:
+        logger.warning("Could not write LLM response log: %s", e)
+
+
 # Try to import LLM libraries
 try:
     from openai import OpenAI
+
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
 
 try:
     import anthropic
+
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 try:
     import google.generativeai as genai
+
     GOOGLE_AVAILABLE = True
 except ImportError:
     GOOGLE_AVAILABLE = False
 
 try:
     import requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
     import ollama
+
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
@@ -70,6 +219,7 @@ xai_model = "grok-4-fast-reasoning"
 # Try to load GPT model from LLM config
 try:
     from llm_config_endpoint import load_llm_config
+
     config = load_llm_config()
     gpt_model = config.get("internalModel", "gpt-5.2")
     logger.info(f"Loaded GPT model from config: {gpt_model}")
@@ -91,6 +241,7 @@ def get_job_info(
     phone_number: str = "",
     user_id: Optional[str] = None,
     user_email: Optional[str] = None,
+    is_plain_text: bool = False,
 ):
     """
     Generate cover letter based on job information using specified LLM.
@@ -99,21 +250,27 @@ def get_job_info(
     Args:
         user_id: Optional user ID to access custom personality profiles
         user_email: Optional user email to access custom personality profiles
+        is_plain_text: If True, skip all file processing (S3, local files, base64) and treat resume as plain text
     """
     # Get today's date if not provided
-    today_date = (
-        date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
-    )
+    today_date_iso = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
+    # Convert to long form (February 12, 2026) for LLM so it uses it directly; fallback to ISO if parse fails
+    try:
+        dt = datetime.datetime.strptime(today_date_iso, "%Y-%m-%d")
+        today_date = dt.strftime("%B %d, %Y")
+    except ValueError:
+        today_date = today_date_iso
 
     # Check if resume is a file path, S3 key, or base64 data
     resume_content = resume
 
+    # If explicitly marked as plain text, skip all file processing
+    if is_plain_text:
+        logger.info("Resume marked as plain text, skipping file processing")
+        resume_content = resume
     # First, check if it's base64 encoded data
-    if (
-        resume
-        and len(resume) > 100
-        and not resume.endswith(".pdf")
-        and not resume.endswith(".PDF")
+    elif (
+        resume and len(resume) > 100 and not resume.endswith(".pdf") and not resume.endswith(".PDF")
     ):
         try:
             # Try to decode as base64
@@ -131,7 +288,8 @@ def get_job_info(
             logger.debug(f"Resume field is not base64 encoded: {str(e)}")
 
     # If base64 decode didn't work, try S3 or local file paths
-    if resume_content == resume and resume:
+    # Skip if explicitly marked as plain text
+    if resume_content == resume and resume and not is_plain_text:
         # Check if it looks like an S3 key (contains '/' - format: user_id/filename or just filename)
         # S3 keys from the client will be in format: user_id/filename.pdf
         is_s3_key = "/" in resume
@@ -174,9 +332,7 @@ def get_job_info(
                         logger.info(f"Downloading PDF from S3: {s3_path}")
                         pdf_bytes = download_pdf_from_s3(s3_path)
                         resume_content = read_pdf_from_bytes(pdf_bytes)
-                        logger.info(
-                            "Successfully downloaded and extracted text from S3 PDF"
-                        )
+                        logger.info("Successfully downloaded and extracted text from S3 PDF")
                     except Exception as e:
                         logger.warning(
                             f"Failed to download from S3: {str(e)}. Will try local file paths."
@@ -190,7 +346,7 @@ def get_job_info(
             # MongoDB ObjectId is 24 characters, so check if first part is 24 chars
             parts = resume.split("/", 1)
             is_s3_key_format = len(parts) == 2 and len(parts[0]) == 24
-            
+
             # Only try local paths if it doesn't look like an S3 key
             if not is_s3_key_format:
                 # Get the current working directory
@@ -250,7 +406,7 @@ def get_job_info(
                     logger.warning(
                         f"PDF file not found locally. Tried paths: {possible_paths[:5]}... (showing first 5)"
                     )
-            
+
             # If we haven't successfully extracted content, return the original
             if resume_content == resume:
                 if is_s3_key_format:
@@ -269,9 +425,7 @@ def get_job_info(
 
     # Require user_id or user_email to access personality profiles
     if not user_id and not user_email:
-        logger.warning(
-            "No user_id or user_email provided. Cannot retrieve personality profiles."
-        )
+        logger.warning("No user_id or user_email provided. Cannot retrieve personality profiles.")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="user_id or user_email is required to access personality profiles",
@@ -303,9 +457,7 @@ def get_job_info(
                 )
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Get user's custom personality profiles
         # user is a UserResponse Pydantic model, so access preferences as attribute
@@ -320,11 +472,7 @@ def get_job_info(
                     # Verify structure and filter out invalid profiles
                     normalized_profiles = []
                     for profile in custom_profiles:
-                        if (
-                            isinstance(profile, dict)
-                            and profile.get("id")
-                            and profile.get("name")
-                        ):
+                        if isinstance(profile, dict) and profile.get("id") and profile.get("name"):
                             # Extract only id, name, description
                             normalized_profiles.append(
                                 {
@@ -344,20 +492,17 @@ def get_job_info(
         )
 
         if not custom_profiles:
-            logger.warning(
-                f"No personality profiles found for user. Available profiles: []"
-            )
+            logger.warning(f"No personality profiles found for user. Available profiles: []")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No personality profiles found for user. Please add personality profiles in your user preferences.",
             )
 
-        logger.info(
-            f"Found {len(custom_profiles)} custom personality profiles for user"
-        )
+        logger.info(f"Found {len(custom_profiles)} custom personality profiles for user")
         # Try to find matching profile by name (case-insensitive) or ID
         # Normalize profiles to ensure structure is {"id", "name", "description"} only
         profile_found = False
+        matched_profile_name = ""
         for profile in custom_profiles:
             if isinstance(profile, dict):
                 # Normalize structure: extract only id, name, description
@@ -368,6 +513,7 @@ def get_job_info(
                 # Match by name (case-insensitive) or ID
                 if tone.lower() == profile_name or tone == profile_id:
                     selected_profile = profile_desc
+                    matched_profile_name = profile.get("name", tone)
                     logger.info(
                         f"Using custom personality profile: '{profile.get('name')}' (ID: {profile_id})"
                     )
@@ -413,7 +559,7 @@ def get_job_info(
     )
 
     # Build personality instruction - make it prominent and direct
-    personality_instruction = f"""
+    critical_instructions = f"""
 === PERSONALITY PROFILE INSTRUCTION - CRITICAL ===
 YOU MUST FOLLOW THIS PERSONALITY PROFILE EXACTLY:
 {selected_profile}
@@ -422,8 +568,86 @@ Apply this personality throughout the entire cover letter. This instruction take
 === END PERSONALITY PROFILE INSTRUCTION ===
 """
     logger.info(
-        f"Personality instruction prepared ({len(personality_instruction)} chars): {selected_profile[:100]}..."
+        f"Personality instruction prepared ({len(critical_instructions)} chars): {selected_profile[:100]}..."
     )
+
+    # Build template structure instruction - align letter layout with template (pinned: set USE_TEMPLATE_IN_PROMPT=false to revert)
+    template_instruction = ""
+    if settings.USE_TEMPLATE_IN_PROMPT:
+        template_content = get_template_for_profile(matched_profile_name or tone)
+        if template_content:
+            template_instruction = f"""
+=== TEMPLATE STRUCTURE - MATCH LINE BREAKS EXACTLY ===
+Your "content" output MUST follow this template line-for-line so paragraph and line breaks are consistent.
+
+RULES:
+- Each non-blank line in the template = one line in your content (use one newline (\\n) after it before the next line).
+- Each blank line in the template = exactly two newlines (\\n\\n) in your content — that is the paragraph separator.
+- Do not merge lines or skip blank lines. The number of lines and blank lines in your output must match the template.
+
+TEMPLATE (copy its structure; replace placeholders with real data):
+---
+{template_content}
+---
+
+Placeholders: <<date>>, <<name>>, <<phone>>, <<email>>, <<address>>, <<city, state, zip>>, <<hiring manager>>, <<company name>>, <<company address>>, <<position title>>, <<salutation>>, <<body paragraph>> (repeat for each body paragraph), <<complimentary close>> — replace with actual resume/job data. Generate the right number of <<body paragraph>> blocks.
+=== END TEMPLATE STRUCTURE ===
+"""
+            logger.info("Template structure instruction added to prompt (USE_TEMPLATE_IN_PROMPT=true)")
+    if not template_instruction and not settings.USE_TEMPLATE_IN_PROMPT:
+        logger.debug("Template omitted from prompt (USE_TEMPLATE_IN_PROMPT=false)")
+    critical_instructions = critical_instructions + template_instruction
+
+    # Typography baseline: when user selects a non-default font, pass as baseline for body; LLM may vary for lists/tables
+    if user and user.preferences:
+        app_settings = (user.preferences or {}).get("appSettings", {})
+        if isinstance(app_settings, dict):
+            print_props = app_settings.get("printProperties", {})
+            if isinstance(print_props, dict) and print_props:
+                use_default_fonts = print_props.get("useDefaultFonts", False)
+                font_family = print_props.get("fontFamily", "Times New Roman")
+                font_size = print_props.get("fontSize", 12)
+                line_height = print_props.get("lineHeight", 1.6)
+                is_default_font = (
+                    font_family and str(font_family).strip().lower() == "default"
+                )
+                if not is_default_font and not use_default_fonts:
+                    typography_instruction = f"""
+=== TYPOGRAPHY BASELINE ===
+Use font-family '{font_family}', font-size {font_size}pt, and line-height {line_height} as the baseline for main body text.
+You may creatively vary font size, color, and style for lists, tables, headings, and key phrases using inline HTML (e.g. <span style='font-size:14pt'>, <span style='color:#c00000'>). The baseline applies to the main letter content; lists and tables can use different sizes for visual hierarchy.
+=== END TYPOGRAPHY BASELINE ===
+"""
+                    critical_instructions = critical_instructions + typography_instruction
+                    logger.info(
+                        f"Added typography baseline to prompt: fontFamily={font_family}, fontSize={font_size}pt"
+                    )
+
+    # When USE_DOCX_COMPONENTS: ask LLM to return document as three OOXML components (word/document.xml, numbering.xml, styles.xml)
+    if getattr(settings, "USE_DOCX_COMPONENTS", False):
+        docx_components_instruction = """
+=== OUTPUT FORMAT: DOCX AS XML COMPONENTS (required when this section is present) ===
+Return a JSON object with exactly three string fields. The values must be valid XML for a Word document.
+
+1. "document_xml": Full content of word/document.xml.
+   Root: <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body> ... </w:body></w:document>
+   - Ordinary paragraph: <w:p><w:r><w:t>Your text here</w:t></w:r></w:p>
+   - BULLET LISTS (mandatory): Do NOT put bullet characters (•, -, *, etc.) inside <w:t>. For every bullet list item you MUST use this exact structure so the document gets proper hanging indents:
+     <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>List item text only</w:t></w:r></w:p>
+     The <w:numPr> block (with ilvl 0 and numId 1) is what makes Word show the bullet and hanging indent. The text inside <w:t> must be the list item content only—no leading bullet character.
+   - End the body with <w:sectPr/> before </w:body>.
+
+2. "numbering_xml": (optional) Full content of word/numbering.xml. If you omit or leave empty, the system uses a default (numId 1 = bullet with hanging indent).
+
+3. "styles_xml": (optional) Full content of word/styles.xml. If you omit or leave empty, the system uses a default.
+
+Escape quotes inside JSON strings (use \\" for a literal quote). Newlines inside the XML strings are allowed.
+=== END DOCX COMPONENTS ===
+"""
+        critical_instructions = critical_instructions + docx_components_instruction
+        logger.info("DOCX components output format added to prompt (USE_DOCX_COMPONENTS=true)")
+
+    # Additional Instructions are passed to the LLM only (below); no parsing or post/pre adorning of the letter here.
 
     # Build message payload (without additional_instructions - it will be appended last to override)
     message_data = {
@@ -445,11 +669,59 @@ Apply this personality throughout the entire cover letter. This instruction take
 
     message = json.dumps(message_data)
 
-    # Prepare additional instructions to be appended last (so they override all other instructions)
+    # Prepare additional instructions - enhance by default, override ONLY if explicitly requested
     additional_instructions_text = ""
     if additional_instructions and additional_instructions.strip():
-        # Use very explicit override language that LLMs will prioritize
-        additional_instructions_text = f"""
+        # Check if the additional instructions explicitly request an override
+        # Override mode should ONLY trigger if user explicitly commands it with very specific language
+        # Default behavior is ALWAYS enhancement mode
+        instructions_lower = additional_instructions.lower().strip()
+
+        # EXTREMELY strict override detection - user must explicitly command override
+        # Override mode ONLY triggers if instructions start with explicit override markers
+        # This prevents accidental triggering from normal instructions
+
+        # Check if instructions start with explicit override markers
+        # Must literally start with one of these exact phrases (case-insensitive)
+        override_markers = [
+            "override:",
+            "override ",
+            "ignore all previous:",
+            "ignore all previous ",
+            "ignore previous:",
+            "ignore previous ",
+            "disregard all previous:",
+            "disregard all previous ",
+            "disregard previous:",
+            "disregard previous ",
+        ]
+
+        starts_with_override = any(
+            instructions_lower.startswith(marker) for marker in override_markers
+        )
+
+        # Also check for explicit override phrases anywhere in the text (but be very strict)
+        explicit_override_phrases = [
+            "override all previous instructions",
+            "ignore all previous instructions",
+            "disregard all previous instructions",
+        ]
+
+        contains_explicit_override = any(
+            phrase in instructions_lower for phrase in explicit_override_phrases
+        )
+
+        # ONLY trigger override if user explicitly commands it
+        is_override = starts_with_override or contains_explicit_override
+
+        # Log detection for debugging
+        logger.info(
+            f"Additional instructions override detection: starts_with_override={starts_with_override}, contains_explicit_override={contains_explicit_override}, is_override={is_override}"
+        )
+
+        if is_override:
+            # User explicitly requested override - use override language
+            additional_instructions_text = f"""
 
 === FINAL OVERRIDE INSTRUCTIONS - HIGHEST PRIORITY ===
 IGNORE ALL PREVIOUS INSTRUCTIONS ABOUT LENGTH, TONE, STYLE, OR FORMATTING.
@@ -464,9 +736,46 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
 === END OVERRIDE INSTRUCTIONS ===
 """
-        logger.info(
-            f"Additional instructions provided ({len(additional_instructions)} chars) - will override ALL other instructions"
-        )
+            # logger.info(
+            #     f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE detected (explicit override requested)"
+            # )
+        else:
+            # User wants to enhance/supplement - add as additional guidance
+            additional_instructions_text = f"""
+
+=== ADDITIONAL INSTRUCTIONS ===
+Please also take into account the following additional guidance when generating the cover letter.
+These instructions should enhance and work together with the personality profile, system instructions, and other guidance provided:
+
+{additional_instructions}
+
+Please incorporate these instructions while maintaining consistency with all other provided guidance.
+=== END ADDITIONAL INSTRUCTIONS ===
+"""
+            # logger.info(
+            #     f"Additional instructions provided ({len(additional_instructions)} chars) - ENHANCEMENT MODE (will supplement other instructions)"
+            # )
+
+    # Debug: capture prompts for analysis (tmp/debug_prompts.json)
+    # try:
+    #     _service_dir = os.path.dirname(os.path.abspath(__file__))
+    #     _project_root = os.path.normpath(os.path.join(_service_dir, "..", ".."))
+    #     _tmp_dir = os.path.join(_project_root, "tmp")
+    #     os.makedirs(_tmp_dir, exist_ok=True)
+    #     _debug_path = os.path.join(_tmp_dir, "debug_prompts.json")
+    #     _debug_payload = {
+    #         "personality_tone_text": selected_profile,
+    #         "template_content": template_content or None,
+    #         "matched_profile_name": matched_profile_name or tone,
+    #         "job_description": jd,
+    #         "resume_text": resume_content,
+    #         "additional_instructions_text": (additional_instructions or "").strip(),
+    #     }
+    #     with open(_debug_path, "w", encoding="utf-8") as _f:
+    #         json.dump(_debug_payload, _f, indent=2, ensure_ascii=False)
+    #     logger.info(f"Wrote debug prompts to {_debug_path}")
+    # except Exception as _e:
+    #     logger.warning(f"Could not write debug_prompts.json: {_e}")
 
     r = ""
 
@@ -474,12 +783,16 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
             # Include personality instruction prominently at the start
-            msg = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
-            logger.info("Personality instruction included in Gemini prompt")
+            msg = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
             if additional_instructions_text:
-                logger.info(
-                    "Additional instructions appended to Gemini prompt as final override"
-                )
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.debug(
+                        "Additional instructions appended to Gemini prompt (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.debug(
+                        "Additional instructions appended to Gemini prompt (ENHANCEMENT MODE)"
+                    )
             if not GOOGLE_AVAILABLE or not settings.GEMINI_API_KEY:
                 raise ValueError("Google Generative AI not available or API key not set")
             genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -493,9 +806,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 "max_output_tokens": 8192,  # Increase max tokens to prevent truncation
             }
 
-            response = model.generate_content(
-                contents=msg, generation_config=generation_config
-            )
+            _write_llm_prompt_log(llm, full_text=msg)
+            response = model.generate_content(contents=msg, generation_config=generation_config)
             r = response.text
             logger.info(f"Gemini response length: {len(r)} characters")
 
@@ -507,22 +819,30 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 {"role": "system", "content": system_message},
                 {
                     "role": "user",
-                    "content": personality_instruction.strip(),
+                    "content": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"role": "user", "content": message},
-                {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
-                {"role": "user", "content": f"Company Name: {company_name}"},
-                {"role": "user", "content": f"Ad Source: {ad_source}"},
             ]
-            # Append additional instructions last as a separate, high-priority message
+            messages.extend(
+                [
+                    {"role": "user", "content": message},
+                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+                    {"role": "user", "content": f"Company Name: {company_name}"},
+                    {"role": "user", "content": f"Ad Source: {ad_source}"},
+                ]
+            )
+            # Append additional instructions last as a separate message
             if additional_instructions_text:
-                messages.append(
-                    {"role": "user", "content": additional_instructions_text.strip()}
-                )
-                logger.info(
-                    "Additional instructions appended to ChatGPT messages as final override"
-                )
+                messages.append({"role": "user", "content": additional_instructions_text.strip()})
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.debug(
+                        "Additional instructions appended to ChatGPT messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.debug(
+                        "Additional instructions appended to ChatGPT messages (ENHANCEMENT MODE)"
+                    )
             # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
+            _write_llm_prompt_log(llm, messages=messages)
             if gpt_model == "gpt-5.2":
                 response = client.chat.completions.create(
                     model=gpt_model,
@@ -549,22 +869,31 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 {"role": "system", "content": system_message},
                 {
                     "role": "user",
-                    "content": personality_instruction.strip(),
+                    "content": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"role": "user", "content": message},
-                {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
-                {"role": "user", "content": f"Company Name: {company_name}"},
-                {"role": "user", "content": f"Ad Source: {ad_source}"},
             ]
-            logger.info("Personality instruction included in Grok messages")
-            # Append additional instructions last so they override all previous instructions
+            messages_list.extend(
+                [
+                    {"role": "user", "content": message},
+                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+                    {"role": "user", "content": f"Company Name: {company_name}"},
+                    {"role": "user", "content": f"Ad Source: {ad_source}"},
+                ]
+            )
+            # Append additional instructions last
             if additional_instructions_text:
                 messages_list.append(
                     {"role": "user", "content": additional_instructions_text.strip()}
                 )
-                logger.info(
-                    "Additional instructions appended to Grok messages as final override"
-                )
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.debug(
+                        "Additional instructions appended to Grok messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.debug(
+                        "Additional instructions appended to Grok messages (ENHANCEMENT MODE)"
+                    )
+            _write_llm_prompt_log(llm, messages=messages_list)
             data = {"model": xai_model, "messages": messages_list}
             response = requests.post(
                 "https://api.x.ai/v1/chat/completions",
@@ -578,7 +907,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
         elif llm == "OCI" or llm == "oci-generative-ai":
             # Include personality instruction prominently at the start
-            full_prompt = f"{system_message}{personality_instruction}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            full_prompt = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            _write_llm_prompt_log(llm, full_text=full_prompt)
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
 
@@ -590,53 +920,65 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
             # Use the same message_data that includes the personality profile (tone field)
             # This ensures the personality profile description is included in Llama prompts
-            message_llama = message  # Use the original message which includes the tone/personality profile
+            message_llama = (
+                message  # Use the original message which includes the tone/personality profile
+            )
             messages = [
                 {"role": "system", "content": system_message},
                 {
                     "role": "user",
-                    "content": personality_instruction.strip(),
+                    "content": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"role": "user", "content": message_llama},
             ]
-            logger.info("Personality instruction included in Llama messages")
-            # Append additional instructions last so they override all previous instructions
+            messages.append({"role": "user", "content": message_llama})
+            # Append additional instructions last
             if additional_instructions_text:
-                messages.append(
-                    {"role": "user", "content": additional_instructions_text.strip()}
-                )
-                logger.info(
-                    "Additional instructions appended to Llama messages as final override"
-                )
+                messages.append({"role": "user", "content": additional_instructions_text.strip()})
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.debug(
+                        "Additional instructions appended to Llama messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.debug(
+                        "Additional instructions appended to Llama messages (ENHANCEMENT MODE)"
+                    )
+            _write_llm_prompt_log(llm, messages=messages)
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response["message"]["content"]
 
-        elif (
-            llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514"
-        ):
+        elif llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514":
             if not ANTHROPIC_AVAILABLE or not settings.ANTHROPIC_API_KEY:
                 raise ValueError("Anthropic not available or API key not set")
             client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
             content_list = [
                 {
                     "type": "text",
-                    "text": personality_instruction.strip(),
+                    "text": critical_instructions.strip(),
                 },  # Add personality instruction as separate, prominent message
-                {"type": "text", "text": message},
-                {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
-                {"type": "text", "text": f"Company Name: {company_name}"},
-                {"type": "text", "text": f"Ad Source: {ad_source}"},
             ]
-            logger.info("Personality instruction included in Claude messages")
-            # Append additional instructions last so they override all previous instructions
+            content_list.extend(
+                [
+                    {"type": "text", "text": message},
+                    {"type": "text", "text": f"Hiring Manager: {hiring_manager}"},
+                    {"type": "text", "text": f"Company Name: {company_name}"},
+                    {"type": "text", "text": f"Ad Source: {ad_source}"},
+                ]
+            )
+            # Append additional instructions last
             if additional_instructions_text:
-                content_list.append(
-                    {"type": "text", "text": additional_instructions_text.strip()}
-                )
-                logger.info(
-                    "Additional instructions appended to Claude messages as final override"
-                )
+                content_list.append({"type": "text", "text": additional_instructions_text.strip()})
+                if "OVERRIDE" in additional_instructions_text:
+                    logger.debug(
+                        "Additional instructions appended to Claude messages (OVERRIDE MODE)"
+                    )
+                else:
+                    logger.debug(
+                        "Additional instructions appended to Claude messages (ENHANCEMENT MODE)"
+                    )
             messages = [{"role": "user", "content": content_list}]
+            _write_llm_prompt_log(
+                llm, system=system_message, user_content_list=content_list
+            )
             response = client.messages.create(
                 model=claude_model,
                 system=system_message,
@@ -648,6 +990,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         else:
             raise ValueError(f"Unsupported LLM: {llm}")
 
+        _write_llm_response_log(llm, r)
+
         # Increment LLM usage count for the user (after successful LLM call)
         if user_id:
             normalized_llm = normalize_llm_name(llm)
@@ -658,6 +1002,13 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 )
             except Exception as e:
                 logger.warning(f"Failed to increment LLM usage count: {e}")
+
+            # Decrement generation credits if user has no subscription
+            try:
+                decrement_generation_credits(user_id)
+                logger.info(f"Decremented generation credits for user {user_id} (if applicable)")
+            except Exception as e:
+                logger.warning(f"Failed to decrement generation credits: {e}")
         elif user_email:
             # Try to get user_id from email
             try:
@@ -667,10 +1018,20 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info(
                     f"Incremented LLM usage count for {normalized_llm} (user_email: {user_email})"
                 )
+
+                # Decrement generation credits if user has no subscription
+                try:
+                    decrement_generation_credits(user.id)
+                    logger.info(
+                        f"Decremented generation credits for user {user.id} (if applicable)"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to decrement generation credits: {e}")
             except Exception as e:
                 logger.warning(f"Failed to increment LLM usage count from email: {e}")
 
         # Clean and parse the response
+        logger.info("Cleaning and parsing LLM response text")
         r = r.replace("```json", "").replace("```", "").strip()
 
         # Try to extract JSON if it's embedded in text
@@ -684,15 +1045,15 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         else:
             json_str = r
 
+        logger.info("Attempting to parse JSON from LLM response")
         try:
             json_r = json.loads(json_str)
+            logger.info("JSON parse of LLM response succeeded")
         except json.JSONDecodeError as e:
             # If parsing fails, try to fix common issues
-            # Remove any trailing incomplete JSON
             logger.warning(f"Initial JSON parse failed: {e}, attempting to fix...")
 
-            # Try to find and extract a valid JSON object
-            # Look for the last complete JSON object
+            # Fix 1: Look for the last complete JSON object (balanced braces)
             brace_count = 0
             last_valid_end = -1
             for i, char in enumerate(json_str):
@@ -705,70 +1066,127 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                         break
 
             if last_valid_end > 0:
-                json_str = json_str[: last_valid_end + 1]
                 try:
-                    json_r = json.loads(json_str)
-                    logger.info("Successfully fixed truncated JSON")
+                    json_r = json.loads(json_str[: last_valid_end + 1])
+                    logger.info("Successfully fixed truncated JSON (balanced braces)")
                 except json.JSONDecodeError:
-                    raise e
+                    json_r = None
             else:
+                json_r = None
+
+            # Fix 2: If still no parse (e.g. unterminated string), recover "content" or "markdown" from start
+            if json_r is None and ("Unterminated string" in str(e) or "Expecting" in str(e)):
+                content_match = re.search(r'"content"\s*:\s*"', json_str)
+                markdown_match = re.search(r'"markdown"\s*:\s*"', json_str)
+                if content_match:
+                    value_start = content_match.end()
+                    raw_content = json_str[value_start:]
+                    escaped = (
+                        raw_content.replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    try:
+                        fixed_str = '{"content": "' + escaped + '"}'
+                        json_r = json.loads(fixed_str)
+                        logger.info("Recovered from unterminated string: using content")
+                    except json.JSONDecodeError:
+                        pass
+                if json_r is None and markdown_match:
+                    value_start = markdown_match.end()
+                    raw_markdown = json_str[value_start:]
+                    # Escape for JSON: backslash and quote first, then newlines
+                    escaped = (
+                        raw_markdown.replace("\\", "\\\\")
+                        .replace('"', '\\"')
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                    )
+                    try:
+                        fixed_str = '{"markdown": "' + escaped + '", "html": ""}'
+                        json_r = json.loads(fixed_str)
+                        logger.info(
+                            "Recovered from unterminated string: using markdown content, html empty"
+                        )
+                    except json.JSONDecodeError:
+                        pass
+
+            if json_r is None:
+                logger.warning("JSON parse still failed after all fix attempts; re-raising error")
                 raise e
 
-        # Clean up the markdown field - remove "markdown " prefix if Gemini added it
+        # Docx components flow: LLM returns document_xml, numbering_xml, styles_xml (when USE_DOCX_COMPONENTS)
+        doc_xml = json_r.get("document_xml")
+        if doc_xml is not None and isinstance(doc_xml, str) and doc_xml.strip():
+            num_xml = json_r.get("numbering_xml")
+            sty_xml = json_r.get("styles_xml")
+            return {
+                "document_xml": doc_xml.strip(),
+                "numbering_xml": (num_xml.strip() if num_xml and isinstance(num_xml, str) else None),
+                "styles_xml": (sty_xml.strip() if sty_xml and isinstance(sty_xml, str) else None),
+            }
+
+        # Docx-only flow: LLM returns single field "content" (plain text)
+        letter_content = json_r.get("content")
+        if letter_content is not None and isinstance(letter_content, str):
+            if letter_content.startswith("content "):
+                letter_content = letter_content[8:].lstrip()
+                logger.info("Removed 'content ' prefix from LLM response")
+            if today_date_iso and today_date and today_date != today_date_iso:
+                letter_content = letter_content.replace(today_date_iso, today_date)
+            _write_additional_instructions_debug(additional_instructions, letter_content)
+            return {"content": letter_content}
+
+        # Legacy flow: markdown + html
         markdown_content = json_r.get("markdown", "")
         if markdown_content.startswith("markdown "):
-            markdown_content = markdown_content[9:]  # Remove "markdown " (9 characters)
+            markdown_content = markdown_content[9:]
             logger.info("Removed 'markdown ' prefix from Gemini response")
 
-        # Get raw HTML from LLM response
         raw_html = json_r.get("html", "")
-        
-        # Strip unwanted \r and \n characters from HTML
-        raw_html = raw_html.replace("\r", "").replace("\n", " ")
-        raw_html = re.sub(r' +', ' ', raw_html)
+        if not raw_html and markdown_content:
+            try:
+                import markdown
 
-        # Apply user's print settings to HTML
-        # Note: The user object was already retrieved earlier for personality profiles
-        # We'll retrieve it again here to access print settings (or reuse if available)
+                raw_html = markdown.markdown(
+                    markdown_content,
+                    extensions=["extra", "nl2br"],
+                )
+                logger.info("Converted recovered markdown to HTML for display")
+            except Exception as md_err:
+                logger.warning(f"Could not convert markdown to HTML: {md_err}")
+
+        raw_html = raw_html or ""
+        if today_date_iso and today_date and today_date != today_date_iso:
+            raw_html = raw_html.replace(today_date_iso, today_date)
+        if markdown_content and today_date_iso and today_date != today_date_iso:
+            markdown_content = markdown_content.replace(today_date_iso, today_date)
+        raw_html = html_p_to_br(raw_html)
+        raw_html = collapse_br_pairs(raw_html)
+        raw_html = double_break_after_groups(raw_html)
+
         styled_html = raw_html
         try:
-            # Retrieve user to get print settings
-            user_for_styling = None
-            if user_id:
-                try:
-                    user_for_styling = get_user_by_id(user_id)
-                except Exception:
-                    pass  # If lookup fails, continue without styling
-            elif user_email:
-                try:
-                    user_for_styling = get_user_by_email(user_email)
-                except Exception:
-                    pass  # If lookup fails, continue without styling
-
+            user_for_styling = user
             if user_for_styling and user_for_styling.preferences:
                 app_settings = user_for_styling.preferences.get("appSettings", {})
                 if isinstance(app_settings, dict):
                     print_props = app_settings.get("printProperties", {})
                     if isinstance(print_props, dict) and print_props:
-                        # Check if user wants to use default fonts from LLM HTML
                         use_default_fonts = print_props.get("useDefaultFonts", False)
-
-                        if use_default_fonts:
-                            # Don't apply font styling - let LLM HTML dictate formatting
-                            logger.info(
-                                "useDefaultFonts is True - skipping font styling, using raw LLM HTML"
-                            )
+                        font_family = print_props.get("fontFamily", "Times New Roman")
+                        font_size = print_props.get("fontSize", 12)
+                        line_height = print_props.get("lineHeight", 1.6)
+                        is_default_font = (
+                            font_family and str(font_family).strip().lower() == "default"
+                        )
+                        if is_default_font or use_default_fonts:
                             styled_html = raw_html
-                        else:
-                            # Get print properties with defaults
-                            font_family = print_props.get(
-                                "fontFamily", "Times New Roman"
+                            logger.info(
+                                "Skipping font wrapper: fontFamily is 'default' or useDefaultFonts is True - using raw LLM HTML"
                             )
-                            font_size = print_props.get("fontSize", 12)
-                            line_height = print_props.get("lineHeight", 1.6)
-
-                            # Wrap HTML with CSS styling using inline styles
-                            # Escape any quotes in font family name
+                        else:
                             font_family_escaped = font_family.replace("'", "\\'")
                             styled_html = f"""<div style="font-family: '{font_family_escaped}', serif; font-size: {font_size}pt; line-height: {line_height}; color: #000;">{raw_html}</div>"""
                             logger.info(
@@ -776,31 +1194,21 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                             )
         except Exception as e:
             logger.warning(f"Could not apply print settings to HTML: {e}")
-            # Continue with unstyled HTML if styling fails
 
-        # Final cleanup: strip any remaining \r or \n from HTML before returning
-        styled_html = styled_html.replace("\r", "").replace("\n", " ")
-        styled_html = re.sub(r' +', ' ', styled_html)
-        
         return {"markdown": markdown_content, "html": styled_html}
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
         logger.error(f"Response length: {len(r)} characters")
+        error_msg = f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}"
         error_html = f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
-        # Clean HTML of unwanted characters
-        error_html = error_html.replace("\r", "").replace("\n", " ")
-        error_html = re.sub(r' +', ' ', error_html)
-        
-        return {
-            "markdown": f"Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.\n\nError: {str(e)}\n\nFirst 500 chars of response:\n{r[:500]}",
-            "html": error_html,
-        }
+        error_html = error_html.replace("\r", "").replace("\n", "<br />")
+        error_html = re.sub(r" +", " ", error_html)
+        return {"content": error_msg, "markdown": error_msg, "html": error_html}
     except Exception as e:
         logger.error(f"Error in get_job_info: {str(e)}")
+        error_msg = f"Error: {str(e)}"
         error_html = f"<p>Error: {str(e)}</p>"
-        # Clean HTML of unwanted characters
-        error_html = error_html.replace("\r", "").replace("\n", " ")
-        error_html = re.sub(r' +', ' ', error_html)
-        return {"markdown": f"Error: {str(e)}", "html": error_html}
-
+        error_html = error_html.replace("\r", "").replace("\n", "<br />")
+        error_html = re.sub(r" +", " ", error_html)
+        return {"content": error_msg, "markdown": error_msg, "html": error_html}

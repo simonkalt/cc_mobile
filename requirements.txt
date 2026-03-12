@@ -1,4 +1,5 @@
 python-dotenv
+colorama
 openai
 anthropic
 google-generativeai
@@ -7,6 +8,7 @@ requests
 oci
 pydantic
 fastapi
+python-multipart
 scikit-learn>=1.2.0
 xai
 ollama
@@ -15,15 +17,28 @@ cycler
 kiwisolver
 matplotlib>=3.6.0,<4.0.0
 PyPDF2
+# PyMuPDF (fitz) - for high-quality PDF to HTML conversion with layout preservation
+pymupdf
 boto3
 pymongo
 bcrypt
 uvicorn
 email-validator
 markdown
+# DOCX generation/manipulation for cover letter .docx pipeline (incl. OOXML list numbering: numPr, numbering.xml)
+python-docx>=1.1.0
+# System dependency for POST /api/files/docx-to-pdf (not a pip package):
+#   Local: see documentation/LIBREOFFICE_SETUP.md
+#   Render: deploy as Docker (same repo Dockerfile installs LibreOffice)
 weasyprint
+# Print preview PDF; after pip install run: playwright install chromium
+playwright>=1.40.0
 html5lib>=1.1
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 requests>=2.31.0
 selenium>=4.15.0
+redis
+stripe>=7.0.0
+python-jose[cryptography]
+passlib[bcrypt]
