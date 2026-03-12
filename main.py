@@ -268,6 +268,7 @@ try:
         cover_letters,
         pdf,
         sms,
+        subscriptions,
     )
 
     app.include_router(job_url.router)
@@ -279,6 +280,7 @@ try:
     app.include_router(cover_letters.router)
     app.include_router(pdf.router)
     app.include_router(sms.router)
+    app.include_router(subscriptions.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:

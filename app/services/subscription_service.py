@@ -4,7 +4,7 @@ Subscription service - Stripe integration for subscription management
 
 import logging
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from fastapi import HTTPException, status
 
@@ -133,15 +133,76 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
-    # Get product ID - either from database or fetch from Stripe if we have a subscription
+    # Start with values from MongoDB
+    subscription_id = user.get("subscriptionId")
+    subscription_status = user.get("subscriptionStatus", "free")
+    subscription_plan = user.get("subscriptionPlan", "free")
     product_id = user.get("subscriptionProductId")
-    
-    # If we don't have product_id stored but have a subscription, try to get it from Stripe
-    if not product_id and user.get("subscriptionId") and STRIPE_AVAILABLE:
+    current_period_end = user.get("subscriptionCurrentPeriodEnd")
+
+    # Sync with Stripe when we have a subscription ID to avoid stale "expired" dates in DB
+    if subscription_id and STRIPE_AVAILABLE:
         try:
             stripe_to_use = _get_stripe_module()
             if stripe_to_use:
-                subscription_id = user.get("subscriptionId")
+                stripe_sub = stripe_to_use.Subscription.retrieve(
+                    subscription_id,
+                    expand=["items.data.price.product"],
+                )
+
+                stripe_status = getattr(stripe_sub, "status", None)
+                if stripe_status:
+                    # Preserve existing DB status vocabulary while mapping Stripe values
+                    status_map = {
+                        "active": "active",
+                        "trialing": "active",
+                        "past_due": "past_due",
+                        "canceled": "canceled",
+                        "unpaid": "canceled",
+                        "incomplete": "canceled",
+                        "incomplete_expired": "canceled",
+                    }
+                    subscription_status = status_map.get(stripe_status, subscription_status)
+
+                if getattr(stripe_sub, "current_period_end", None):
+                    # Use UTC timezone so API returns an explicit timezone-aware timestamp.
+                    current_period_end = datetime.fromtimestamp(
+                        stripe_sub.current_period_end, tz=timezone.utc
+                    )
+
+                # Keep product_id in sync if available from expanded Stripe response
+                items_data = stripe_sub.items.data if hasattr(stripe_sub.items, "data") else []
+                if items_data and len(items_data) > 0:
+                    price_obj = items_data[0].price
+                    if hasattr(price_obj, "product") and price_obj.product:
+                        if isinstance(price_obj.product, str):
+                            product_id = price_obj.product
+                        elif hasattr(price_obj.product, "id"):
+                            product_id = price_obj.product.id
+
+                # Persist fresh Stripe values to MongoDB
+                update_doc = {}
+                if subscription_status != user.get("subscriptionStatus"):
+                    update_doc["subscriptionStatus"] = subscription_status
+                if current_period_end != user.get("subscriptionCurrentPeriodEnd"):
+                    update_doc["subscriptionCurrentPeriodEnd"] = current_period_end
+                if product_id and product_id != user.get("subscriptionProductId"):
+                    update_doc["subscriptionProductId"] = product_id
+
+                if update_doc:
+                    collection.update_one({"_id": user_id_obj}, {"$set": update_doc})
+        except Exception as e:
+            logger.warning(
+                "Could not sync subscription state from Stripe for user %s: %s",
+                user_id,
+                e,
+            )
+    
+    # If we still don't have product_id stored but have a subscription, try to get it from Stripe
+    if not product_id and subscription_id and STRIPE_AVAILABLE:
+        try:
+            stripe_to_use = _get_stripe_module()
+            if stripe_to_use:
                 logger.info(f"Fetching product ID from Stripe for subscription {subscription_id}")
                 
                 # Retrieve subscription with expanded price data
@@ -189,11 +250,11 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
             logger.error(f"Could not fetch product ID from Stripe: {e}", exc_info=True)
     
     return SubscriptionResponse(
-        subscriptionId=user.get("subscriptionId"),
-        subscriptionStatus=user.get("subscriptionStatus", "free"),
-        subscriptionPlan=user.get("subscriptionPlan", "free"),
+        subscriptionId=subscription_id,
+        subscriptionStatus=subscription_status,
+        subscriptionPlan=subscription_plan,
         productId=product_id,
-        subscriptionCurrentPeriodEnd=user.get("subscriptionCurrentPeriodEnd"),
+        subscriptionCurrentPeriodEnd=current_period_end,
         lastPaymentDate=user.get("lastPaymentDate"),
         stripeCustomerId=user.get("stripeCustomerId"),
     )
