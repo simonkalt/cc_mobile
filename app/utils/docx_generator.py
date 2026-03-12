@@ -533,7 +533,9 @@ def _plain_text_to_blocks(text: str) -> List[Dict]:
 
     # Accept common ordered-list prefixes from LLMs.
     # Examples: "1. item", "1) item", "(1) item"
-    list_number_re = re.compile(r"^\s*(?:\(?\d+\)?[.)])\s+")
+    # Intentionally limited to 1-2 digits to avoid false positives on phone
+    # patterns like "(818) 419-5986".
+    list_number_re = re.compile(r"^\s*(?:\(?[1-9]\d?\)?[.)])\s+")
     # Accept common bullet prefixes.
     # Examples: "- item", "* item", "+ item", "• item", "◦ item", "▪ item", "▸ item"
     list_bullet_re = re.compile(r"^\s*(?:[•◦▪▸\-\*\+])\s+")
@@ -545,8 +547,13 @@ def _plain_text_to_blocks(text: str) -> List[Dict]:
         is_all_list_lines = bool(non_empty) and all(
             list_number_re.match(ln) or list_bullet_re.match(ln) for ln in non_empty
         )
+        # If a paragraph mixes normal text and list lines (e.g. heading + bullets),
+        # split per line so list lines can be promoted to Word-native lists later.
+        has_any_list_lines = any(
+            list_number_re.match(ln) or list_bullet_re.match(ln) for ln in non_empty
+        )
 
-        if is_all_list_lines:
+        if is_all_list_lines or has_any_list_lines:
             for line in lines:
                 if not line.strip():
                     continue
@@ -809,7 +816,8 @@ def build_docx_from_content(
         if not stripped:
             continue
         # Numbered list: "1. ", "2. ", "10. " etc. -> Word List Number
-        num_match = re.match(r"^(?:\(?(\d+)\)?[.)])\s+", stripped)
+        # Limit to 1-2 digits so contact lines like "(818) ..." are not treated as lists.
+        num_match = re.match(r"^(?:\(?([1-9]\d?)\)?[.)])\s+", stripped)
         if num_match:
             block["type"] = "li_number"
             first_run["text"] = stripped[num_match.end() :]

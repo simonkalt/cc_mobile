@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, status, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError, EmailStr, Field
@@ -218,6 +219,40 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Mount static files for website and documents
+# Get the project root directory - try multiple methods for compatibility
+try:
+    # Method 1: Current working directory (most common)
+    cwd = os.getcwd()
+
+    # Method 2: Relative to this file
+    file_dir = os.path.dirname(os.path.abspath(__file__))
+
+    website_path = None
+    documents_path = None
+
+    # Check current working directory first
+    if os.path.exists(os.path.join(cwd, "website")):
+        website_path = os.path.join(cwd, "website")
+        documents_path = os.path.join(cwd, "documents")
+    elif os.path.exists(os.path.join(file_dir, "website")):
+        website_path = os.path.join(file_dir, "website")
+        documents_path = os.path.join(file_dir, "documents")
+
+    if website_path and os.path.exists(website_path):
+        app.mount("/website", StaticFiles(directory=website_path, html=True), name="website")
+        print(f"✓ Successfully mounted website static files from: {website_path}")
+    else:
+        print(f"✗ Website directory not found. Checked: {cwd}/website, {file_dir}/website")
+
+    if documents_path and os.path.exists(documents_path):
+        app.mount("/documents", StaticFiles(directory=documents_path), name="documents")
+        print(f"✓ Successfully mounted documents static files from: {documents_path}")
+    else:
+        print(f"✗ Documents directory not found. Checked: {cwd}/documents, {file_dir}/documents")
+except Exception as e:
+    print(f"Error mounting static files: {e}")
 
 
 # Configure CORS for React app
@@ -1018,10 +1053,17 @@ except ImportError:
 # The original function definition (~690 lines) has been moved to app/services/cover_letter_service.py
 
 
-# Define a simple root endpoint to check if the server is running
+# Serve webpage at root (/) so root URL shows website/index.html
 @app.get("/")
 def read_root():
-    return {"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    index_path = os.path.join(project_root, "website", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    # Fallback if website/index.html is missing
+    return JSONResponse(
+        content={"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
+    )
 
 
 @app.get("/api/health")
