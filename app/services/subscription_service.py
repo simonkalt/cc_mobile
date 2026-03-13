@@ -248,6 +248,22 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                     logger.warning(f"Subscription {subscription_id} has no items")
         except Exception as e:
             logger.error(f"Could not fetch product ID from Stripe: {e}", exc_info=True)
+
+    # Ensure free-tier credit fields are always present in response.
+    max_credits_raw = user.get("max_credits", 10)
+    try:
+        max_credits = max(0, int(max_credits_raw))
+    except (TypeError, ValueError):
+        max_credits = 10
+
+    generation_credits_raw = user.get("generation_credits")
+    if generation_credits_raw is None:
+        generation_credits = max_credits if str(subscription_status).lower() == "free" else 0
+    else:
+        try:
+            generation_credits = max(0, int(generation_credits_raw))
+        except (TypeError, ValueError):
+            generation_credits = max_credits if str(subscription_status).lower() == "free" else 0
     
     return SubscriptionResponse(
         subscriptionId=subscription_id,
@@ -257,6 +273,8 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
         subscriptionCurrentPeriodEnd=current_period_end,
         lastPaymentDate=user.get("lastPaymentDate"),
         stripeCustomerId=user.get("stripeCustomerId"),
+        generation_credits=generation_credits,
+        max_credits=max_credits,
     )
 
 

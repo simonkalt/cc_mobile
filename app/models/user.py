@@ -1,7 +1,7 @@
 """
 User-related Pydantic models
 """
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -93,6 +93,8 @@ class UserResponse(BaseModel):
     lastLogin: Optional[datetime] = None
     llm_counts: Optional[dict] = None
     last_llm_used: Optional[str] = None
+    generation_credits: int = Field(default=10, ge=0)
+    max_credits: int = Field(default=10, ge=0)
 
     class Config:
         from_attributes = True

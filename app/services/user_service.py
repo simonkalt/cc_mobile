@@ -178,7 +178,15 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "dateUpdated": datetime.utcnow(),
         "llm_counts": {},  # Initialize empty LLM usage counts object
         "last_llm_used": None,  # Initialize last LLM used field
-        "preferences": final_preferences
+        "preferences": final_preferences,
+        "subscriptionId": None,
+        "subscriptionStatus": "free",
+        "subscriptionPlan": "free",
+        "subscriptionCurrentPeriodEnd": None,
+        "lastPaymentDate": None,
+        "stripeCustomerId": None,
+        "generation_credits": 10,
+        "max_credits": 10,
     }
     
     try:

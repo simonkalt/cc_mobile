@@ -1,7 +1,7 @@
 """
 Subscription-related Pydantic models
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
@@ -15,6 +15,8 @@ class SubscriptionResponse(BaseModel):
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
     lastPaymentDate: Optional[datetime] = None
     stripeCustomerId: Optional[str] = None
+    generation_credits: int = Field(default=10, ge=0)
+    max_credits: int = Field(default=10, ge=0)
 
 
 class CreatePaymentIntentRequest(BaseModel):

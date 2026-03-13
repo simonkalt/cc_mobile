@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 USERS_COLLECTION = "users"
 
+DEFAULT_MAX_CREDITS = 10
+
 
 def normalize_personality_profile(profile: dict) -> Optional[dict]:
     """
@@ -97,6 +99,23 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
                 app_settings.get("personalityProfiles", [])
             )
     
+    subscription_status = str(user_doc.get("subscriptionStatus", "free") or "free").lower()
+    max_credits_raw = user_doc.get("max_credits", DEFAULT_MAX_CREDITS)
+    try:
+        max_credits = max(0, int(max_credits_raw))
+    except (TypeError, ValueError):
+        max_credits = DEFAULT_MAX_CREDITS
+
+    generation_credits_raw = user_doc.get("generation_credits")
+    if generation_credits_raw is None:
+        # Free-tier users must always receive explicit credit values.
+        generation_credits = max_credits if subscription_status == "free" else 0
+    else:
+        try:
+            generation_credits = max(0, int(generation_credits_raw))
+        except (TypeError, ValueError):
+            generation_credits = max_credits if subscription_status == "free" else 0
+
     return UserResponse(
         id=str(user_doc["_id"]),
         name=user_doc.get("name", ""),
@@ -112,6 +131,8 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         dateUpdated=user_doc.get("dateUpdated"),
         lastLogin=user_doc.get("lastLogin"),
         llm_counts=user_doc.get("llm_counts"),
-        last_llm_used=user_doc.get("last_llm_used")
+        last_llm_used=user_doc.get("last_llm_used"),
+        generation_credits=generation_credits,
+        max_credits=max_credits,
     )
 
