@@ -21,6 +21,7 @@ from app.models.user import (
     UserLoginRequest,
     UserLoginResponse,
 )
+from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password, verify_password
 from app.utils.user_helpers import (
@@ -30,6 +31,47 @@ from app.utils.user_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _built_in_default_personality_profiles() -> list[dict]:
+    """Fallback defaults used if JSON config is missing or invalid."""
+    return [
+        {
+            "id": "professional-default",
+            "name": "Professional",
+            "description": (
+                "I am trying to garner interest in my talents and experience so that I stand out "
+                "and make easy for the recruiter to hire me. Be very professional."
+            ),
+        }
+    ]
+
+
+def _load_default_personality_profiles() -> list[dict]:
+    """
+    Load default profiles for new users from JSON file.
+    Expected shape:
+    {
+      "profiles": [{"id": "...", "name": "...", "description": "..."}]
+    }
+    """
+    path = settings.DEFAULT_PERSONALITY_PROFILES_PATH
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        profiles = payload.get("profiles", []) if isinstance(payload, dict) else []
+        normalized = normalize_personality_profiles(profiles if isinstance(profiles, list) else [])
+        if normalized:
+            return normalized
+        logger.warning(
+            "Default personality profiles file has no valid profiles: %s. Using fallback.",
+            path,
+        )
+    except FileNotFoundError:
+        logger.warning("Default personality profiles file not found: %s. Using fallback.", path)
+    except Exception as e:
+        logger.warning("Failed to load default personality profiles from %s: %s", path, e)
+    return _built_in_default_personality_profiles()
 
 
 def _b64url(data: bytes) -> str:
@@ -83,15 +125,14 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     app_settings = preferences.get("appSettings", {})
     personality_profiles = app_settings.get("personalityProfiles", [])
     
-    # If no personality profiles provided or empty, create default profile
+    # If no personality profiles provided or empty, create defaults from JSON.
     if not personality_profiles or len(personality_profiles) == 0:
-        default_profile = {
-            "id": str(int(time.time() * 1000)),  # Current timestamp in milliseconds
-            "name": "Professional",
-            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
-        }
-        personality_profiles = [default_profile]
-        logger.info(f"Created default personality profile for new user: {user_data.email}")
+        personality_profiles = _load_default_personality_profiles()
+        logger.info(
+            "Assigned %d default personality profile(s) to new user: %s",
+            len(personality_profiles),
+            user_data.email,
+        )
     
     # Ensure appSettings exists in preferences
     if "appSettings" not in preferences:
@@ -363,11 +404,7 @@ def create_user_from_registration_data(
         "useDefaultFonts": False,
     })
     if not app_settings.get("personalityProfiles"):
-        app_settings["personalityProfiles"] = [{
-            "id": str(int(time.time() * 1000)),
-            "name": "Professional",
-            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional.",
-        }]
+        app_settings["personalityProfiles"] = _load_default_personality_profiles()
     preferences["appSettings"] = app_settings
 
     user_doc = {

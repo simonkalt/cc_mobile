@@ -1,0 +1,24 @@
+{
+  "profiles": [
+    {
+      "id": "professional-default",
+      "name": "Professional",
+      "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional."
+    },
+    {
+      "id": "professional-concise",
+      "name": "Professional Concise",
+      "description": "Be highly professional and direct. Focus on measurable impact, outcomes, and role alignment with minimal fluff. Use bullet points and concise language."
+    },
+    {
+      "id": "professional-warm",
+      "name": "Professional Warm",
+      "description": "Be professional and polished with a friendly tone. Emphasize collaboration, communication, and business value."
+    },
+    {
+      "id": "professional-creative-colorful",
+      "name": "Professional Creative & Colorful",
+      "description": "Be professional and polished with a friendly tone. Emphasize collaboration, communication, and business value. Allow the letter to be visually colorful and engaging. Utilize bold colors and fonts (and sizes) to make the letter more engaging."
+    }
+  ]
+}

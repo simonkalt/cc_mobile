@@ -135,6 +135,7 @@ class Settings:
         os.getenv("USE_SYSTEM_PROMPT_FILE", "true").lower() == "true"
     )
     PERSONALITY_PROFILES_PATH: Path = Path(__file__).parent.parent.parent / "personality_profiles.json"
+    DEFAULT_PERSONALITY_PROFILES_PATH: Path = Path(__file__).parent.parent.parent / "default_personality_profiles.json"
     TEMPLATES_DIR: Path = Path(__file__).parent.parent.parent / "templates"
 
     # Cover-letter generation feature flags (Word-integration compatibility)
