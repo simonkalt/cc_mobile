@@ -61,11 +61,40 @@ class Settings:
     
     # Google Places API
     GOOGLE_PLACES_API_KEY: Optional[str] = os.getenv("GOOGLE_PLACES_API_KEY")
+
+    # LinkedIn API (3-legged OAuth + jobLibrary integration)
+    LINKEDIN_CLIENT_ID: Optional[str] = os.getenv("LINKEDIN_CLIENT_ID")
+    LINKEDIN_CLIENT_SECRET: Optional[str] = os.getenv("LINKEDIN_CLIENT_SECRET")
+    LINKEDIN_REDIRECT_URI: Optional[str] = os.getenv("LINKEDIN_REDIRECT_URI")
+    LINKEDIN_SCOPE: Optional[str] = os.getenv("LINKEDIN_SCOPE")
+    LINKEDIN_SUCCESS_REDIRECT: Optional[str] = os.getenv("LINKEDIN_SUCCESS_REDIRECT")
     
-    # Twilio Configuration
-    TWILIO_ACCOUNT_SID: Optional[str] = os.getenv("TWILIO_ACCOUNT_SID")
-    TWILIO_AUTH_TOKEN: Optional[str] = os.getenv("TWILIO_AUTH_TOKEN")
-    TWILIO_PHONE_NUMBER: Optional[str] = os.getenv("TWILIO_PHONE_NUMBER")
+    # Telnyx SMS Configuration
+    TELNYX_API_KEY: Optional[str] = os.getenv("TELNYX_API_KEY")
+    TELNYX_PHONE_NUMBER: Optional[str] = os.getenv("TELNYX_PHONE_NUMBER")
+
+    # Redis Configuration
+    REDIS_HOST: Optional[str] = os.getenv("REDIS_HOST")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_USERNAME: Optional[str] = os.getenv("REDIS_USERNAME")
+    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
+    REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")
+
+    # Zoho Mail API + legacy SMTP
+    ZOHO_CLIENT_ID: Optional[str] = os.getenv("ZOHO_CLIENT_ID")
+    ZOHO_CLIENT_SECRET: Optional[str] = os.getenv("ZOHO_CLIENT_SECRET")
+    ZOHO_REFRESH_TOKEN: Optional[str] = os.getenv("ZOHO_REFRESH_TOKEN")
+    ZOHO_ACCOUNT_ID: Optional[str] = os.getenv("ZOHO_ACCOUNT_ID")
+    FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL", "no-reply@saimonsoft.com")
+
+    SMTP_SERVER: Optional[str] = os.getenv("SMTP_SERVER")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USERNAME: Optional[str] = os.getenv("SMTP_USERNAME")
+    SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
+    SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    SMTP_USE_SSL: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
 
     # Stripe Configuration (supports both legacy and newer env names)
     STRIPE_LIVE: bool = os.getenv("STRIPE_LIVE", "false").lower() == "true"
@@ -87,9 +116,24 @@ class Settings:
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+
+    # Print-preview/PDF behavior flags
+    NUTRIENT_API_KEY: Optional[str] = os.getenv("NUTRIENT_API_KEY")
+    PRINT_PREVIEW_USE_NUTRIENT: bool = (
+        os.getenv("PRINT_PREVIEW_USE_NUTRIENT", "false").lower() == "true"
+    )
+    PRINT_PREVIEW_USE_WEASYPRINT_ONLY: bool = (
+        os.getenv("PRINT_PREVIEW_USE_WEASYPRINT_ONLY", "false").lower() == "true"
+    )
+    PRINT_PREVIEW_RAW_HTML: bool = (
+        os.getenv("PRINT_PREVIEW_RAW_HTML", "false").lower() == "true"
+    )
     
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
+    USE_SYSTEM_PROMPT_FILE: bool = (
+        os.getenv("USE_SYSTEM_PROMPT_FILE", "true").lower() == "true"
+    )
     PERSONALITY_PROFILES_PATH: Path = Path(__file__).parent.parent.parent / "personality_profiles.json"
     TEMPLATES_DIR: Path = Path(__file__).parent.parent.parent / "templates"
 

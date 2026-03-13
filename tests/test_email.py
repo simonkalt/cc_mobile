@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Email sending test script
-Tests the email sending functionality with SMTP2Go
+Tests the email sending functionality with Zoho Mail API
 
 Usage:
     python test_email.py --to user@example.com --code 123456
@@ -55,19 +55,20 @@ def test_email_sending(to_email: str, code: str):
         logger.error(f"Invalid code format: {code}. Must be a 6-digit number.")
         return False
     
-    # Check SMTP configuration
-    logger.info("Checking SMTP configuration...")
-    logger.info(f"  SMTP Server: {settings.SMTP_SERVER}")
-    logger.info(f"  SMTP Port: {settings.SMTP_PORT}")
-    logger.info(f"  SMTP Username: {settings.SMTP_USERNAME}")
-    logger.info(f"  SMTP Use TLS: {settings.SMTP_USE_TLS}")
-    logger.info(f"  SMTP Use SSL: {settings.SMTP_USE_SSL}")
+    # Check Zoho Mail API configuration
+    logger.info("Checking Zoho Mail API configuration...")
+    logger.info(f"  Zoho Client ID configured: {bool(settings.ZOHO_CLIENT_ID)}")
+    logger.info(f"  Zoho Client Secret configured: {bool(settings.ZOHO_CLIENT_SECRET)}")
+    logger.info(f"  Zoho Refresh Token configured: {bool(settings.ZOHO_REFRESH_TOKEN)}")
+    logger.info(f"  Zoho Account ID configured: {bool(settings.ZOHO_ACCOUNT_ID)}")
     logger.info(f"  From Email: {settings.FROM_EMAIL}")
     logger.info(f"  Email Available: {EMAIL_AVAILABLE}")
     
     if not EMAIL_AVAILABLE:
-        logger.error("❌ SMTP is not configured. Please check your .env file.")
-        logger.error("Required variables: SMTP_SERVER, SMTP_USERNAME, SMTP_PASSWORD")
+        logger.error("❌ Zoho Mail API is not configured. Please check your .env file.")
+        logger.error(
+            "Required variables: ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ACCOUNT_ID, FROM_EMAIL"
+        )
         return False
     
     if not settings.FROM_EMAIL:

@@ -5,11 +5,12 @@ import logging
 import time
 import os
 import json
+import re
 import base64
 import hmac
 import hashlib
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional, Any
 from bson import ObjectId
 from fastapi import HTTPException, status
 
@@ -273,6 +274,135 @@ def get_user_by_email(email: str) -> UserResponse:
         )
     
     return user_doc_to_response(user)
+
+
+def get_user_by_email_ignore_case(email: str) -> UserResponse:
+    """Get user by email, case-insensitive."""
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
+
+    # Anchor regex to exact email with case-insensitive comparison.
+    user = collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    return user_doc_to_response(user)
+
+
+def create_user_from_registration_data(
+    registration_data: dict, is_email_verified: bool = False
+) -> UserResponse:
+    """
+    Create a user from pre-validated registration payload (e.g. Redis flow).
+    Expects `registration_data["password"]` to already be hashed.
+    """
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
+
+    email = registration_data.get("email")
+    name = registration_data.get("name")
+    hashed_password = registration_data.get("password")
+    if not email or not name or not hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="registration_data must include name, email, and hashed password",
+        )
+
+    existing_user = collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists",
+        )
+
+    preferences = registration_data.get("preferences") or {}
+    if not isinstance(preferences, dict):
+        preferences = {}
+
+    # Ensure minimal app settings shape exists
+    app_settings: Dict[str, Any] = preferences.get("appSettings") or {}
+    if not isinstance(app_settings, dict):
+        app_settings = {}
+    app_settings.setdefault("printProperties", {
+        "margins": {"top": 1.0, "right": 0.75, "bottom": 0.25, "left": 0.75},
+        "fontFamily": "Georgia",
+        "fontSize": 11.0,
+        "lineHeight": 1.15,
+        "pageSize": {"width": 8.5, "height": 11.0},
+        "useDefaultFonts": False,
+    })
+    if not app_settings.get("personalityProfiles"):
+        app_settings["personalityProfiles"] = [{
+            "id": str(int(time.time() * 1000)),
+            "name": "Professional",
+            "description": "I am trying to garner interest in my talents and experience so that I stand out and make easy for the recruiter to hire me. Be very professional.",
+        }]
+    preferences["appSettings"] = app_settings
+
+    user_doc = {
+        "name": name,
+        "email": email,
+        "hashedPassword": hashed_password,
+        "isActive": True,
+        "isEmailVerified": is_email_verified,
+        "roles": ["user"],
+        "failedLoginAttempts": 0,
+        "lastLogin": None,
+        "passwordChangedAt": None,
+        "avatarUrl": None,
+        "phone": registration_data.get("phone"),
+        "address": registration_data.get("address")
+        or {"street": None, "city": None, "state": None, "zip": None, "country": None},
+        "dateCreated": datetime.utcnow(),
+        "dateUpdated": datetime.utcnow(),
+        "llm_counts": {},
+        "last_llm_used": None,
+        "preferences": preferences,
+        "subscriptionId": None,
+        "subscriptionStatus": "free",
+        "subscriptionPlan": "free",
+        "subscriptionCurrentPeriodEnd": None,
+        "lastPaymentDate": None,
+        "stripeCustomerId": None,
+        "generation_credits": 10,
+        "max_credits": 10,
+        "SMSOpt": None,
+        "SMSOptDate": None,
+    }
+
+    try:
+        result = collection.insert_one(user_doc)
+        user_doc["_id"] = result.inserted_id
+        return user_doc_to_response(user_doc)
+    except Exception as e:
+        logger.error(f"Error creating user from registration data: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}",
+        )
 
 
 def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
@@ -698,4 +828,54 @@ def decrement_generation_credits(user_id: str) -> bool:
     except Exception as e:
         logger.error(f"Error decrementing generation credits for user {user_id}: {e}")
         return False
+
+
+def set_linkedin_token(user_id: str, token_data: Dict) -> bool:
+    """
+    Store LinkedIn OAuth token data under user preferences.
+    """
+    if not is_connected():
+        logger.warning("MongoDB not connected; cannot set LinkedIn token")
+        return False
+
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        return False
+
+    try:
+        user_id_obj = ObjectId(user_id)
+    except Exception:
+        logger.warning("Invalid user_id for set_linkedin_token: %s", user_id)
+        return False
+
+    user = collection.find_one({"_id": user_id_obj})
+    if not user:
+        logger.warning("User not found for set_linkedin_token: %s", user_id)
+        return False
+
+    preferences = user.get("preferences") or {}
+    if not isinstance(preferences, dict):
+        preferences = {}
+    preferences["linkedin"] = token_data
+
+    result = collection.update_one(
+        {"_id": user_id_obj},
+        {"$set": {"preferences": preferences, "dateUpdated": datetime.utcnow()}},
+    )
+    return result.matched_count > 0
+
+
+def get_linkedin_token(user_id: str) -> Optional[Dict]:
+    """
+    Read LinkedIn OAuth token data from user preferences.
+    """
+    try:
+        user = get_user_by_id(user_id)
+        prefs = user.preferences or {}
+        linkedin = prefs.get("linkedin")
+        if isinstance(linkedin, dict) and linkedin.get("access_token"):
+            return linkedin
+    except Exception:
+        pass
+    return None
 

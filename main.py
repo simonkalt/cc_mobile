@@ -220,6 +220,50 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+# OAuth callback endpoint for Zoho Mail API setup
+@app.get("/oauth/callback")
+async def oauth_callback(request: Request):
+    """
+    OAuth callback endpoint for Zoho Mail API authorization.
+    Returns authorization code or structured error details.
+    """
+    code = request.query_params.get("code")
+    error = request.query_params.get("error")
+    error_description = request.query_params.get("error_description")
+
+    if error:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": error,
+                "error_description": error_description or "No description provided",
+                "message": "OAuth authorization failed. Please try the authorization process again.",
+            },
+        )
+
+    if not code:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "missing_code",
+                "error_description": "The authorization code was not found in the callback URL.",
+                "message": "No authorization code received. Please try the authorization process again.",
+            },
+        )
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "success": True,
+            "code": code,
+            "message": "Authorization code received successfully. Use this code to generate your refresh token.",
+            "next_step": "Exchange this authorization code for a refresh token using the Zoho OAuth token endpoint.",
+        },
+    )
+
 # Mount static files for website and documents
 # Get the project root directory - try multiple methods for compatibility
 try:
@@ -303,7 +347,9 @@ try:
         cover_letters,
         pdf,
         sms,
+        email,
         subscriptions,
+        linkedin,
     )
 
     app.include_router(job_url.router)
@@ -315,7 +361,9 @@ try:
     app.include_router(cover_letters.router)
     app.include_router(pdf.router)
     app.include_router(sms.router)
+    app.include_router(email.router)
     app.include_router(subscriptions.router)
+    app.include_router(linkedin.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:

@@ -2,8 +2,17 @@
 User API routes
 """
 import logging
-from fastapi import APIRouter, status
+from datetime import datetime
+import os
+import time
+from fastapi import APIRouter, status, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from bson import ObjectId
+
+from app.core.auth import get_current_user, _verify_token
+from app.db.mongodb import get_collection, is_connected
+from app.utils.user_helpers import USERS_COLLECTION
 
 from app.models.user import (
     UserRegisterRequest,
@@ -11,6 +20,8 @@ from app.models.user import (
     UserResponse,
     UserLoginRequest,
     UserLoginResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
 )
 from app.services.user_service import (
     register_user,
@@ -19,11 +30,16 @@ from app.services.user_service import (
     update_user,
     delete_user,
     login_user,
+    _make_signed_token,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+class SMSOptRequest(BaseModel):
+    SMSOpt: str
 
 
 @router.post(
@@ -63,6 +79,35 @@ async def login_user_endpoint(login_data: UserLoginRequest):
         raise
 
 
+@router.post("/refresh-token", response_model=RefreshTokenResponse)
+async def refresh_token_endpoint(request: RefreshTokenRequest):
+    """Refresh access token using a valid refresh token."""
+    payload = _verify_token(request.refresh_token)
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+    now = int(time.time())
+    access_ttl_seconds = 24 * 60 * 60
+    access_payload = {
+        "sub": user_id,
+        "email": payload.get("email", ""),
+        "type": "access",
+        "iat": now,
+        "exp": now + access_ttl_seconds,
+    }
+    jwt_secret = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
+    new_access_token = _make_signed_token(access_payload, jwt_secret)
+    return RefreshTokenResponse(access_token=new_access_token, token_type="bearer")
+
+
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user_by_id_endpoint(user_id: str):
     """Get user by ID"""
@@ -80,6 +125,46 @@ async def get_user_by_id_endpoint(user_id: str):
 async def get_user_by_email_endpoint(email: str):
     """Get user by email"""
     return get_user_by_email(email)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_endpoint(current_user: UserResponse = Depends(get_current_user)):
+    """Get current authenticated user"""
+    return get_user_by_id(current_user.id)
+
+
+@router.put("/me/sms-opt", response_model=UserResponse)
+async def set_sms_opt_endpoint(
+    body: SMSOptRequest, current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Set SMS opt-in/out for current user.
+    Persists SMSOpt ('IN' or 'OUT') and SMSOptDate timestamp.
+    """
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
+
+    sms_opt = (body.SMSOpt or "").strip().upper()
+    if sms_opt not in {"IN", "OUT"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SMSOpt must be either 'IN' or 'OUT'",
+        )
+
+    collection.update_one(
+        {"_id": ObjectId(current_user.id)},
+        {"$set": {"SMSOpt": sms_opt, "SMSOptDate": datetime.utcnow()}},
+    )
+    return get_user_by_id(current_user.id)
 
 
 @router.put("/{user_id}", response_model=UserResponse)

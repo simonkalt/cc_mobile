@@ -107,3 +107,12 @@ class UserLoginResponse(BaseModel):
     token_type: Optional[str] = "bearer"
     expires_in: Optional[int] = 86400
 
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+

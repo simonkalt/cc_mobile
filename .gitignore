@@ -14,6 +14,7 @@ __pycache__/
 *.so
 .Python
 env.zip
+stripe_backup_code.txt
 stripe_backup_codetxt
 
 # Distribution / packaging
@@ -22,6 +23,6 @@ dist/
 *.egg-info/
 
 .oci/config
-.pem
+*.pem
 
 .cursor/mcp.json

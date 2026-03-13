@@ -6,6 +6,7 @@ import json
 import os
 from typing import Optional, Dict, Any
 from datetime import timedelta
+from urllib.parse import urlparse
 
 from app.core.config import settings
 
@@ -82,17 +83,61 @@ def get_redis_client():
                 "socket_connect_timeout": 5,
                 "socket_timeout": 5,
             }
-            
+
+            # Tolerate REDIS_HOST values that include scheme and/or credentials.
+            # Supported examples:
+            # - redis-12345.example.com
+            # - username@redis-12345.example.com
+            # - redis://username:password@redis-12345.example.com:15435/0
+            # - rediss://username:password@redis-12345.example.com:15435/0
+            raw_host = (settings.REDIS_HOST or "").strip()
+            parsed_username = settings.REDIS_USERNAME
+            parsed_password = settings.REDIS_PASSWORD
+            parsed_host = raw_host
+            parsed_port = settings.REDIS_PORT
+            parsed_ssl = settings.REDIS_SSL
+
+            if raw_host.startswith("redis://") or raw_host.startswith("rediss://"):
+                parsed = urlparse(raw_host)
+                if parsed.hostname:
+                    parsed_host = parsed.hostname
+                if parsed.port:
+                    parsed_port = parsed.port
+                if parsed.username:
+                    parsed_username = parsed.username
+                if parsed.password:
+                    parsed_password = parsed.password
+                if parsed.scheme == "rediss":
+                    parsed_ssl = True
+            elif "@" in raw_host:
+                # Handle shorthand "username@host[:port]" style.
+                userinfo, hostpart = raw_host.split("@", 1)
+                parsed_host = hostpart
+                if ":" in userinfo:
+                    u, p = userinfo.split(":", 1)
+                    parsed_username = parsed_username or u
+                    parsed_password = parsed_password or p
+                else:
+                    parsed_username = parsed_username or userinfo
+                if ":" in hostpart:
+                    h, port_text = hostpart.rsplit(":", 1)
+                    parsed_host = h
+                    if port_text.isdigit():
+                        parsed_port = int(port_text)
+
+            connection_params["host"] = parsed_host
+            connection_params["port"] = parsed_port
+
             # Add authentication if provided
-            if settings.REDIS_USERNAME and settings.REDIS_PASSWORD:
-                connection_params["username"] = settings.REDIS_USERNAME
-                connection_params["password"] = settings.REDIS_PASSWORD
-            elif settings.REDIS_PASSWORD:
+            if parsed_username and parsed_password:
+                connection_params["username"] = parsed_username
+                connection_params["password"] = parsed_password
+            elif parsed_password:
                 # Some Redis setups only use password (no username)
-                connection_params["password"] = settings.REDIS_PASSWORD
-            
+                connection_params["password"] = parsed_password
+
             # Add SSL if configured
-            if settings.REDIS_SSL:
+            if parsed_ssl:
                 connection_params["ssl"] = True
                 connection_params["ssl_cert_reqs"] = "required"
             

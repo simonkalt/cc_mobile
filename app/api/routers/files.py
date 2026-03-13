@@ -6,7 +6,7 @@ import base64
 import re
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, status, Request
-from fastapi.responses import JSONResponse, Response, HTMLResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, Response, HTMLResponse, PlainTextResponse, FileResponse
 from botocore.exceptions import ClientError
 
 from app.models.file import (
@@ -43,6 +43,58 @@ def get_s3_bucket_name():
         import os
         bucket_name = os.getenv("S3_BUCKET_URI", "").replace("s3://", "").split("/")[0]
     return bucket_name
+
+
+@router.get("/profile/bizcard", dependencies=[])
+async def get_profile_bizcard():
+    """
+    Get the public business card PNG from the local website/profile directory.
+    """
+    import os
+
+    png_filename = "bizcardsk.png"
+    current_file = os.path.abspath(__file__)
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+    cwd = os.getcwd()
+    possible_paths = [
+        os.path.join(project_root, "website", "profile", png_filename),
+        os.path.join(cwd, "website", "profile", png_filename),
+    ]
+    for png_path in possible_paths:
+        if os.path.exists(png_path):
+            return FileResponse(
+                png_path,
+                media_type="image/png",
+                filename=png_filename,
+                headers={"Content-Disposition": f'inline; filename="{png_filename}"'},
+            )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile business card PNG not found")
+
+
+@router.get("/profile", dependencies=[])
+async def get_profile_pdf():
+    """
+    Get the public profile resume PDF from the local website/profile directory.
+    """
+    import os
+
+    pdf_filename = "Simon Kaltgrad Resume 2025 Q3.pdf"
+    current_file = os.path.abspath(__file__)
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file))))
+    cwd = os.getcwd()
+    possible_paths = [
+        os.path.join(project_root, "website", "profile", pdf_filename),
+        os.path.join(cwd, "website", "profile", pdf_filename),
+    ]
+    for pdf_path in possible_paths:
+        if os.path.exists(pdf_path):
+            return FileResponse(
+                pdf_path,
+                media_type="application/pdf",
+                filename=pdf_filename,
+                headers={"Content-Disposition": f'inline; filename="{pdf_filename}"'},
+            )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile PDF not found")
 
 
 def _extract_tos_blocks(raw_text: str) -> List[Dict[str, Any]]:

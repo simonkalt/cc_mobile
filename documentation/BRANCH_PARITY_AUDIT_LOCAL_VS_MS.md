@@ -1,0 +1,208 @@
+# Branch Parity Audit
+
+- Source ref: `HEAD`
+- Target ref: `origin/MS-Word-Integration`
+- Divergence: source ahead `13`, target ahead `148`
+
+## File Change Overview (noise-filtered)
+- Total changed paths: `293`
+- Noise-filtered paths: `205`
+
+- `A` `.Dockerfile`
+- `A` `.dockerignore`
+- `A` `.gitattributes`
+- `M` `.gitignore`
+- `D` `.python-version`
+- `A` `Dockerfile`
+- `M` `app/api/routers/config.py`
+- `M` `app/api/routers/cover_letter.py`
+- `M` `app/api/routers/cover_letters.py`
+- `M` `app/api/routers/email.py`
+- `M` `app/api/routers/files.py`
+- `M` `app/api/routers/job_url.py`
+- `A` `app/api/routers/linkedin.py`
+- `M` `app/api/routers/llm_config.py`
+- `M` `app/api/routers/pdf.py`
+- `M` `app/api/routers/personality.py`
+- `M` `app/api/routers/sms.py`
+- `A` `app/api/routers/subscriptions.py`
+- `M` `app/api/routers/users.py`
+- `A` `app/core/auth.py`
+- `M` `app/core/config.py`
+- `M` `app/db/mongodb.py`
+- `M` `app/main.py`
+- `M` `app/models/__init__.py`
+- `M` `app/models/cover_letter.py`
+- `M` `app/models/email.py`
+- `M` `app/models/job.py`
+- `M` `app/models/pdf.py`
+- `M` `app/models/sms.py`
+- `A` `app/models/subscription.py`
+- `M` `app/models/user.py`
+- `M` `app/services/cover_letter_service.py`
+- `A` `app/services/linkedin_job_api.py`
+- `M` `app/services/pdf_service.py`
+- `A` `app/services/print.css`
+- `A` `app/services/subscription_service.py`
+- `A` `app/services/telnyx_webhook_service.py`
+- `M` `app/services/user_service.py`
+- `M` `app/services/verification_service.py`
+- `A` `app/test.docx`
+- `A` `app/utils/docx_generator.py`
+- `M` `app/utils/email_utils.py`
+- `A` `app/utils/html_normalizer.py`
+- `A` `app/utils/jwt.py`
+- `M` `app/utils/llm_utils.py`
+- `M` `app/utils/pdf_utils.py`
+- `A` `app/utils/redis_utils.py`
+- `M` `app/utils/sms_utils.py`
+- `A` `app/utils/template_loader.py`
+- `M` `app/utils/user_helpers.py`
+- `M` `build.sh`
+- `A` `check_redis.py`
+- `A` `check_redis_install.sh`
+- `A` `copy-docker-tmp.sh`
+- `A` `debug/stripe.py`
+- `A` `docker_full_build.sh`
+- `A` `documentation/ADDITIONAL_INSTRUCTIONS_DEBUG.md`
+- `R100` `documentation/ANDROID_LOCAL_SETUP.md`
+- `A` `documentation/BACKEND_DOCX_PARAGRAPH_AND_LINE_BREAKS.md`
+- `A` `documentation/BACKEND_STRIPE_REQUIREMENTS.md`
+- `A` `documentation/BACKEND_SUBSCRIPTION_IDS_REQUIREMENT.md`
+- `A` `documentation/COVER_LETTER_DOCX_FLOW.md`
+- `A` `documentation/COVER_LETTER_GENERATION_API.md`
+- `M` `documentation/COVER_LETTER_MANAGEMENT_API.md`
+- `A` `documentation/DEFAULT_PERSONALITY_PROFILE_API copy.md`
+- `A` `documentation/DOCX_SOURCE_OF_TRUTH_FRONTEND_GUIDE.md`
+- `A` `documentation/DOCX_TO_PDF_API.md`
+- `A` `documentation/EMAIL_VERIFICATION_API.md`
+- `A` `documentation/ENDPOINT_PROTECTION_GUIDE.md`
+- `R100` `documentation/ENV_SETUP_S3.md`
+- `R100` `documentation/FINAL_SUMMARY.md`
+- `A` `documentation/FRONTEND_COVER_LETTER_AND_PRINT_REQUIREMENTS.md`
+- `A` `documentation/FRONTEND_DOCX_IMPLEMENTATION_GUIDE.md`
+- `A` `documentation/FRONTEND_IMPLEMENTATION_GUIDE.md`
+- `A` `documentation/FRONTEND_VERIFICATION_ERROR_HANDLING.md`
+- `A` `documentation/GET_USER_BY_EMAIL_API.md`
+- `A` `documentation/JWT_AUTHENTICATION.md`
+- `A` `documentation/JWT_FRONTEND_IMPLEMENTATION.md`
+- `A` `documentation/JWT_POSTMAN_IMPLEMENTATION.md`
+- `A` `documentation/JWT_QUICK_REFERENCE.md`
+- `A` `documentation/LIBREOFFICE_SETUP.md`
+- `A` `documentation/MARKDOWN_SOURCE_OF_TRUTH_ENDPOINT_CHANGES.md`
+- `R100` `documentation/MIGRATION_COMPLETE.md`
+- `R100` `documentation/MIGRATION_PROGRESS.md`
+- `R100` `documentation/OPTIONAL_STEPS_COMPLETE.md`
+- `A` `documentation/PDF_SOURCE_TRUTH_DOCX_VS_HTML.md`
+- `A` `documentation/PRINT_PREVIEW_NETWORK_FAILED_DOCKER.md`
+- `A` `documentation/PRINT_PREVIEW_PDF_API.md`
+- `A` `documentation/PRINT_TEMPLATE_SINGLE_SOURCE_OF_TRUTH.md`
+- `R100` `documentation/README_REFACTORING.md`
+- `A` `documentation/REDIS_REGISTRATION_IMPLEMENTATION.md`
+- `R100` `documentation/REFACTORING_SUMMARY.md`
+- `A` `documentation/REGISTRATION_WITH_REDIS.md`
+- `M` `documentation/RENDER_SETUP.md`
+- `M` `documentation/SAVE_COVER_LETTER_API.md`
+- `M` `documentation/SERVER_API_REQUIREMENTS.md`
+- `R100` `documentation/SERVICE_REFACTORING_GUIDE.md`
+- `A` `documentation/SMS_COLLECTION_SCHEMA.md`
+- `A` `documentation/SMS_OPT_IN_OUT_API.md`
+- `M` `documentation/SMS_VERIFICATION_API.md`
+- `A` `documentation/STRIPE_DIAGNOSTIC_GUIDE.md`
+- `A` `documentation/STRIPE_FORCE_SAVE_CARD.md`
+- `A` `documentation/STRIPE_FRONTEND_IMPLEMENTATION.md`
+- `A` `documentation/STRIPE_PAYMENTSHEET_API.md`
+- `A` `documentation/STRIPE_PRODUCTS_API.md`
+- `A` `documentation/SUBSCRIPTION_API_CURL.md`
+- `A` `documentation/SUBSCRIPTION_PLANS_API.md`
+- `M` `documentation/TERMS_OF_SERVICE_API.md`
+- `R100` `documentation/WSL_PORT_FORWARDING_FIX.md`
+- `R100` `documentation/WSL_SETUP_GUIDE.md`
+- `R100` `documentation/WSL_WEASYPRINT_FIX.md`
+- `A` `documentation/ZOHO_MAIL_SETUP.md`
+- `R100` `documentation/fix_wsl_terminal_errors.md`
+- `R100` `documentation/revert_wsl_extension.md`
+- `R100` `documentation/wsl_permissions_guide.md`
+- `A` `documents/sAImon Software - Privacy Policy.pdf`
+- `A` `documents/sAImon Software - Terms of Service.pdf`
+- `A` `install_pymupdf_wsl.sh`
+- `A` `install_pymupdf_wsl_fix.sh`
+- `M` `job_url_analyzer.py`
+- ... plus `85` more
+
+## Critical Directory Presence
+
+- `app/api/routers`: missing in source `1`
+  - `app/api/routers/linkedin.py`
+- `app/models`: missing in source `0`
+- `app/services`: missing in source `4`
+  - `app/services/.DS_Store`
+  - `app/services/linkedin_job_api.py`
+  - `app/services/print.css`
+  - `app/services/telnyx_webhook_service.py`
+- `app/utils`: missing in source `2`
+  - `app/utils/jwt.py`
+  - `app/utils/redis_utils.py`
+- `templates`: missing in source `4`
+  - `templates/creative/1.template`
+  - `templates/formal/1.template`
+  - `templates/formal/2.template`
+  - `templates/informal/1.template`
+- `website`: missing in source `0`
+- `documents`: missing in source `0`
+
+## Route Parity
+- Source routes: `64`
+- Target routes: `74`
+- Missing in source: `10`
+- `GET /auth-url`
+- `GET /callback`
+- `GET /me`
+- `GET /oauth/callback`
+- `GET /profile`
+- `GET /profile/bizcard`
+- `GET /status`
+- `POST /refresh-token`
+- `POST /webhook/telnyx`
+- `PUT /me/sms-opt`
+
+## Router Registration Parity (main.py)
+- Source registered routers: `11`
+- Target registered routers: `2`
+- Missing in source: `0`
+
+## Environment Key Parity (os.getenv)
+- Missing in source: `32`
+- `FROM_EMAIL`
+- `LINKEDIN_CLIENT_ID`
+- `LINKEDIN_CLIENT_SECRET`
+- `LINKEDIN_REDIRECT_URI`
+- `LINKEDIN_SCOPE`
+- `LINKEDIN_SUCCESS_REDIRECT`
+- `NO_COLOR`
+- `NUTRIENT_API_KEY`
+- `PRINT_PREVIEW_RAW_HTML`
+- `PRINT_PREVIEW_USE_NUTRIENT`
+- `PRINT_PREVIEW_USE_WEASYPRINT_ONLY`
+- `REDIS_API_KEY`
+- `REDIS_DB`
+- `REDIS_HOST`
+- `REDIS_PASSWORD`
+- `REDIS_PORT`
+- `REDIS_SSL`
+- `REDIS_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_PORT`
+- `SMTP_SERVER`
+- `SMTP_USERNAME`
+- `SMTP_USE_SSL`
+- `SMTP_USE_TLS`
+- `TELNYX_API_KEY`
+- `TELNYX_PHONE_NUMBER`
+- `TERM`
+- `USE_SYSTEM_PROMPT_FILE`
+- `ZOHO_ACCOUNT_ID`
+- `ZOHO_CLIENT_ID`
+- `ZOHO_CLIENT_SECRET`
+- `ZOHO_REFRESH_TOKEN`
+
