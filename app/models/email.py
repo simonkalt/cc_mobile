@@ -2,13 +2,15 @@
 Email verification related Pydantic models
 """
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 class SendVerificationCodeRequest(BaseModel):
     """Request to send verification code via email"""
     email: EmailStr
     purpose: str  # "forgot_password", "change_password", "finish_registration"
+    registration_data: Optional[Dict[str, Any]] = None  # For finish_registration flow
+    delivery_method: Optional[str] = "email"  # "email" or "sms"
 
 
 class VerifyCodeRequest(BaseModel):
