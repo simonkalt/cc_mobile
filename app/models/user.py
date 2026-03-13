@@ -95,6 +95,8 @@ class UserResponse(BaseModel):
     last_llm_used: Optional[str] = None
     generation_credits: int = Field(default=10, ge=0)
     max_credits: int = Field(default=10, ge=0)
+    SMSOpt: Optional[str] = None
+    SMSOptDate: Optional[datetime] = None
 
     class Config:
         from_attributes = True

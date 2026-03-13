@@ -134,5 +134,7 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         last_llm_used=user_doc.get("last_llm_used"),
         generation_credits=generation_credits,
         max_credits=max_credits,
+        SMSOpt=user_doc.get("SMSOpt"),
+        SMSOptDate=user_doc.get("SMSOptDate"),
     )
 

@@ -74,6 +74,31 @@ def _load_default_personality_profiles() -> list[dict]:
     return _built_in_default_personality_profiles()
 
 
+def _normalize_sms_opt_value(registration_data: Optional[dict] = None) -> str:
+    """
+    Normalize registration SMS consent to backend enum ('IN'/'OUT').
+    Defaults to 'IN' for new registrations.
+    """
+    if not isinstance(registration_data, dict):
+        return "IN"
+
+    direct_value = (
+        registration_data.get("SMSOpt")
+        or registration_data.get("smsOpt")
+        or registration_data.get("sms_opt")
+    )
+    if isinstance(direct_value, str):
+        candidate = direct_value.strip().upper()
+        if candidate in {"IN", "OUT"}:
+            return candidate
+
+    bool_value = registration_data.get("sms_opt_in")
+    if isinstance(bool_value, bool):
+        return "IN" if bool_value else "OUT"
+
+    return "IN"
+
+
 def _b64url(data: bytes) -> str:
     """Base64 URL-safe encoding without padding."""
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
@@ -228,6 +253,8 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "stripeCustomerId": None,
         "generation_credits": 10,
         "max_credits": 10,
+        "SMSOpt": "IN",
+        "SMSOptDate": datetime.utcnow(),
     }
     
     try:
@@ -407,6 +434,8 @@ def create_user_from_registration_data(
         app_settings["personalityProfiles"] = _load_default_personality_profiles()
     preferences["appSettings"] = app_settings
 
+    sms_opt_value = _normalize_sms_opt_value(registration_data)
+
     user_doc = {
         "name": name,
         "email": email,
@@ -434,8 +463,8 @@ def create_user_from_registration_data(
         "stripeCustomerId": None,
         "generation_credits": 10,
         "max_credits": 10,
-        "SMSOpt": None,
-        "SMSOptDate": None,
+        "SMSOpt": sms_opt_value,
+        "SMSOptDate": datetime.utcnow(),
     }
 
     try:
