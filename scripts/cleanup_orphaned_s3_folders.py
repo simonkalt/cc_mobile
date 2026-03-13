@@ -8,10 +8,12 @@ you to delete them after confirmation.
 
 Usage:
     python scripts/cleanup_orphaned_s3_folders.py
+    python scripts/cleanup_orphaned_s3_folders.py --silent
 """
 
 import sys
 import os
+import argparse
 from pathlib import Path
 from typing import Set, List, Dict
 from bson import ObjectId
@@ -218,7 +220,22 @@ def format_size(size_bytes: int) -> str:
     return f"{size_bytes:.2f} PB"
 
 
-def main():
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Clean up orphaned S3 user folders that have no matching MongoDB user."
+    )
+    parser.add_argument(
+        "--silent",
+        "--yes",
+        action="store_true",
+        dest="silent",
+        help="Run without confirmation prompt and proceed with deletion automatically.",
+    )
+    return parser.parse_args()
+
+
+def main(silent: bool = False):
     """Main cleanup workflow"""
     print("=" * 80)
     print("S3 Orphaned Folders Cleanup Utility")
@@ -311,12 +328,14 @@ def main():
     print(f"Total size: {format_size(total_size)}")
     print()
     
-    response = input("Do you want to proceed with deletion? (yes/no): ").strip().lower()
-    
-    if response not in ['yes', 'y']:
-        print("❌ Deletion cancelled.")
-        close_mongodb_connection()
-        return 0
+    if silent:
+        print("Silent mode enabled: skipping confirmation prompt.")
+    else:
+        response = input("Do you want to proceed with deletion? (yes/no): ").strip().lower()
+        if response not in ['yes', 'y']:
+            print("❌ Deletion cancelled.")
+            close_mongodb_connection()
+            return 0
     
     # Step 8: Delete folders
     print("\nStep 6: Deleting orphaned folders...")
@@ -352,7 +371,8 @@ def main():
 
 if __name__ == "__main__":
     try:
-        exit_code = main()
+        args = parse_args()
+        exit_code = main(silent=args.silent)
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print("\n\n❌ Interrupted by user")
