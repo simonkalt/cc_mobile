@@ -669,59 +669,11 @@ Escape quotes inside JSON strings (use \\" for a literal quote). Newlines inside
 
     message = json.dumps(message_data)
 
-    # Prepare additional instructions - enhance by default, override ONLY if explicitly requested
+    # Prepare additional instructions as final override (legacy behavior).
+    # Any non-empty additional_instructions should be treated as highest priority.
     additional_instructions_text = ""
     if additional_instructions and additional_instructions.strip():
-        # Check if the additional instructions explicitly request an override
-        # Override mode should ONLY trigger if user explicitly commands it with very specific language
-        # Default behavior is ALWAYS enhancement mode
-        instructions_lower = additional_instructions.lower().strip()
-
-        # EXTREMELY strict override detection - user must explicitly command override
-        # Override mode ONLY triggers if instructions start with explicit override markers
-        # This prevents accidental triggering from normal instructions
-
-        # Check if instructions start with explicit override markers
-        # Must literally start with one of these exact phrases (case-insensitive)
-        override_markers = [
-            "override:",
-            "override ",
-            "ignore all previous:",
-            "ignore all previous ",
-            "ignore previous:",
-            "ignore previous ",
-            "disregard all previous:",
-            "disregard all previous ",
-            "disregard previous:",
-            "disregard previous ",
-        ]
-
-        starts_with_override = any(
-            instructions_lower.startswith(marker) for marker in override_markers
-        )
-
-        # Also check for explicit override phrases anywhere in the text (but be very strict)
-        explicit_override_phrases = [
-            "override all previous instructions",
-            "ignore all previous instructions",
-            "disregard all previous instructions",
-        ]
-
-        contains_explicit_override = any(
-            phrase in instructions_lower for phrase in explicit_override_phrases
-        )
-
-        # ONLY trigger override if user explicitly commands it
-        is_override = starts_with_override or contains_explicit_override
-
-        # Log detection for debugging
-        logger.info(
-            f"Additional instructions override detection: starts_with_override={starts_with_override}, contains_explicit_override={contains_explicit_override}, is_override={is_override}"
-        )
-
-        if is_override:
-            # User explicitly requested override - use override language
-            additional_instructions_text = f"""
+        additional_instructions_text = f"""
 
 === FINAL OVERRIDE INSTRUCTIONS - HIGHEST PRIORITY ===
 IGNORE ALL PREVIOUS INSTRUCTIONS ABOUT LENGTH, TONE, STYLE, OR FORMATTING.
@@ -736,25 +688,9 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
 === END OVERRIDE INSTRUCTIONS ===
 """
-            # logger.info(
-            #     f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE detected (explicit override requested)"
-            # )
-        else:
-            # User wants to enhance/supplement - add as additional guidance
-            additional_instructions_text = f"""
-
-=== ADDITIONAL INSTRUCTIONS ===
-Please also take into account the following additional guidance when generating the cover letter.
-These instructions should enhance and work together with the personality profile, system instructions, and other guidance provided:
-
-{additional_instructions}
-
-Please incorporate these instructions while maintaining consistency with all other provided guidance.
-=== END ADDITIONAL INSTRUCTIONS ===
-"""
-            # logger.info(
-            #     f"Additional instructions provided ({len(additional_instructions)} chars) - ENHANCEMENT MODE (will supplement other instructions)"
-            # )
+        logger.info(
+            f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE (legacy behavior restored)"
+        )
 
     # Debug: capture prompts for analysis (tmp/debug_prompts.json)
     # try:

@@ -1,0 +1,4 @@
+{
+  "terminal.integrated.profiles.windows":  {"WSL": { "path": "/mnt/c/Users/simon/AppData/Local/Microsoft/WindowsApps/ubuntu2204.exe"} },
+  "terminal.integrated.defaultProfile.windows": "WSL"
+}

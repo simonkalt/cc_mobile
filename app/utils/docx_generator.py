@@ -931,10 +931,21 @@ def build_docx_from_content(
             last_ended_with_space = text.endswith(" ") or text.endswith("\t")
             run = p.add_run(text)
             run_font = run.font
-            if not use_default_fonts:
-                run_font.name = (run_spec.get("font_family") or "").strip() or font_family
-                size_pt = run_spec.get("font_size_pt")
-                run_font.size = Pt(size_pt if size_pt is not None and size_pt > 0 else font_size_pt)
+            inline_font_family = (run_spec.get("font_family") or "").strip()
+            inline_size_pt = run_spec.get("font_size_pt")
+            has_inline_size = inline_size_pt is not None and inline_size_pt > 0
+
+            # Always honor explicit inline style tags from content (e.g. [size:28pt], [font:Georgia]),
+            # even when useDefaultFonts is enabled.
+            if inline_font_family:
+                run_font.name = inline_font_family
+            elif not use_default_fonts:
+                run_font.name = font_family
+
+            if has_inline_size:
+                run_font.size = Pt(inline_size_pt)
+            elif not use_default_fonts:
+                run_font.size = Pt(font_size_pt)
             run.bold = run_spec.get("bold", False)
             run.italic = run_spec.get("italic", False)
             color_hex = run_spec.get("color_hex")
