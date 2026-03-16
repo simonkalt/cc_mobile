@@ -176,10 +176,9 @@ async def update_user_endpoint(user_id: str, updates: UserUpdateRequest):
         if isinstance(app_settings, dict) and "personalityProfiles" in app_settings:
             personality_profiles = app_settings["personalityProfiles"]
             logger.info(
-                f"Update request for user {user_id} includes personalityProfiles: "
+                f"Update request for user {user_id} includes personalityProfiles "
                 f"type={type(personality_profiles)}, "
-                f"length={len(personality_profiles) if isinstance(personality_profiles, list) else 'N/A'}, "
-                f"value={personality_profiles}"
+                f"length={len(personality_profiles) if isinstance(personality_profiles, list) else 'N/A'}"
             )
         else:
             logger.debug(f"Update request for user {user_id} does not include personalityProfiles")

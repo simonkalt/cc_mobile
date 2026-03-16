@@ -561,7 +561,12 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     # If not provided, preserve existing profiles
                     if "personalityProfiles" in app_settings:
                         personality_profiles = app_settings["personalityProfiles"]
-                        logger.info(f"personalityProfiles provided in update request for user {user_id}: type={type(personality_profiles)}, value={personality_profiles}")
+                        logger.info(
+                            "personalityProfiles provided in update request for user %s: type=%s, length=%s",
+                            user_id,
+                            type(personality_profiles),
+                            len(personality_profiles) if isinstance(personality_profiles, list) else "N/A",
+                        )
                         
                         if isinstance(personality_profiles, list):
                             # Only update if explicitly provided (even if empty array)
