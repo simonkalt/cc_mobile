@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "clear-cache": "python3 clear-all-cache.py",
+    "clear-cache:all": "python3 clear-all-cache.py --include-verification",
+    "clear-cache:flush": "python3 clear-all-cache.py --flushdb"
+  },
   "dependencies": {
     "xai-sdk": "^1.0.0-alpha.0"
   }

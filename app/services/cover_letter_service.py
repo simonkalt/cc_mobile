@@ -14,6 +14,7 @@ from datetime import timedelta
 from typing import Optional, Any, Dict
 
 from fastapi import HTTPException, status  # type: ignore[import-untyped]
+from dotenv import dotenv_values
 
 # Try to import colorama for better color support in WSL/Windows
 try:
@@ -93,6 +94,14 @@ def _redis_set_json(key: str, value: Dict[str, Any], ttl_seconds: int) -> None:
     try:
         client = get_redis_client()
         client.setex(key, timedelta(seconds=ttl_seconds), json.dumps(value, default=str))
+    except Exception:
+        return
+
+
+def _redis_delete(key: str) -> None:
+    try:
+        client = get_redis_client()
+        client.delete(key)
     except Exception:
         return
 
@@ -205,14 +214,32 @@ def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
     redis_key = f"cache:{cache_key}"
     cached = _redis_get_json(redis_key)
     if cached:
+        if _is_error_result(cached):
+            _redis_delete(redis_key)
+            return None
         return cached
-    return _local_get_json(_local_result_cache, cache_key)
+    cached_local = _local_get_json(_local_result_cache, cache_key)
+    if cached_local and _is_error_result(cached_local):
+        _local_result_cache.pop(cache_key, None)
+        return None
+    return cached_local
 
 
 def _set_cached_result(cache_key: str, value: Dict[str, Any]) -> None:
+    if _is_error_result(value):
+        return
     redis_key = f"cache:{cache_key}"
     _redis_set_json(redis_key, value, _RESULT_CACHE_TTL_SECONDS)
     _local_set_json(_local_result_cache, cache_key, value, _RESULT_CACHE_TTL_SECONDS)
+
+
+def _is_error_result(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    text = payload.get("content")
+    if isinstance(text, str) and text.strip().lower().startswith("error:"):
+        return True
+    return False
 
 
 def _record_generation_usage(
@@ -243,6 +270,24 @@ def _record_generation_usage(
         logger.info(f"Decremented generation credits for user {usage_user_id} (if applicable)")
     except Exception as e:
         logger.warning(f"Failed to decrement generation credits: {e}")
+
+
+def _resolve_xai_api_key() -> Optional[str]:
+    key = (settings.XAI_API_KEY or "").strip()
+    if key:
+        return key
+    try:
+        service_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.normpath(os.path.join(service_dir, "..", ".."))
+        env_path = os.path.join(project_root, ".env")
+        env_map = dotenv_values(env_path)
+        fallback = str(env_map.get("XAI_API_KEY") or "").strip()
+        if fallback:
+            logger.warning("Using XAI_API_KEY fallback from .env file")
+            return fallback
+    except Exception as e:
+        logger.debug("Could not load XAI_API_KEY from .env fallback: %s", e)
+    return None
 
 
 def _write_llm_prompt_log(
@@ -988,7 +1033,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 "temperature": 0.7,
                 "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": 8192,  # Increase max tokens to prevent truncation
+                "max_output_tokens": settings.LLM_MAX_OUTPUT_TOKENS,
             }
 
             _write_llm_prompt_log(llm, full_text=msg)
@@ -1032,7 +1077,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 response = client.chat.completions.create(
                     model=gpt_model,
                     messages=messages,
-                    max_completion_tokens=4096,  # GPT-5.2 uses max_completion_tokens
+                    max_completion_tokens=settings.LLM_MAX_OUTPUT_TOKENS,  # GPT-5.2 uses max_completion_tokens
                 )
             else:
                 response = client.chat.completions.create(
@@ -1043,11 +1088,17 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             r = response.choices[0].message.content
 
         elif llm == "Grok" or llm == xai_model or llm == "grok-4-fast-reasoning":
-            if not REQUESTS_AVAILABLE or not settings.XAI_API_KEY:
+            xai_api_key = _resolve_xai_api_key()
+            if not REQUESTS_AVAILABLE or not xai_api_key:
+                logger.error(
+                    "Grok prerequisites failed (requests_available=%s, xai_key_set=%s)",
+                    REQUESTS_AVAILABLE,
+                    bool(xai_api_key),
+                )
                 raise ValueError("XAI API not available or API key not set")
             # Use HTTP API (xai SDK has different API structure)
             headers = {
-                "Authorization": f"Bearer {settings.XAI_API_KEY}",
+                "Authorization": f"Bearer {xai_api_key}",
                 "Content-Type": "application/json",
             }
             messages_list = [
@@ -1168,7 +1219,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 model=claude_model,
                 system=system_message,
                 messages=messages,
-                max_tokens=20000,
+                max_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
                 temperature=1,
             )
             r = response.content[0].text

@@ -38,6 +38,30 @@ except ImportError:
     OxmlElement = None
     qn = None
 
+_VISUAL_BULLET_RE = re.compile(r"^\s*[•◦▪▸\-\*\+]\s+")
+_VISUAL_NUMBER_RE = re.compile(r"^\s*(?:\(?[1-9]\d?\)?[.)])\s+")
+
+
+def _apply_visual_hanging_indent_fallback(doc) -> None:
+    """
+    Enforce hanging indent on paragraphs that look like list items by text prefix.
+    This is a safety net when upstream parsing or model XML leaves visible bullets/numbers.
+    """
+    if not DOCX_AVAILABLE or Inches is None:
+        return
+    list_left = Inches(0.25)
+    list_hang = Inches(-0.25)
+    try:
+        for p in doc.paragraphs:
+            txt = (p.text or "").strip()
+            if not txt:
+                continue
+            if _VISUAL_BULLET_RE.match(txt) or _VISUAL_NUMBER_RE.match(txt):
+                p.paragraph_format.left_indent = list_left
+                p.paragraph_format.first_line_indent = list_hang
+    except Exception as e:
+        logger.debug("DOCX: visual hanging-indent fallback skipped: %s", e)
+
 
 def _parse_span_style(style_attr: str) -> Dict:
     """Parse style='...' into color_hex, font_size_pt, font_family (for docx runs)."""
@@ -961,6 +985,7 @@ def build_docx_from_content(
                         pass
 
     logger.info("DOCX: writing document to bytes buffer")
+    _apply_visual_hanging_indent_fallback(doc)
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -1153,6 +1178,7 @@ def apply_print_properties_to_docx(
         if not use_default_fonts and font_family and str(font_family).strip().lower() != "default":
             style.font.name = (font_family or "Times New Roman").strip()
             style.font.size = Pt(font_size_pt)
+        _apply_visual_hanging_indent_fallback(doc)
         out = io.BytesIO()
         doc.save(out)
         out.seek(0)
