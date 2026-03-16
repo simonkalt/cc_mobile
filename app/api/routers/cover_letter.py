@@ -9,7 +9,7 @@ import logging
 import os
 import re
 import html as htmllib
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request, HTTPException, Depends, status
 from fastapi.responses import JSONResponse
 from app.core.auth import get_current_user
@@ -181,7 +181,9 @@ def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
     return payload
 
 
-def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
+def _attach_docx_to_payload(
+    payload: Dict[str, Any], req: Any, current_user: Optional[UserResponse] = None
+) -> None:
     """
     Build a .docx from docx components (document_xml, numbering_xml, styles_xml),
     or from content (plain text) / legacy markdown/html, and attach as docxBase64.
@@ -190,7 +192,16 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
         # Resolve print_properties once (request body or user preferences) for both components and content paths
         logger.info("DOCX: determining print_properties for request")
         print_properties = getattr(req, "print_properties", None)
-        if not print_properties and getattr(req, "user_id", None):
+        user = current_user
+        if (
+            not print_properties
+            and user
+            and isinstance(getattr(user, "preferences", None), dict)
+        ):
+            app_settings = (user.preferences or {}).get("appSettings", {})
+            if isinstance(app_settings, dict):
+                print_properties = app_settings.get("printProperties")
+        if not print_properties and not user and getattr(req, "user_id", None):
             try:
                 user = get_user_by_id(req.user_id)
                 if user and user.preferences:
@@ -199,7 +210,7 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
                         print_properties = app_settings.get("printProperties")
             except Exception as e:
                 logger.debug("Could not get user print properties by id: %s", e)
-        if not print_properties and getattr(req, "user_email", None):
+        if not print_properties and not user and getattr(req, "user_email", None):
             try:
                 user = get_user_by_email(req.user_email)
                 if user and user.preferences:
@@ -242,7 +253,9 @@ def _attach_docx_to_payload(payload: Dict[str, Any], req: Any) -> None:
 
 
 @router.post("/job-info", response_model=CoverLetterGenerationResponse)
-async def handle_job_info(request: JobInfoRequest):
+async def handle_job_info(
+    request: JobInfoRequest, current_user: UserResponse = Depends(get_current_user)
+):
     """
     Generate cover letter based on job information.
 
@@ -272,11 +285,12 @@ async def handle_job_info(request: JobInfoRequest):
             phone_number=request.phone_number,
             user_id=request.user_id,
             user_email=request.user_email,
+            current_user=current_user,
         )
         logger.info("get_job_info() completed for /api/job-info")
         payload = _normalize_generation_response(result, request)
         logger.info("Starting DOCX attachment for /api/job-info")
-        _attach_docx_to_payload(payload, request)
+        _attach_docx_to_payload(payload, request, current_user=current_user)
         logger.info("DOCX attachment completed for /api/job-info")
         # Docx-only contract: return docx + hints + optional content; no markdown/html
         payload.pop("html", None)
@@ -297,7 +311,10 @@ async def handle_job_info(request: JobInfoRequest):
 
 
 @router.post("/cover-letter/generate-with-text-resume", response_model=CoverLetterGenerationResponse)
-async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextResumeRequest):
+async def generate_cover_letter_with_text_resume(
+    request: CoverLetterWithTextResumeRequest,
+    current_user: UserResponse = Depends(get_current_user),
+):
     """
     Generate cover letter with explicitly pasted resume text.
 
@@ -334,11 +351,12 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
             user_id=request.user_id,
             user_email=request.user_email,
             is_plain_text=True,  # Skip file processing for pasted text
+            current_user=current_user,
         )
         logger.info("get_job_info() completed for /api/cover-letter/generate-with-text-resume")
         payload = _normalize_generation_response(result, request)
         logger.info("Starting DOCX attachment for /api/cover-letter/generate-with-text-resume")
-        _attach_docx_to_payload(payload, request)
+        _attach_docx_to_payload(payload, request, current_user=current_user)
         logger.info("DOCX attachment completed for /api/cover-letter/generate-with-text-resume")
         payload.pop("html", None)
         payload.pop("markdown", None)
@@ -363,7 +381,9 @@ async def generate_cover_letter_with_text_resume(request: CoverLetterWithTextRes
 
 
 @router.post("/chat")
-async def handle_chat(request: Request):
+async def handle_chat(
+    request: Request, current_user: UserResponse = Depends(get_current_user)
+):
     """Handle both simple chat requests and job info requests"""
     try:
         body = await request.json()
@@ -467,9 +487,10 @@ async def handle_chat(request: Request):
                 phone_number=job_request.phone_number,
                 user_id=job_request.user_id,
                 user_email=job_request.user_email,
+                current_user=current_user,
             )
             payload = _normalize_generation_response(result, job_request)
-            _attach_docx_to_payload(payload, job_request)
+            _attach_docx_to_payload(payload, job_request, current_user=current_user)
             payload.pop("html", None)
             payload.pop("markdown", None)
             _write_client_payload_log(payload)

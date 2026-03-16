@@ -8,7 +8,10 @@ import datetime
 import base64
 import logging
 import re
-from typing import Optional
+import hashlib
+import time
+from datetime import timedelta
+from typing import Optional, Any, Dict
 
 from fastapi import HTTPException, status  # type: ignore[import-untyped]
 
@@ -22,10 +25,12 @@ except ImportError:
     COLORAMA_AVAILABLE = False
 
 from app.core.config import settings
+from app.models.user import UserResponse
 from app.utils.html_normalizer import html_p_to_br, collapse_br_pairs, double_break_after_groups
 from app.utils.template_loader import get_template_for_profile
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
+from app.utils.redis_utils import get_redis_client
 # from app.utils.docx_generator import insert_line_breaks_in_long_paragraphs
 from app.utils.llm_utils import (
     load_system_prompt,
@@ -40,6 +45,204 @@ from app.services.user_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Cache TTLs (seconds)
+_RESUME_CACHE_TTL_SECONDS = 30 * 60
+_RESULT_CACHE_TTL_SECONDS = 10 * 60
+_USER_PROFILE_CACHE_TTL_SECONDS = 5 * 60
+
+# Local fallback caches when Redis is unavailable
+_local_resume_cache: Dict[str, tuple[float, str]] = {}
+_local_result_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+_local_user_profile_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _redis_get_text(key: str) -> Optional[str]:
+    try:
+        client = get_redis_client()
+        raw = client.get(key)
+        return raw if isinstance(raw, str) else None
+    except Exception:
+        return None
+
+
+def _redis_set_text(key: str, value: str, ttl_seconds: int) -> None:
+    try:
+        client = get_redis_client()
+        client.setex(key, timedelta(seconds=ttl_seconds), value)
+    except Exception:
+        return
+
+
+def _redis_get_json(key: str) -> Optional[Dict[str, Any]]:
+    try:
+        client = get_redis_client()
+        raw = client.get(key)
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def _redis_set_json(key: str, value: Dict[str, Any], ttl_seconds: int) -> None:
+    try:
+        client = get_redis_client()
+        client.setex(key, timedelta(seconds=ttl_seconds), json.dumps(value, default=str))
+    except Exception:
+        return
+
+
+def _local_get_text(cache: Dict[str, tuple[float, str]], key: str) -> Optional[str]:
+    item = cache.get(key)
+    if not item:
+        return None
+    expires_at, value = item
+    if expires_at <= time.time():
+        cache.pop(key, None)
+        return None
+    return value
+
+
+def _local_set_text(cache: Dict[str, tuple[float, str]], key: str, value: str, ttl_seconds: int) -> None:
+    cache[key] = (time.time() + ttl_seconds, value)
+
+
+def _local_get_json(
+    cache: Dict[str, tuple[float, Dict[str, Any]]], key: str
+) -> Optional[Dict[str, Any]]:
+    item = cache.get(key)
+    if not item:
+        return None
+    expires_at, value = item
+    if expires_at <= time.time():
+        cache.pop(key, None)
+        return None
+    return dict(value)
+
+
+def _local_set_json(
+    cache: Dict[str, tuple[float, Dict[str, Any]]], key: str, value: Dict[str, Any], ttl_seconds: int
+) -> None:
+    cache[key] = (time.time() + ttl_seconds, dict(value))
+
+
+def _user_to_cache_payload(user: Optional[UserResponse]) -> Optional[Dict[str, Any]]:
+    if not user:
+        return None
+    return {
+        "id": user.id,
+        "email": user.email,
+        "dateUpdated": user.dateUpdated.isoformat() if user.dateUpdated else "",
+        "preferences": user.preferences if isinstance(user.preferences, dict) else {},
+    }
+
+
+def _resolve_user_profile_cache_key(user_id: Optional[str], user_email: Optional[str]) -> Optional[str]:
+    if user_id:
+        return f"cover_letter:user_profile:id:{user_id}"
+    if user_email:
+        return f"cover_letter:user_profile:email:{user_email.lower()}"
+    return None
+
+
+def _get_cached_user_profile(
+    *, user_id: Optional[str], user_email: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    key = _resolve_user_profile_cache_key(user_id, user_email)
+    if not key:
+        return None
+    redis_key = f"cache:{key}"
+    cached = _redis_get_json(redis_key)
+    if cached:
+        return cached
+    cached_local = _local_get_json(_local_user_profile_cache, key)
+    if cached_local:
+        return cached_local
+    return None
+
+
+def _set_cached_user_profile(
+    *, user_id: Optional[str], user_email: Optional[str], payload: Dict[str, Any]
+) -> None:
+    key = _resolve_user_profile_cache_key(user_id, user_email)
+    if not key:
+        return
+    redis_key = f"cache:{key}"
+    _redis_set_json(redis_key, payload, _USER_PROFILE_CACHE_TTL_SECONDS)
+    _local_set_json(_local_user_profile_cache, key, payload, _USER_PROFILE_CACHE_TTL_SECONDS)
+
+
+def _build_resume_cache_key(user_id: Optional[str], resume: str, is_plain_text: bool) -> str:
+    source = "text" if is_plain_text else "file"
+    return f"cover_letter:resume:{source}:{user_id or 'anon'}:{_sha256_text(resume or '')}"
+
+
+def _get_cached_resume_text(cache_key: str) -> Optional[str]:
+    redis_key = f"cache:{cache_key}"
+    cached = _redis_get_text(redis_key)
+    if cached:
+        return cached
+    return _local_get_text(_local_resume_cache, cache_key)
+
+
+def _set_cached_resume_text(cache_key: str, value: str) -> None:
+    redis_key = f"cache:{cache_key}"
+    _redis_set_text(redis_key, value, _RESUME_CACHE_TTL_SECONDS)
+    _local_set_text(_local_resume_cache, cache_key, value, _RESUME_CACHE_TTL_SECONDS)
+
+
+def _build_result_cache_key(payload: Dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+    return f"cover_letter:result:{_sha256_text(canonical)}"
+
+
+def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
+    redis_key = f"cache:{cache_key}"
+    cached = _redis_get_json(redis_key)
+    if cached:
+        return cached
+    return _local_get_json(_local_result_cache, cache_key)
+
+
+def _set_cached_result(cache_key: str, value: Dict[str, Any]) -> None:
+    redis_key = f"cache:{cache_key}"
+    _redis_set_json(redis_key, value, _RESULT_CACHE_TTL_SECONDS)
+    _local_set_json(_local_result_cache, cache_key, value, _RESULT_CACHE_TTL_SECONDS)
+
+
+def _record_generation_usage(
+    *, user_id: Optional[str], user_email: Optional[str], user_ctx: Optional[Dict[str, Any]], llm: str
+) -> None:
+    usage_user_id = user_id or (user_ctx.get("id") if isinstance(user_ctx, dict) else None)
+    if not usage_user_id and user_email:
+        try:
+            user = get_user_by_email(user_email)
+            usage_user_id = user.id
+        except Exception as e:
+            logger.warning(f"Failed to resolve user by email for usage tracking: {e}")
+            return
+    if not usage_user_id:
+        return
+
+    normalized_llm = normalize_llm_name(llm)
+    try:
+        increment_llm_usage_count(usage_user_id, normalized_llm)
+        logger.info(
+            f"Incremented LLM usage count for {normalized_llm} (user_id: {usage_user_id})"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to increment LLM usage count: {e}")
+
+    try:
+        decrement_generation_credits(usage_user_id)
+        logger.info(f"Decremented generation credits for user {usage_user_id} (if applicable)")
+    except Exception as e:
+        logger.warning(f"Failed to decrement generation credits: {e}")
 
 
 def _write_llm_prompt_log(
@@ -242,6 +445,7 @@ def get_job_info(
     user_id: Optional[str] = None,
     user_email: Optional[str] = None,
     is_plain_text: bool = False,
+    current_user: Optional[UserResponse] = None,
 ):
     """
     Generate cover letter based on job information using specified LLM.
@@ -252,6 +456,11 @@ def get_job_info(
         user_email: Optional user email to access custom personality profiles
         is_plain_text: If True, skip all file processing (S3, local files, base64) and treat resume as plain text
     """
+    # Reuse already-resolved authenticated user when available.
+    if current_user:
+        user_id = user_id or current_user.id
+        user_email = user_email or current_user.email
+
     # Get today's date if not provided
     today_date_iso = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
     # Convert to long form (February 12, 2026) for LLM so it uses it directly; fallback to ISO if parse fails
@@ -262,7 +471,10 @@ def get_job_info(
         today_date = today_date_iso
 
     # Check if resume is a file path, S3 key, or base64 data
-    resume_content = resume
+    resume_cache_key = _build_resume_cache_key(user_id, resume, is_plain_text)
+    resume_content = _get_cached_resume_text(resume_cache_key) or resume
+    if resume_content != resume:
+        logger.info("Resume cache hit for user %s", user_id or "anon")
 
     # If explicitly marked as plain text, skip all file processing
     if is_plain_text:
@@ -419,9 +631,13 @@ def get_job_info(
                     )
                 resume_content = resume
 
+    if resume_content:
+        _set_cached_resume_text(resume_cache_key, resume_content)
+
     # Get personality profile from user's custom profiles (user_id or user_email required)
     selected_profile = None
     profile_source = "user_custom"
+    user_ctx: Optional[Dict[str, Any]] = _user_to_cache_payload(current_user) if current_user else None
 
     # Require user_id or user_email to access personality profiles
     if not user_id and not user_email:
@@ -432,10 +648,13 @@ def get_job_info(
         )
 
     try:
-        user = None
-        if user_id:
+        if not user_ctx:
+            user_ctx = _get_cached_user_profile(user_id=user_id, user_email=user_email)
+
+        if not user_ctx and user_id:
             try:
                 user = get_user_by_id(user_id)
+                user_ctx = _user_to_cache_payload(user)
             except HTTPException:
                 raise
             except Exception as e:
@@ -444,9 +663,10 @@ def get_job_info(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"User not found: {str(e)}",
                 )
-        elif user_email:
+        elif not user_ctx and user_email:
             try:
                 user = get_user_by_email(user_email)
+                user_ctx = _user_to_cache_payload(user)
             except HTTPException:
                 raise
             except Exception as e:
@@ -456,13 +676,13 @@ def get_job_info(
                     detail=f"User not found: {str(e)}",
                 )
 
-        if not user:
+        if not user_ctx:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        _set_cached_user_profile(user_id=user_id, user_email=user_email, payload=user_ctx)
 
         # Get user's custom personality profiles
-        # user is a UserResponse Pydantic model, so access preferences as attribute
         # Note: user_doc_to_response already normalizes personalityProfiles to {"id", "name", "description"} structure
-        user_prefs = user.preferences if user.preferences else {}
+        user_prefs = user_ctx.get("preferences") if isinstance(user_ctx, dict) else {}
         if isinstance(user_prefs, dict):
             app_settings = user_prefs.get("appSettings", {})
             if isinstance(app_settings, dict):
@@ -599,8 +819,9 @@ Placeholders: <<date>>, <<name>>, <<phone>>, <<email>>, <<address>>, <<city, sta
     critical_instructions = critical_instructions + template_instruction
 
     # Typography baseline: when user selects a non-default font, pass as baseline for body; LLM may vary for lists/tables
-    if user and user.preferences:
-        app_settings = (user.preferences or {}).get("appSettings", {})
+    user_preferences = user_ctx.get("preferences") if isinstance(user_ctx, dict) else {}
+    if isinstance(user_preferences, dict) and user_preferences:
+        app_settings = user_preferences.get("appSettings", {})
         if isinstance(app_settings, dict):
             print_props = app_settings.get("printProperties", {})
             if isinstance(print_props, dict) and print_props:
@@ -692,6 +913,34 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE (legacy behavior restored)"
         )
 
+    result_cache_key = _build_result_cache_key(
+        {
+            "llm": llm,
+            "date_input": date_input,
+            "company_name": company_name,
+            "hiring_manager": hiring_manager,
+            "ad_source": ad_source,
+            "resume_hash": _sha256_text(resume_content or ""),
+            "jd_hash": _sha256_text(jd or ""),
+            "additional_instructions": additional_instructions or "",
+            "tone": tone,
+            "selected_profile_hash": _sha256_text(selected_profile or ""),
+            "address": address or "",
+            "phone_number": phone_number or "",
+            "use_template_in_prompt": bool(settings.USE_TEMPLATE_IN_PROMPT),
+            "use_docx_components": bool(getattr(settings, "USE_DOCX_COMPONENTS", False)),
+            "gpt_model": gpt_model,
+            "claude_model": claude_model,
+            "xai_model": xai_model,
+            "ollama_model": ollama_model,
+        }
+    )
+    cached_result = _get_cached_result(result_cache_key)
+    if cached_result:
+        logger.info("Generation result cache hit; skipping upstream LLM call")
+        _record_generation_usage(user_id=user_id, user_email=user_email, user_ctx=user_ctx, llm=llm)
+        return cached_result
+
     # Debug: capture prompts for analysis (tmp/debug_prompts.json)
     # try:
     #     _service_dir = os.path.dirname(os.path.abspath(__file__))
@@ -777,13 +1026,13 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                     logger.debug(
                         "Additional instructions appended to ChatGPT messages (ENHANCEMENT MODE)"
                     )
-            # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
+            # Keep completion cap bounded for letter generation latency.
             _write_llm_prompt_log(llm, messages=messages)
             if gpt_model == "gpt-5.2":
                 response = client.chat.completions.create(
                     model=gpt_model,
                     messages=messages,
-                    max_completion_tokens=128000,  # GPT-5.2 uses max_completion_tokens
+                    max_completion_tokens=4096,  # GPT-5.2 uses max_completion_tokens
                 )
             else:
                 response = client.chat.completions.create(
@@ -928,43 +1177,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
         _write_llm_response_log(llm, r)
 
-        # Increment LLM usage count for the user (after successful LLM call)
-        if user_id:
-            normalized_llm = normalize_llm_name(llm)
-            try:
-                increment_llm_usage_count(user_id, normalized_llm)
-                logger.info(
-                    f"Incremented LLM usage count for {normalized_llm} (user_id: {user_id})"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to increment LLM usage count: {e}")
-
-            # Decrement generation credits if user has no subscription
-            try:
-                decrement_generation_credits(user_id)
-                logger.info(f"Decremented generation credits for user {user_id} (if applicable)")
-            except Exception as e:
-                logger.warning(f"Failed to decrement generation credits: {e}")
-        elif user_email:
-            # Try to get user_id from email
-            try:
-                user = get_user_by_email(user_email)
-                normalized_llm = normalize_llm_name(llm)
-                increment_llm_usage_count(user.id, normalized_llm)
-                logger.info(
-                    f"Incremented LLM usage count for {normalized_llm} (user_email: {user_email})"
-                )
-
-                # Decrement generation credits if user has no subscription
-                try:
-                    decrement_generation_credits(user.id)
-                    logger.info(
-                        f"Decremented generation credits for user {user.id} (if applicable)"
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to decrement generation credits: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to increment LLM usage count from email: {e}")
+        _record_generation_usage(user_id=user_id, user_email=user_email, user_ctx=user_ctx, llm=llm)
 
         # Clean and parse the response
         logger.info("Cleaning and parsing LLM response text")
@@ -1057,11 +1270,13 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         if doc_xml is not None and isinstance(doc_xml, str) and doc_xml.strip():
             num_xml = json_r.get("numbering_xml")
             sty_xml = json_r.get("styles_xml")
-            return {
+            result_payload = {
                 "document_xml": doc_xml.strip(),
                 "numbering_xml": (num_xml.strip() if num_xml and isinstance(num_xml, str) else None),
                 "styles_xml": (sty_xml.strip() if sty_xml and isinstance(sty_xml, str) else None),
             }
+            _set_cached_result(result_cache_key, result_payload)
+            return result_payload
 
         # Docx-only flow: LLM returns single field "content" (plain text)
         letter_content = json_r.get("content")
@@ -1072,7 +1287,9 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             if today_date_iso and today_date and today_date != today_date_iso:
                 letter_content = letter_content.replace(today_date_iso, today_date)
             _write_additional_instructions_debug(additional_instructions, letter_content)
-            return {"content": letter_content}
+            result_payload = {"content": letter_content}
+            _set_cached_result(result_cache_key, result_payload)
+            return result_payload
 
         # Legacy flow: markdown + html
         markdown_content = json_r.get("markdown", "")
@@ -1104,9 +1321,12 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
         styled_html = raw_html
         try:
-            user_for_styling = user
-            if user_for_styling and user_for_styling.preferences:
-                app_settings = user_for_styling.preferences.get("appSettings", {})
+            user_for_styling = user_ctx
+            user_style_prefs = (
+                user_for_styling.get("preferences") if isinstance(user_for_styling, dict) else {}
+            )
+            if isinstance(user_style_prefs, dict) and user_style_prefs:
+                app_settings = user_style_prefs.get("appSettings", {})
                 if isinstance(app_settings, dict):
                     print_props = app_settings.get("printProperties", {})
                     if isinstance(print_props, dict) and print_props:
@@ -1131,7 +1351,9 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         except Exception as e:
             logger.warning(f"Could not apply print settings to HTML: {e}")
 
-        return {"markdown": markdown_content, "html": styled_html}
+        result_payload = {"markdown": markdown_content, "html": styled_html}
+        _set_cached_result(result_cache_key, result_payload)
+        return result_payload
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
@@ -1140,11 +1362,15 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         error_html = f"<p>Error: Failed to parse LLM response as JSON. The response may be truncated or malformed.</p><p>Error: {str(e)}</p><pre>{r[:500]}</pre>"
         error_html = error_html.replace("\r", "").replace("\n", "<br />")
         error_html = re.sub(r" +", " ", error_html)
-        return {"content": error_msg, "markdown": error_msg, "html": error_html}
+        result_payload = {"content": error_msg, "markdown": error_msg, "html": error_html}
+        _set_cached_result(result_cache_key, result_payload)
+        return result_payload
     except Exception as e:
         logger.error(f"Error in get_job_info: {str(e)}")
         error_msg = f"Error: {str(e)}"
         error_html = f"<p>Error: {str(e)}</p>"
         error_html = error_html.replace("\r", "").replace("\n", "<br />")
         error_html = re.sub(r" +", " ", error_html)
-        return {"content": error_msg, "markdown": error_msg, "html": error_html}
+        result_payload = {"content": error_msg, "markdown": error_msg, "html": error_html}
+        _set_cached_result(result_cache_key, result_payload)
+        return result_payload
