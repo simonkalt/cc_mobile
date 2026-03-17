@@ -26,6 +26,8 @@ from app.utils.redis_utils import (
     delete_verification_session,
 )
 from app.utils.password import hash_password
+from app.utils.password import validate_strong_password
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +263,14 @@ def send_and_store_verification_code_email(
     
     # For registration flow, use Redis
     if purpose == "finish_registration" and registration_data:
+        if settings.ENFORCE_STRONG_PASSWORDS:
+            raw_password = str(registration_data.get("password") or "")
+            validation_error = validate_strong_password(raw_password)
+            if validation_error:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=validation_error,
+                )
         # Hash password before storing in Redis
         if "password" in registration_data and registration_data["password"]:
             registration_data["password"] = hash_password(registration_data["password"])

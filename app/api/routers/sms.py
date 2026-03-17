@@ -24,14 +24,26 @@ from app.services.verification_service import (
 )
 from app.services.user_service import get_user_by_email, get_user_by_id
 from app.db.mongodb import get_collection, is_connected
-from app.utils.password import hash_password
+from app.utils.password import hash_password, validate_strong_password
 from app.utils.user_helpers import USERS_COLLECTION
 from app.utils.sms_utils import normalize_phone_number
 from app.services.telnyx_webhook_service import store_telnyx_message
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sms", tags=["sms"])
+
+
+def _enforce_strong_password_or_raise(password: str) -> None:
+    if not settings.ENFORCE_STRONG_PASSWORDS:
+        return
+    validation_error = validate_strong_password(password)
+    if validation_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=validation_error,
+        )
 
 
 @router.post("/webhook/telnyx")
@@ -243,6 +255,7 @@ async def reset_password_endpoint(request: ResetPasswordRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code"
         )
+    _enforce_strong_password_or_raise(request.new_password)
     
     # Update password
     from datetime import datetime
@@ -295,6 +308,7 @@ async def change_password_endpoint(request: ChangePasswordRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code"
         )
+    _enforce_strong_password_or_raise(request.new_password)
     
     # Update password
     from datetime import datetime

@@ -23,7 +23,7 @@ from app.models.user import (
 )
 from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
-from app.utils.password import hash_password, verify_password
+from app.utils.password import hash_password, verify_password, validate_strong_password
 from app.utils.user_helpers import (
     user_doc_to_response,
     normalize_personality_profiles,
@@ -141,6 +141,14 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             status_code=status.HTTP_409_CONFLICT,
             detail="User with this email already exists"
         )
+
+    if settings.ENFORCE_STRONG_PASSWORDS:
+        validation_error = validate_strong_password(user_data.password)
+        if validation_error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=validation_error,
+            )
     
     # Hash password
     hashed_password_str = hash_password(user_data.password)

@@ -34,10 +34,23 @@ from app.utils.redis_utils import delete_registration_data, delete_verification_
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password
 from app.utils.user_helpers import USERS_COLLECTION
+from app.core.config import settings
+from app.utils.password import validate_strong_password
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/email", tags=["email"])
+
+
+def _enforce_strong_password_or_raise(password: str) -> None:
+    if not settings.ENFORCE_STRONG_PASSWORDS:
+        return
+    validation_error = validate_strong_password(password)
+    if validation_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=validation_error,
+        )
 
 
 @router.post("/send-code", response_model=SendVerificationCodeResponse)
@@ -81,6 +94,9 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="registration_data is required for finish_registration purpose"
             )
+        if settings.ENFORCE_STRONG_PASSWORDS:
+            raw_password = str(request.registration_data.get("password") or "")
+            _enforce_strong_password_or_raise(raw_password)
         
         # Check if user already exists
         try:
@@ -243,6 +259,7 @@ async def reset_password_endpoint(request: ResetPasswordRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code"
         )
+    _enforce_strong_password_or_raise(request.new_password)
     
     # Check if code was already used (marked as verified)
     user_doc = collection.find_one({"_id": ObjectId(user.id)})
@@ -304,6 +321,7 @@ async def change_password_endpoint(request: ChangePasswordRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code"
         )
+    _enforce_strong_password_or_raise(request.new_password)
     
     # Update password
     from datetime import datetime
