@@ -6,6 +6,34 @@ This backend supports an environment flag to enforce strong passwords:
   - `false` (default): backend accepts current behavior (no strength checks).
   - `true`: backend enforces strong password rules.
 
+## Frontend source of truth (do not duplicate env on client)
+
+Frontend must read policy from backend runtime config, not from a frontend env copy.
+
+- Endpoint: `GET /api/config/client-settings`
+- Response shape:
+
+```json
+{
+  "enforceStrongPasswords": true,
+  "passwordPolicy": {
+    "minLength": 8,
+    "requireUppercase": true,
+    "requireLowercase": true,
+    "requireNumber": true,
+    "requireSpecial": true
+  }
+}
+```
+
+### Frontend implementation notes
+
+1. Fetch `GET /api/config/client-settings` once during app startup.
+2. Cache in memory (and optional short-lived local storage cache).
+3. Use `enforceStrongPasswords` to gate password-strength UX and forced-update flows.
+4. Use `passwordPolicy` values for client-side validation messaging.
+5. Keep backend response (`400 + detail`) as final authority.
+
 ## Strong password rules (when enabled)
 
 Passwords must include all of the following:
@@ -47,7 +75,7 @@ When `ENFORCE_STRONG_PASSWORDS=true`, existing users with weak legacy passwords 
 
 Use this frontend rollout:
 
-1. Detect policy enabled (from your frontend env/config for this deployment).
+1. Detect policy enabled from `GET /api/config/client-settings`.
 2. After successful login, check a client marker:
    - key: `strongPasswordCompliant:<userId>`
    - value: `true` only after successful password change/reset

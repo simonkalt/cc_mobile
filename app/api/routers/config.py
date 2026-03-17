@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/config", tags=["config"])
 
 
+@router.get("/client-settings")
+def get_client_settings():
+    """
+    Global client-consumable runtime settings.
+    """
+    return {
+        "enforceStrongPasswords": settings.ENFORCE_STRONG_PASSWORDS,
+        "passwordPolicy": {
+            "minLength": 8,
+            "requireUppercase": True,
+            "requireLowercase": True,
+            "requireNumber": True,
+            "requireSpecial": True,
+        },
+    }
+
+
 @router.get("/google-places-key")
 def get_google_places_key():
     """JSON API endpoint to get the Google Places API key"""
