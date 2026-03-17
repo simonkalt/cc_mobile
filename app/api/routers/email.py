@@ -142,11 +142,19 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             detail="User not found"
         )
     
-    # Send and store verification code (use stored user.email so delivery goes to canonical address)
+    # Send and store verification code.
+    # Use the requested email after user lookup succeeds so stale DB email values do not misroute delivery.
     try:
+        if user.email.lower() != request.email.lower():
+            logger.warning(
+                "Email mismatch for verification send (user_id=%s, request_email=%s, user_email=%s). Sending to request email.",
+                user.id,
+                request.email,
+                user.email,
+            )
         send_and_store_verification_code_email(
             user_id=user.id,
-            email=user.email,
+            email=request.email,
             purpose=request.purpose
         )
         
