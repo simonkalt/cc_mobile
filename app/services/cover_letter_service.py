@@ -32,6 +32,7 @@ from app.utils.template_loader import get_template_for_profile
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
 from app.utils.redis_utils import get_redis_client
+from app.utils.generation_timing import GenerationTiming
 # from app.utils.docx_generator import insert_line_breaks_in_long_paragraphs
 from app.utils.llm_utils import (
     load_system_prompt,
@@ -348,6 +349,57 @@ def _write_llm_prompt_log(
         logger.warning("Could not write LLM prompt log: %s", e)
 
 
+def _log_prompt_length(
+    llm: str,
+    *,
+    full_text: Optional[str] = None,
+    messages: Optional[list] = None,
+    system: Optional[str] = None,
+    user_content_list: Optional[list] = None,
+) -> None:
+    """
+    Log prompt size for latency tuning.
+    Uses character count as a provider-agnostic prompt size signal.
+    """
+    try:
+        if full_text is not None:
+            chars = len(full_text)
+            logger.info("LLM prompt length (%s): %s chars [full_text]", llm, chars)
+            return
+
+        if messages is not None:
+            chars = 0
+            count = 0
+            for m in messages:
+                content = m.get("content", "") if isinstance(m, dict) else ""
+                if isinstance(content, str):
+                    chars += len(content)
+                    count += 1
+            logger.info(
+                "LLM prompt length (%s): %s chars across %s message content block(s)",
+                llm,
+                chars,
+                count,
+            )
+            return
+
+        if system is not None and user_content_list is not None:
+            chars = len(system or "")
+            blocks = 0
+            for block in user_content_list:
+                text = block.get("text", "") if isinstance(block, dict) else str(block)
+                chars += len(text or "")
+                blocks += 1
+            logger.info(
+                "LLM prompt length (%s): %s chars [system + %s user block(s)]",
+                llm,
+                chars,
+                blocks,
+            )
+    except Exception as e:
+        logger.debug("Could not log prompt length for %s: %s", llm, e)
+
+
 def _write_additional_instructions_debug(
     additional_instructions: Optional[str],
     letter_content: Optional[str],
@@ -491,6 +543,7 @@ def get_job_info(
     user_email: Optional[str] = None,
     is_plain_text: bool = False,
     current_user: Optional[UserResponse] = None,
+    timing: Optional[GenerationTiming] = None,
 ):
     """
     Generate cover letter based on job information using specified LLM.
@@ -505,6 +558,8 @@ def get_job_info(
     if current_user:
         user_id = user_id or current_user.id
         user_email = user_email or current_user.email
+    if timing:
+        timing.checkpoint("service_start")
 
     # Get today's date if not provided
     today_date_iso = date_input if date_input else datetime.datetime.now().strftime("%Y-%m-%d")
@@ -678,6 +733,8 @@ def get_job_info(
 
     if resume_content:
         _set_cached_resume_text(resume_cache_key, resume_content)
+    if timing:
+        timing.checkpoint("resume_processed")
 
     # Get personality profile from user's custom profiles (user_id or user_email required)
     selected_profile = None
@@ -822,6 +879,8 @@ def get_job_info(
     logger.info(
         f"Personality profile source: {profile_source} (profile retrieved from user's database preferences)"
     )
+    if timing:
+        timing.checkpoint("personality_profile_loaded")
 
     # Build personality instruction - make it prominent and direct
     critical_instructions = f"""
@@ -957,6 +1016,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         logger.info(
             f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE (legacy behavior restored)"
         )
+    if timing:
+        timing.checkpoint("prompt_prepared")
 
     result_cache_key = _build_result_cache_key(
         {
@@ -984,6 +1045,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
     if cached_result:
         logger.info("Generation result cache hit; skipping upstream LLM call")
         _record_generation_usage(user_id=user_id, user_email=user_email, user_ctx=user_ctx, llm=llm)
+        if timing:
+            timing.checkpoint("result_cache_hit")
         return cached_result
 
     # Debug: capture prompts for analysis (tmp/debug_prompts.json)
@@ -1010,6 +1073,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
     r = ""
 
     try:
+        if timing:
+            timing.checkpoint("llm_call_start")
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
             # Include personality instruction prominently at the start
@@ -1036,6 +1101,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 "max_output_tokens": settings.LLM_MAX_OUTPUT_TOKENS,
             }
 
+            _log_prompt_length(llm, full_text=msg)
             _write_llm_prompt_log(llm, full_text=msg)
             response = model.generate_content(contents=msg, generation_config=generation_config)
             r = response.text
@@ -1072,6 +1138,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                         "Additional instructions appended to ChatGPT messages (ENHANCEMENT MODE)"
                     )
             # Keep completion cap bounded for letter generation latency.
+            _log_prompt_length(llm, messages=messages)
             _write_llm_prompt_log(llm, messages=messages)
             if gpt_model == "gpt-5.2":
                 response = client.chat.completions.create(
@@ -1129,6 +1196,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                     logger.debug(
                         "Additional instructions appended to Grok messages (ENHANCEMENT MODE)"
                     )
+            _log_prompt_length(llm, messages=messages_list)
             _write_llm_prompt_log(llm, messages=messages_list)
             data = {"model": xai_model, "messages": messages_list}
             response = requests.post(
@@ -1144,6 +1212,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         elif llm == "OCI" or llm == "oci-generative-ai":
             # Include personality instruction prominently at the start
             full_prompt = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            _log_prompt_length(llm, full_text=full_prompt)
             _write_llm_prompt_log(llm, full_text=full_prompt)
             r = get_oc_info(full_prompt)
             logger.info(f"OCI response received ({len(r)} characters)")
@@ -1178,6 +1247,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                     logger.debug(
                         "Additional instructions appended to Llama messages (ENHANCEMENT MODE)"
                     )
+            _log_prompt_length(llm, messages=messages)
             _write_llm_prompt_log(llm, messages=messages)
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response["message"]["content"]
@@ -1212,6 +1282,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                         "Additional instructions appended to Claude messages (ENHANCEMENT MODE)"
                     )
             messages = [{"role": "user", "content": content_list}]
+            _log_prompt_length(llm, system=system_message, user_content_list=content_list)
             _write_llm_prompt_log(
                 llm, system=system_message, user_content_list=content_list
             )
@@ -1225,10 +1296,14 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             r = response.content[0].text
         else:
             raise ValueError(f"Unsupported LLM: {llm}")
+        if timing:
+            timing.checkpoint("llm_call_done")
 
         _write_llm_response_log(llm, r)
 
         _record_generation_usage(user_id=user_id, user_email=user_email, user_ctx=user_ctx, llm=llm)
+        if timing:
+            timing.checkpoint("usage_updates_done")
 
         # Clean and parse the response
         logger.info("Cleaning and parsing LLM response text")
@@ -1326,6 +1401,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 "numbering_xml": (num_xml.strip() if num_xml and isinstance(num_xml, str) else None),
                 "styles_xml": (sty_xml.strip() if sty_xml and isinstance(sty_xml, str) else None),
             }
+            if timing:
+                timing.checkpoint("response_parsed")
             _set_cached_result(result_cache_key, result_payload)
             return result_payload
 
@@ -1339,6 +1416,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 letter_content = letter_content.replace(today_date_iso, today_date)
             _write_additional_instructions_debug(additional_instructions, letter_content)
             result_payload = {"content": letter_content}
+            if timing:
+                timing.checkpoint("response_parsed")
             _set_cached_result(result_cache_key, result_payload)
             return result_payload
 
@@ -1403,6 +1482,8 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             logger.warning(f"Could not apply print settings to HTML: {e}")
 
         result_payload = {"markdown": markdown_content, "html": styled_html}
+        if timing:
+            timing.checkpoint("response_parsed")
         _set_cached_result(result_cache_key, result_payload)
         return result_payload
 

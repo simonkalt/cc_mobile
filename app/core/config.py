@@ -143,6 +143,7 @@ class Settings:
     USE_DOCX_COMPONENTS: bool = os.getenv("USE_DOCX_COMPONENTS", "false").lower() == "true"
     LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8124"))
     ENFORCE_STRONG_PASSWORDS: bool = os.getenv("ENFORCE_STRONG_PASSWORDS", "false").lower() == "true"
+    ENABLE_GENERATION_TIMING_CHART: bool = os.getenv("ENABLE_GENERATION_TIMING_CHART", "true").lower() == "true"
 
 
 # Global settings instance

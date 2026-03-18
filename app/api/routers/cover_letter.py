@@ -30,6 +30,7 @@ from app.utils.docx_generator import (
     build_docx_from_components,
     build_docx_from_generation_result,
 )
+from app.utils.generation_timing import GenerationTiming
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -269,8 +270,15 @@ async def handle_job_info(
     logger.info(
         f"Received job info request for LLM: {request.llm}, Company: {request.company_name}"
     )
+    timing = GenerationTiming(
+        enabled=settings.ENABLE_GENERATION_TIMING_CHART,
+        flow_name="cover_letter:/api/job-info",
+        client_start_ms=request.client_generate_start_ms,
+    )
+    timing.checkpoint("request_received")
     try:
         logger.info("Starting get_job_info() for /api/job-info")
+        timing.checkpoint("get_job_info_start")
         result = get_job_info(
             llm=request.llm,
             date_input=request.date_input,
@@ -286,16 +294,23 @@ async def handle_job_info(
             user_id=request.user_id,
             user_email=request.user_email,
             current_user=current_user,
+            timing=timing,
         )
+        timing.checkpoint("get_job_info_done")
         logger.info("get_job_info() completed for /api/job-info")
         payload = _normalize_generation_response(result, request)
         logger.info("Starting DOCX attachment for /api/job-info")
+        timing.checkpoint("docx_attach_start")
         _attach_docx_to_payload(payload, request, current_user=current_user)
+        timing.checkpoint("docx_attach_done")
         logger.info("DOCX attachment completed for /api/job-info")
         # Docx-only contract: return docx + hints + optional content; no markdown/html
         payload.pop("html", None)
         payload.pop("markdown", None)
         _write_client_payload_log(payload)
+        timing.checkpoint("response_ready")
+        if settings.ENABLE_GENERATION_TIMING_CHART:
+            logger.info("\n%s", timing.chart())
         logger.info("handle_job_info completed, returning payload")
         return payload
     except HTTPException:
@@ -331,9 +346,16 @@ async def generate_cover_letter_with_text_resume(
     logger.info(
         f"Received cover letter request with text resume for LLM: {request.llm}, Company: {request.company_name}"
     )
+    timing = GenerationTiming(
+        enabled=settings.ENABLE_GENERATION_TIMING_CHART,
+        flow_name="cover_letter:/api/cover-letter/generate-with-text-resume",
+        client_start_ms=request.client_generate_start_ms,
+    )
+    timing.checkpoint("request_received")
 
     try:
         logger.info("Starting get_job_info() for /api/cover-letter/generate-with-text-resume")
+        timing.checkpoint("get_job_info_start")
         # Pass resume_text directly as resume to get_job_info
         # Set is_plain_text=True to skip file processing (S3, local files, base64)
         result = get_job_info(
@@ -352,15 +374,22 @@ async def generate_cover_letter_with_text_resume(
             user_email=request.user_email,
             is_plain_text=True,  # Skip file processing for pasted text
             current_user=current_user,
+            timing=timing,
         )
+        timing.checkpoint("get_job_info_done")
         logger.info("get_job_info() completed for /api/cover-letter/generate-with-text-resume")
         payload = _normalize_generation_response(result, request)
         logger.info("Starting DOCX attachment for /api/cover-letter/generate-with-text-resume")
+        timing.checkpoint("docx_attach_start")
         _attach_docx_to_payload(payload, request, current_user=current_user)
+        timing.checkpoint("docx_attach_done")
         logger.info("DOCX attachment completed for /api/cover-letter/generate-with-text-resume")
         payload.pop("html", None)
         payload.pop("markdown", None)
         _write_client_payload_log(payload)
+        timing.checkpoint("response_ready")
+        if settings.ENABLE_GENERATION_TIMING_CHART:
+            logger.info("\n%s", timing.chart())
         logger.info("generate_cover_letter_with_text_resume completed, returning payload")
         return payload
     except HTTPException:
@@ -451,6 +480,13 @@ async def handle_chat(
 
         if is_job_info_request:
             logger.info("Detected job info request in /chat endpoint, routing to job-info handler")
+            client_start_ms = body.get("client_generate_start_ms")
+            timing = GenerationTiming(
+                enabled=settings.ENABLE_GENERATION_TIMING_CHART,
+                flow_name="cover_letter:/api/chat(job-info)",
+                client_start_ms=client_start_ms if isinstance(client_start_ms, int) else None,
+            )
+            timing.checkpoint("request_received")
             # Check for required user identification
             if not body.get("user_id") and not body.get("user_email"):
                 logger.error("Job info request missing user_id or user_email")
@@ -473,6 +509,7 @@ async def handle_chat(
                         "detail": str(e),
                     },
                 )
+            timing.checkpoint("get_job_info_start")
             result = get_job_info(
                 llm=job_request.llm,
                 date_input=job_request.date_input,
@@ -488,12 +525,19 @@ async def handle_chat(
                 user_id=job_request.user_id,
                 user_email=job_request.user_email,
                 current_user=current_user,
+                timing=timing,
             )
+            timing.checkpoint("get_job_info_done")
             payload = _normalize_generation_response(result, job_request)
+            timing.checkpoint("docx_attach_start")
             _attach_docx_to_payload(payload, job_request, current_user=current_user)
+            timing.checkpoint("docx_attach_done")
             payload.pop("html", None)
             payload.pop("markdown", None)
             _write_client_payload_log(payload)
+            timing.checkpoint("response_ready")
+            if settings.ENABLE_GENERATION_TIMING_CHART:
+                logger.info("\n%s", timing.chart())
             return payload
         else:
             # Handle as regular chat request
