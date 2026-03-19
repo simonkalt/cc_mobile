@@ -19,9 +19,7 @@ def generate_verification_code() -> str:
     Returns:
         6-digit code as string
     """
-    # TODO: Hardcoded to all zeros until Twilio number is approved
-    # return str(random.randint(100000, 999999))
-    return "000000"
+    return str(random.randint(100000, 999999))
 
 
 def send_sms(phone_number: str, message: str) -> bool:
