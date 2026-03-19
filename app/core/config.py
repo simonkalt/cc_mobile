@@ -112,8 +112,17 @@ class Settings:
     STRIPE_PRODUCT_CAMPAIGN: Optional[str] = os.getenv("STRIPE_PRODUCT_CAMPAIGN")
 
     # JWT Configuration
+    JWT_ENABLED: bool = os.getenv("JWT_ENABLED", "true").lower() == "true"
+    JWT_SECRET: str = os.getenv(
+        "JWT_SECRET",
+        os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production"),
+    )
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_ISSUER: Optional[str] = os.getenv("JWT_ISSUER")
+    JWT_AUDIENCE: Optional[str] = os.getenv("JWT_AUDIENCE")
+    JWT_VALIDATE_ISSUER: bool = os.getenv("JWT_VALIDATE_ISSUER", "false").lower() == "true"
+    JWT_VALIDATE_AUDIENCE: bool = os.getenv("JWT_VALIDATE_AUDIENCE", "false").lower() == "true"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 

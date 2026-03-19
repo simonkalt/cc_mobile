@@ -33,10 +33,7 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
         ValueError: If JWT_SECRET_KEY is not configured
     """
     # Validate JWT secret key is configured
-    if (
-        not settings.JWT_SECRET_KEY
-        or settings.JWT_SECRET_KEY == "your-secret-key-change-in-production"
-    ):
+    if not settings.JWT_SECRET or settings.JWT_SECRET == "your-secret-key-change-in-production":
         error_msg = "JWT_SECRET_KEY is not properly configured. Please set it in your environment variables."
         if logger:
             logger.error(error_msg)
@@ -50,10 +47,14 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
         expire = datetime.utcnow() + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "access"})
+    if settings.JWT_ISSUER:
+        to_encode["iss"] = settings.JWT_ISSUER
+    if settings.JWT_AUDIENCE:
+        to_encode["aud"] = settings.JWT_AUDIENCE
 
     try:
         encoded_jwt = jwt.encode(
-            to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+            to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
         )
 
         if not encoded_jwt:
@@ -80,10 +81,7 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
         ValueError: If JWT_SECRET_KEY is not configured
     """
     # Validate JWT secret key is configured
-    if (
-        not settings.JWT_SECRET_KEY
-        or settings.JWT_SECRET_KEY == "your-secret-key-change-in-production"
-    ):
+    if not settings.JWT_SECRET or settings.JWT_SECRET == "your-secret-key-change-in-production":
         error_msg = "JWT_SECRET_KEY is not properly configured. Please set it in your environment variables."
         if logger:
             logger.error(error_msg)
@@ -93,10 +91,14 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
     expire = datetime.utcnow() + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "refresh"})
+    if settings.JWT_ISSUER:
+        to_encode["iss"] = settings.JWT_ISSUER
+    if settings.JWT_AUDIENCE:
+        to_encode["aud"] = settings.JWT_AUDIENCE
 
     try:
         encoded_jwt = jwt.encode(
-            to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+            to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM
         )
 
         if not encoded_jwt:
@@ -149,7 +151,17 @@ def verify_token(token: str, token_type: str = "access") -> Dict[str, Any]:
         )
 
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience=settings.JWT_AUDIENCE if settings.JWT_VALIDATE_AUDIENCE else None,
+            issuer=settings.JWT_ISSUER if settings.JWT_VALIDATE_ISSUER else None,
+            options={
+                "verify_aud": settings.JWT_VALIDATE_AUDIENCE,
+                "verify_iss": settings.JWT_VALIDATE_ISSUER,
+            },
+        )
 
         # Verify token type
         token_type_in_payload = payload.get("type")

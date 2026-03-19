@@ -44,7 +44,7 @@ def _verify_token(token: str) -> Dict[str, Any]:
         # Verify signature
         signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
         expected_sig = hmac.new(
-            settings.JWT_SECRET_KEY.encode("utf-8"),
+            settings.JWT_SECRET.encode("utf-8"),
             signing_input,
             hashlib.sha256,
         ).digest()
@@ -60,6 +60,18 @@ def _verify_token(token: str) -> Dict[str, Any]:
         exp = payload.get("exp")
         if isinstance(exp, (int, float)) and int(exp) < int(time.time()):
             raise ValueError("Token expired")
+
+        if settings.JWT_VALIDATE_ISSUER and settings.JWT_ISSUER:
+            if payload.get("iss") != settings.JWT_ISSUER:
+                raise ValueError("Invalid token issuer")
+
+        if settings.JWT_VALIDATE_AUDIENCE and settings.JWT_AUDIENCE:
+            aud = payload.get("aud")
+            if isinstance(aud, list):
+                if settings.JWT_AUDIENCE not in aud:
+                    raise ValueError("Invalid token audience")
+            elif aud != settings.JWT_AUDIENCE:
+                raise ValueError("Invalid token audience")
 
         return payload
     except Exception as exc:

@@ -3,7 +3,6 @@ User API routes
 """
 import logging
 from datetime import datetime
-import os
 import time
 from fastapi import APIRouter, status, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -11,6 +10,7 @@ from pydantic import BaseModel
 from bson import ObjectId
 
 from app.core.auth import get_current_user, _verify_token
+from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
 from app.utils.user_helpers import USERS_COLLECTION
 
@@ -103,7 +103,11 @@ async def refresh_token_endpoint(request: RefreshTokenRequest):
         "iat": now,
         "exp": now + access_ttl_seconds,
     }
-    jwt_secret = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
+    if settings.JWT_ISSUER:
+        access_payload["iss"] = settings.JWT_ISSUER
+    if settings.JWT_AUDIENCE:
+        access_payload["aud"] = settings.JWT_AUDIENCE
+    jwt_secret = settings.JWT_SECRET
     new_access_token = _make_signed_token(access_payload, jwt_secret)
     return RefreshTokenResponse(access_token=new_access_token, token_type="bearer")
 

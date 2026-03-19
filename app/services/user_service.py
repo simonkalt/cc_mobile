@@ -3,7 +3,6 @@ User service - business logic for user operations
 """
 import logging
 import time
-import os
 import json
 import re
 import base64
@@ -117,6 +116,16 @@ def _make_signed_token(payload: dict, secret: str) -> str:
     signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
     signature_b64 = _b64url(signature)
     return f"{header_b64}.{payload_b64}.{signature_b64}"
+
+
+def _apply_standard_jwt_claims(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach standard issuer/audience claims when configured."""
+    enriched = payload.copy()
+    if settings.JWT_ISSUER:
+        enriched["iss"] = settings.JWT_ISSUER
+    if settings.JWT_AUDIENCE:
+        enriched["aud"] = settings.JWT_AUDIENCE
+    return enriched
 
 
 def register_user(user_data: UserRegisterRequest) -> UserResponse:
@@ -757,23 +766,23 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     now = int(time.time())
     access_ttl_seconds = 24 * 60 * 60
     refresh_ttl_seconds = 30 * 24 * 60 * 60
-    jwt_secret = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
+    jwt_secret = settings.JWT_SECRET
     user_id = str(user["_id"])
 
-    access_payload = {
+    access_payload = _apply_standard_jwt_claims({
         "sub": user_id,
         "email": user.get("email"),
         "type": "access",
         "iat": now,
         "exp": now + access_ttl_seconds,
-    }
-    refresh_payload = {
+    })
+    refresh_payload = _apply_standard_jwt_claims({
         "sub": user_id,
         "email": user.get("email"),
         "type": "refresh",
         "iat": now,
         "exp": now + refresh_ttl_seconds,
-    }
+    })
 
     access_token = _make_signed_token(access_payload, jwt_secret)
     refresh_token = _make_signed_token(refresh_payload, jwt_secret)
