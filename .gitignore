@@ -1,5 +1,8 @@
 # Environments
 .env*
+# Local secrets (SERVICE_AUTH_KEY, etc.) — never commit
+.secrets
+
 .venv
 venv/
 debug/

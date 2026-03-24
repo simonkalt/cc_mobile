@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import List, Optional
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Project root (repo root): load .env then .secrets so local overrides stay out of git
+_ROOT = Path(__file__).resolve().parent.parent.parent
+load_dotenv(_ROOT / ".env")
+load_dotenv(_ROOT / ".secrets", override=True)
 
 
 class Settings:
@@ -17,6 +19,9 @@ class Settings:
     APP_NAME: str = "Cover Letter API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+
+    # Third-party / server-to-server integration (set in .secrets, not committed)
+    SERVICE_AUTH_KEY: Optional[str] = os.getenv("SERVICE_AUTH_KEY")
     
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")

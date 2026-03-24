@@ -12,7 +12,7 @@ import json
 import time
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import settings
@@ -21,6 +21,37 @@ from app.services.user_service import get_user_by_id
 
 
 security = HTTPBearer()
+
+
+def _secure_string_compare(a: Optional[str], b: Optional[str]) -> bool:
+    """Constant-time comparison for secret strings (same length only)."""
+    if a is None or b is None:
+        return False
+    if len(a) != len(b):
+        return False
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+
+
+def verify_service_auth(
+    x_service_auth: Optional[str] = Header(
+        None,
+        description="Shared secret for server-to-server integration",
+    ),
+) -> None:
+    """
+    Validate X-Service-Auth against settings.SERVICE_AUTH_KEY.
+    Use for third-party or internal services that must not use end-user JWTs.
+    """
+    if not settings.SERVICE_AUTH_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service authentication is not configured on this server",
+        )
+    if not _secure_string_compare(x_service_auth, settings.SERVICE_AUTH_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing X-Service-Auth header",
+        )
 
 
 def _b64url_decode(value: str) -> bytes:
