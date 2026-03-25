@@ -12,6 +12,8 @@ import re
 import subprocess
 import tempfile
 import json
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Dict, Optional, Union, Tuple
 
@@ -449,6 +451,92 @@ def set_cached_pdf(cache_identity: str, content_hash: str, pdf_bytes: bytes) -> 
         logger.warning("Could not write PDF cache for user %s: %s", safe_id, e)
 
 
+def log_docx_highlight_and_background_xml(docx_bytes: bytes) -> None:
+    """
+    Inspect OOXML inside the .docx (zip) and log whether highlight / shading markup exists.
+    Helps diagnose LibreOffice PDF output missing highlights or backgrounds.
+    """
+    try:
+        with zipfile.ZipFile(BytesIO(docx_bytes), "r") as zf:
+            xml_names = sorted(
+                n for n in zf.namelist() if n.startswith("word/") and n.endswith(".xml")
+            )
+            if not xml_names:
+                logger.info("DOCX XML scan: no word/*.xml entries found")
+                return
+
+            totals = {"w_highlight": 0, "w_shd": 0, "w14_text_fill": 0, "v_background": 0}
+            per_file = []
+
+            for name in xml_names:
+                try:
+                    raw = zf.read(name).decode("utf-8", errors="replace")
+                except Exception as exc:
+                    logger.debug("DOCX XML scan skip %s: %s", name, exc)
+                    continue
+
+                w_highlight = raw.count("w:highlight")
+                w_shd = raw.count("w:shd")
+                # Theme / Office 2010+ text fill (sometimes used for “highlight-like” effects)
+                w14_fill = raw.count("w14:textFill") + raw.count("w14:fill")
+                # VML page background (less common in modern docx)
+                v_bg = raw.count("v:background")
+
+                if w_highlight or w_shd or w14_fill or v_bg:
+                    per_file.append(
+                        {
+                            "path": name,
+                            "w_highlight": w_highlight,
+                            "w_shd": w_shd,
+                            "w14_text_fill_or_fill": w14_fill,
+                            "v_background": v_bg,
+                        }
+                    )
+
+                totals["w_highlight"] += w_highlight
+                totals["w_shd"] += w_shd
+                totals["w14_text_fill"] += w14_fill
+                totals["v_background"] += v_bg
+
+            # Optional: sample highlight @w:val values from document.xml only (debugging)
+            highlight_vals = []
+            doc_main = None
+            for name in ("word/document.xml", "word/glossary/document.xml"):
+                if name in zf.namelist():
+                    doc_main = name
+                    break
+            if doc_main:
+                try:
+                    doc_raw = zf.read(doc_main).decode("utf-8", errors="replace")
+                    for m in re.finditer(r"<w:highlight[^>]*w:val=\"([^\"]+)\"", doc_raw):
+                        highlight_vals.append(m.group(1))
+                except Exception:
+                    pass
+
+            logger.info(
+                "DOCX XML scan (highlight/background): totals=%s files_with_matches=%s detail=%s",
+                totals,
+                len(per_file),
+                per_file[:20] if len(per_file) > 20 else per_file,
+            )
+            if highlight_vals:
+                uniq = sorted(set(highlight_vals))
+                logger.info(
+                    "DOCX XML scan: distinct w:highlight @w:val in %s: %s",
+                    doc_main,
+                    uniq[:30],
+                )
+            elif totals["w_highlight"] == 0 and totals["w_shd"] == 0:
+                logger.info(
+                    "DOCX XML scan: no w:highlight or w:shd found in word/*.xml "
+                    "(LibreOffice may still omit some effects in PDF export)"
+                )
+    except zipfile.BadZipFile:
+        logger.warning("DOCX XML scan: bytes are not a valid ZIP/.docx")
+    except Exception as exc:
+        logger.warning("DOCX XML scan failed: %s", exc, exc_info=True)
+
+
 def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
     """
     Convert a .docx document to PDF using LibreOffice headless.
@@ -469,6 +557,8 @@ def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
     """
     if not docx_bytes or len(docx_bytes) < 100:
         raise ValueError("Invalid or empty .docx content")
+
+    log_docx_highlight_and_background_xml(docx_bytes)
 
     # Use a single temp directory for both input and output
     with tempfile.TemporaryDirectory(prefix="docx2pdf_") as tmpdir:
