@@ -85,9 +85,15 @@ print(r.json())
 
 ## Which endpoints use this header?
 
-**Today:** routes under **`/api/integration`** require `X-Service-Auth` (starting with **`GET /api/integration/ping`**).
+`/api/integration/*` routes require `X-Service-Auth` by router dependency.
+Additional routes outside that router are controlled by `integration_auth_endpoints.json`.
 
-Other parts of the API may use **end-user JWT** (`Authorization: Bearer …`) or be public. If you need service-to-service access to additional routes, coordinate with us so we can enable the same or a scoped policy for your integration.
+**Current examples include:**
+
+- `GET /api/integration/ping`
+- `POST /api/files/docx-to-pdf`
+
+Other parts of the API may use end-user JWT (`Authorization: Bearer ...`) or be public.
 
 ## Security practices
 

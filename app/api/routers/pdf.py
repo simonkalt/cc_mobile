@@ -6,13 +6,17 @@ import asyncio
 import base64
 import logging
 from fastapi import APIRouter, File, HTTPException, UploadFile, status, Depends
-from app.core.auth import get_current_user
+from app.core.auth import enforce_integration_auth_if_configured, get_current_user
 from app.models.user import UserResponse
 from app.models.pdf import GeneratePDFRequest, PrintPreviewPDFRequest, PrintTemplateRequest
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/files", tags=["pdf"], dependencies=[Depends(get_current_user)])
+router = APIRouter(
+    prefix="/api/files",
+    tags=["pdf"],
+    dependencies=[Depends(enforce_integration_auth_if_configured)],
+)
 
 # Lazy-import pdf_service so the router registers even if the service fails to load (e.g. in Docker).
 # This avoids 404 on /api/files/print-template when optional deps (playwright, etc.) are missing at import time.
@@ -23,7 +27,7 @@ def _get_print_template(print_props_dict, html_content):
     return get_print_template(print_props_dict, html_content)
 
 
-@router.post("/print-template")
+@router.post("/print-template", dependencies=[Depends(get_current_user)])
 async def print_template_endpoint(request: PrintTemplateRequest):
     """
     Return the exact HTML/CSS wrapper used for PDF generation (single source of truth).
@@ -69,7 +73,7 @@ async def print_template_endpoint(request: PrintTemplateRequest):
     return result
 
 
-@router.post("/generate-pdf")
+@router.post("/generate-pdf", dependencies=[Depends(get_current_user)])
 async def generate_pdf_endpoint(request: GeneratePDFRequest):
     """
     Generate a PDF from Markdown content with proper formatting support.
@@ -134,7 +138,7 @@ async def generate_pdf_endpoint(request: GeneratePDFRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
-@router.post("/print-preview-pdf")
+@router.post("/print-preview-pdf", dependencies=[Depends(get_current_user)])
 async def print_preview_pdf_endpoint(request: PrintPreviewPDFRequest):
     """
     Generate a PDF for Print Preview. HTML is source of truth: send htmlContent.

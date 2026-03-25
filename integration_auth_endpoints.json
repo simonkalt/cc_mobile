@@ -1,0 +1,10 @@
+{
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/files/docx-to-pdf",
+      "enabled": true,
+      "notes": "DOCX conversion consumed by external integration; requires X-Service-Auth."
+    }
+  ]
+}
