@@ -10,9 +10,10 @@ import hashlib
 import hmac
 import json
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import settings
@@ -32,16 +33,8 @@ def _secure_string_compare(a: Optional[str], b: Optional[str]) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
-def verify_service_auth(
-    x_service_auth: Optional[str] = Header(
-        None,
-        description="Shared secret for server-to-server integration",
-    ),
-) -> None:
-    """
-    Validate X-Service-Auth against settings.SERVICE_AUTH_KEY.
-    Use for third-party or internal services that must not use end-user JWTs.
-    """
+def _validate_service_auth_header(x_service_auth: Optional[str]) -> None:
+    """Validate service auth header value against configured key."""
     if not settings.SERVICE_AUTH_KEY:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -52,6 +45,74 @@ def verify_service_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Service-Auth header",
         )
+
+
+def _load_integration_auth_rules() -> list[dict]:
+    """
+    Load JSON rules for endpoints that require integration auth.
+
+    File format:
+    {
+      "endpoints": [
+        {"method": "POST", "path": "/api/files/docx-to-pdf", "enabled": true}
+      ]
+    }
+    """
+    path = Path(settings.INTEGRATION_AUTH_ENDPOINTS_FILE)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Invalid integration auth config: {exc}",
+        ) from exc
+    endpoints = data.get("endpoints")
+    if not isinstance(endpoints, list):
+        return []
+    return [item for item in endpoints if isinstance(item, dict)]
+
+
+def _request_requires_integration_auth(request: Request) -> bool:
+    method = request.method.upper()
+    path = request.url.path
+    for rule in _load_integration_auth_rules():
+        if rule.get("enabled", True) is False:
+            continue
+        rule_method = str(rule.get("method", "")).upper()
+        rule_path = str(rule.get("path", ""))
+        if rule_method == method and rule_path == path:
+            return True
+    return False
+
+
+def enforce_integration_auth_if_configured(
+    request: Request,
+    x_service_auth: Optional[str] = Header(
+        None,
+        description="Shared secret for server-to-server integration",
+    ),
+) -> None:
+    """
+    Require X-Service-Auth only for requests matched by the integration auth JSON rules.
+    """
+    if not _request_requires_integration_auth(request):
+        return
+    _validate_service_auth_header(x_service_auth)
+
+
+def verify_service_auth(
+    x_service_auth: Optional[str] = Header(
+        None,
+        description="Shared secret for server-to-server integration",
+    ),
+) -> None:
+    """
+    Validate X-Service-Auth against settings.SERVICE_AUTH_KEY.
+    Use for third-party or internal services that must not use end-user JWTs.
+    """
+    _validate_service_auth_header(x_service_auth)
 
 
 def _b64url_decode(value: str) -> bytes:

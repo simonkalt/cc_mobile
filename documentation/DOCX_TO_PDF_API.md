@@ -8,10 +8,16 @@ This endpoint converts a **Word `.docx` file** to **PDF** on the server. Use it 
 
 ## Authentication
 
-This route is on the same router as other `/api/files` PDF helpers and **requires a valid Bearer token**.
+This endpoint is configured as an **integration-auth endpoint** and requires:
 
-- Header: `Authorization: Bearer <your_access_token>`
-- Same token you obtain from login; invalid or missing tokens return **401**.
+- Header: `X-Service-Auth: <SERVICE_AUTH_KEY>`
+
+It does **not** require end-user JWT bearer auth when called directly as an integration route.
+
+### How this is configured
+
+Integration-auth routes are controlled by `integration_auth_endpoints.json` in repo root.
+If `POST /api/files/docx-to-pdf` is listed there with `"enabled": true`, service auth is required.
 
 ## Request
 
@@ -57,7 +63,7 @@ Decode `pdfBase64` to binary PDF bytes for download, preview, or upload to stora
 | **400** | Missing/invalid filename, empty file, read failure, or invalid content | `A .docx file is required. Use the 'file' form field.` |
 | **400** | File too small | `Uploaded file is too small or empty` |
 | **400** | Invalid `.docx` content | `Invalid or empty .docx content` |
-| **401** | Missing or invalid Bearer token | `Could not validate credentials` |
+| **401** | Missing or invalid `X-Service-Auth` | `Invalid or missing X-Service-Auth header` |
 | **500** | LibreOffice ran but conversion failed | `Conversion failed: ...` |
 | **503** | LibreOffice not installed on server | `Docx to PDF is not available: LibreOffice (soffice) is not installed on the server.` |
 
@@ -66,19 +72,22 @@ Decode `pdfBase64` to binary PDF bytes for download, preview, or upload to stora
 - **LibreOffice** must be installed and **`soffice` on PATH** (e.g. Debian/Ubuntu: `libreoffice-writer`).
 - Conversion runs in a worker thread with a **120s** timeout; very large documents may hit timeout errors.
 
-## Frontend integration
+## Integration examples (server-side only)
+
+`X-Service-Auth` is a shared secret. Do not send it from browser/mobile WebView code.
+If the caller is frontend, route through your host backend proxy and add this header there.
 
 ### JavaScript / TypeScript (Fetch + FormData)
 
 ```javascript
-async function convertDocxToPdf(docxFile, accessToken, baseUrl = "") {
+async function convertDocxToPdf(docxFile, serviceAuthKey, baseUrl = "") {
   const formData = new FormData();
   formData.append("file", docxFile, docxFile.name);
 
   const response = await fetch(`${baseUrl}/api/files/docx-to-pdf`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      "X-Service-Auth": serviceAuthKey,
       // Do NOT set Content-Type — browser sets multipart boundary
     },
     body: formData,
@@ -121,13 +130,13 @@ URL.revokeObjectURL(url);
 ```javascript
 import axios from "axios";
 
-async function convertDocxToPdf(docxFile, accessToken) {
+async function convertDocxToPdf(docxFile, serviceAuthKey) {
   const formData = new FormData();
   formData.append("file", docxFile);
 
   const { data } = await axios.post("/api/files/docx-to-pdf", formData, {
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      "X-Service-Auth": serviceAuthKey,
       // Let axios set Content-Type for multipart
     },
   });
@@ -138,11 +147,11 @@ async function convertDocxToPdf(docxFile, accessToken) {
 
 ## Testing with cURL
 
-Replace `TOKEN` and path to your `.docx`:
+Replace `SERVICE_AUTH_KEY` and path to your `.docx`:
 
 ```bash
 curl -X POST "http://localhost:8000/api/files/docx-to-pdf" \
-  -H "Authorization: Bearer TOKEN" \
+  -H "X-Service-Auth: SERVICE_AUTH_KEY" \
   -F "file=@/path/to/cover-letter.docx"
 ```
 
@@ -150,7 +159,7 @@ Save PDF from JSON (requires `jq`):
 
 ```bash
 curl -s -X POST "http://localhost:8000/api/files/docx-to-pdf" \
-  -H "Authorization: Bearer TOKEN" \
+  -H "X-Service-Auth: SERVICE_AUTH_KEY" \
   -F "file=@/path/to/cover-letter.docx" \
   | jq -r .pdfBase64 | base64 -d > output.pdf
 ```
@@ -166,12 +175,12 @@ curl -s -X POST "http://localhost:8000/api/files/docx-to-pdf" \
 ## Frontend checklist
 
 - [ ] `POST` to `/api/files/docx-to-pdf`
-- [ ] `Authorization: Bearer <token>` header set
+- [ ] `X-Service-Auth: <SERVICE_AUTH_KEY>` header set
 - [ ] Body is `multipart/form-data` with field name **`file`**
 - [ ] Do not manually set `Content-Type` for `FormData` in the browser
 - [ ] Filename ends with `.docx`
 - [ ] On success, decode `pdfBase64` to a Blob or binary buffer
-- [ ] Handle 400 (bad file), 401 (auth), 500 (conversion error), 503 (LibreOffice missing)
+- [ ] Handle 400 (bad file), 401 (service auth), 500 (conversion error), 503 (LibreOffice missing)
 
 ## Implementation reference
 

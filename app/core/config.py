@@ -22,6 +22,10 @@ class Settings:
 
     # Third-party / server-to-server integration (set in .secrets, not committed)
     SERVICE_AUTH_KEY: Optional[str] = os.getenv("SERVICE_AUTH_KEY")
+    INTEGRATION_AUTH_ENDPOINTS_FILE: str = os.getenv(
+        "INTEGRATION_AUTH_ENDPOINTS_FILE",
+        str(_ROOT / "integration_auth_endpoints.json"),
+    )
     
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
