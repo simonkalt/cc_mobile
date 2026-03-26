@@ -106,20 +106,18 @@ def enforce_integration_auth_if_configured(
     if not _request_requires_integration_auth(request):
         return
 
-    # 1) Prefer JWT if provided and valid
+    # 1) Prefer JWT when client sends Authorization: Bearer <token>
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     if auth_header:
         parts = auth_header.split(" ", 1)
         if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
             token = parts[1].strip()
-            try:
-                _verify_token(token)
-                return
-            except HTTPException:
-                # Fall back to service key validation below.
-                pass
+            # If they sent a Bearer token, treat this as a user-auth attempt: invalid JWT
+            # must be 401, not a fallback to integration key (avoids mobile seeing 503).
+            _verify_token(token)
+            return
 
-    # 2) Otherwise require service key
+    # 2) No Bearer token (or empty): allow integration key only
     _validate_service_auth_header(x_service_auth)
 
 
