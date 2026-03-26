@@ -8,16 +8,18 @@ This endpoint converts a **Word `.docx` file** to **PDF** on the server. Use it 
 
 ## Authentication
 
-This endpoint is configured as an **integration-auth endpoint** and requires:
+This endpoint accepts **either** authentication scheme:
 
-- Header: `X-Service-Auth: <SERVICE_AUTH_KEY>`
-
-It does **not** require end-user JWT bearer auth when called directly as an integration route.
+- **User JWT**: `Authorization: Bearer <your_access_token>`
+- **Integration key**: `X-Service-Auth: <SERVICE_AUTH_KEY>`
 
 ### How this is configured
 
 Integration-auth routes are controlled by `integration_auth_endpoints.json` in repo root.
-If `POST /api/files/docx-to-pdf` is listed there with `"enabled": true`, service auth is required.
+When `POST /api/files/docx-to-pdf` is listed there with `"enabled": true`, the server enforces:
+
+- valid JWT **or**
+- valid `X-Service-Auth`
 
 ## Request
 

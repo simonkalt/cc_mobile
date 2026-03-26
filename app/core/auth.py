@@ -95,10 +95,31 @@ def enforce_integration_auth_if_configured(
     ),
 ) -> None:
     """
-    Require X-Service-Auth only for requests matched by the integration auth JSON rules.
+    For requests matched by the integration auth JSON rules, allow either:
+
+    - End-user JWT: `Authorization: Bearer <token>`
+    - Service key:  `X-Service-Auth: <SERVICE_AUTH_KEY>`
+
+    This supports endpoints that are used by both authenticated users (mobile/web) and
+    server-to-server integrations.
     """
     if not _request_requires_integration_auth(request):
         return
+
+    # 1) Prefer JWT if provided and valid
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth_header:
+        parts = auth_header.split(" ", 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
+            token = parts[1].strip()
+            try:
+                _verify_token(token)
+                return
+            except HTTPException:
+                # Fall back to service key validation below.
+                pass
+
+    # 2) Otherwise require service key
     _validate_service_auth_header(x_service_auth)
 
 
