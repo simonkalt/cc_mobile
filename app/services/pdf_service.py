@@ -461,9 +461,9 @@ def log_docx_highlight_and_background_xml(docx_bytes: bytes) -> None:
             xml_names = sorted(
                 n for n in zf.namelist() if n.startswith("word/") and n.endswith(".xml")
             )
-            if not xml_names:
-                logger.info("DOCX XML scan: no word/*.xml entries found")
-                return
+            # if not xml_names:
+            #     logger.info("DOCX XML scan: no word/*.xml entries found")
+            #     return
 
             totals = {"w_highlight": 0, "w_shd": 0, "w14_text_fill": 0, "v_background": 0}
             per_file = []
@@ -513,24 +513,24 @@ def log_docx_highlight_and_background_xml(docx_bytes: bytes) -> None:
                 except Exception:
                     pass
 
-            logger.info(
-                "DOCX XML scan (highlight/background): totals=%s files_with_matches=%s detail=%s",
-                totals,
-                len(per_file),
-                per_file[:20] if len(per_file) > 20 else per_file,
-            )
-            if highlight_vals:
-                uniq = sorted(set(highlight_vals))
-                logger.info(
-                    "DOCX XML scan: distinct w:highlight @w:val in %s: %s",
-                    doc_main,
-                    uniq[:30],
-                )
-            elif totals["w_highlight"] == 0 and totals["w_shd"] == 0:
-                logger.info(
-                    "DOCX XML scan: no w:highlight or w:shd found in word/*.xml "
-                    "(LibreOffice may still omit some effects in PDF export)"
-                )
+            # logger.info(
+            #     "DOCX XML scan (highlight/background): totals=%s files_with_matches=%s detail=%s",
+            #     totals,
+            #     len(per_file),
+            #     per_file[:20] if len(per_file) > 20 else per_file,
+            # )
+            # if highlight_vals:
+            #     uniq = sorted(set(highlight_vals))
+                # logger.info(
+                #     "DOCX XML scan: distinct w:highlight @w:val in %s: %s",
+                #     doc_main,
+                #     uniq[:30],
+                # )
+            # elif totals["w_highlight"] == 0 and totals["w_shd"] == 0:
+            #     logger.info(
+            #         "DOCX XML scan: no w:highlight or w:shd found in word/*.xml "
+            #         "(LibreOffice may still omit some effects in PDF export)"
+            #     )
     except zipfile.BadZipFile:
         logger.warning("DOCX XML scan: bytes are not a valid ZIP/.docx")
     except Exception as exc:
