@@ -623,9 +623,22 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     # Update selectedModel
                     if "selectedModel" in app_settings:
                         update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]
-                    # Update lastResumeUsed
+                    # Update lastResumeUsed (accept camelCase and legacy snake_case keys)
+                    last_resume_value_set = False
                     if "lastResumeUsed" in app_settings:
                         update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["lastResumeUsed"]
+                        last_resume_value_set = True
+                    elif "last_resume_used" in app_settings:
+                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["last_resume_used"]
+                        last_resume_value_set = True
+                    elif "last_resume" in app_settings:
+                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["last_resume"]
+                        last_resume_value_set = True
+                    if last_resume_value_set:
+                        logger.info(
+                            "Updated lastResumeUsed for user %s",
+                            user_id,
+                        )
                     # Update last_personality_profile_used
                     if "last_personality_profile_used" in app_settings:
                         update_doc["preferences.appSettings.last_personality_profile_used"] = app_settings["last_personality_profile_used"]
