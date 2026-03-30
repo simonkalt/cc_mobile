@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome — You’re subscribed | sAImon Software</title>
+    <meta
+      name="description"
+      content="Thank you for subscribing to Career Helper: AI Job Cover Letter Generator."
+    />
+    <link rel="stylesheet" href="/website/styles.css" />
+    <!--
+      URLs (FastAPI serves this repo):
+        • http://HOST:PORT/subscribed/?user_id=...&api_base=...
+        • http://HOST:PORT/website/subscribed/  (static mount; same query string rules)
+
+      Query params use ? and &, NOT path segments. Wrong: /subscribed/user_id=abc&api_base=...
+      Right:  /subscribed/?user_id=abc&api_base=http%3A%2F%2F192.168.0.166%3A8675
+
+      user_id   — MongoDB user id; page fetches GET {api_base}/api/users/{user_id}
+      api_base  — API origin, no trailing slash. Omit if same host as this page (fetch uses relative /api/...).
+
+      Production example:
+        https://www.saimonsoft.com/subscribed/?user_id={USER_ID}&api_base=https%3A%2F%2Fyour-api.example.com
+    -->
+    <style>
+      .subscribed-hero {
+        text-align: center;
+        margin-bottom: 1.5rem;
+      }
+      .subscribed-hero h2 {
+        font-size: 1.85rem;
+        color: #333;
+        margin-bottom: 0.5rem;
+        line-height: 1.3;
+      }
+      .subscribed-hero .app-name {
+        color: #667eea;
+        font-weight: 600;
+      }
+      .sub-card {
+        background: #f0f4ff;
+        border-radius: 16px;
+        padding: 1.5rem 1.75rem;
+        margin: 1.5rem 0;
+        border-left: 4px solid #667eea;
+      }
+      .sub-card h3 {
+        color: #667eea;
+        margin-bottom: 1rem;
+        font-size: 1.2rem;
+      }
+      .sub-card dl {
+        margin: 0;
+        display: grid;
+        gap: 0.65rem;
+      }
+      .sub-card dt {
+        font-weight: 600;
+        color: #555;
+        font-size: 0.9rem;
+      }
+      .sub-card dd {
+        margin: 0;
+        color: #222;
+      }
+      .sub-card .muted {
+        color: #666;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        justify-content: center;
+        margin: 2rem 0 1rem;
+      }
+      .btn {
+        display: inline-block;
+        padding: 0.9rem 1.5rem;
+        border-radius: 12px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.2s, transform 0.2s;
+        text-align: center;
+      }
+      .btn-primary {
+        background: #667eea;
+        color: white;
+      }
+      .btn-primary:hover {
+        background: #764ba2;
+        transform: translateY(-2px);
+      }
+      .btn-secondary {
+        background: #e8ecf4;
+        color: #333;
+      }
+      .btn-secondary:hover {
+        background: #dde3ee;
+      }
+      .support-block {
+        margin: 2rem 0;
+        padding: 1.25rem;
+        background: #f8f9fa;
+        border-radius: 12px;
+        line-height: 1.65;
+        color: #444;
+      }
+      .support-block a {
+        color: #667eea;
+        font-weight: 600;
+      }
+      .back-link {
+        display: inline-block;
+        margin-top: 1.5rem;
+        color: #667eea;
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .back-link:hover {
+        color: #764ba2;
+        text-decoration: underline;
+      }
+      .error-msg {
+        color: #b00020;
+        font-size: 0.95rem;
+        margin-top: 0.75rem;
+      }
+      #subscriptionPanel[hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1 class="ai-logo-container">
+          s<img src="/website/images/ai-hero.gif" alt="AI" class="ai-logo" />mon
+          Software
+        </h1>
+        <p class="tagline">AI-Powered Solutions for Your Career</p>
+      </header>
+
+      <div class="main-content">
+        <div class="subscribed-hero">
+          <h2>Thank you for subscribing</h2>
+          <p>
+            <span class="app-name">Career Helper: AI Job Cover Letter Generator</span><br />
+            Your subscription helps us keep improving your experience.
+          </p>
+        </div>
+
+        <div id="subscriptionPanel" hidden>
+          <div class="sub-card">
+            <h3>Your subscription</h3>
+            <p class="muted" id="subscriptionIntro"></p>
+            <dl>
+              <dt>Status</dt>
+              <dd id="fieldStatus">—</dd>
+              <dt>Plan</dt>
+              <dd id="fieldPlan">—</dd>
+              <dt>Current period ends</dt>
+              <dd id="fieldPeriodEnd">—</dd>
+            </dl>
+            <p id="fetchError" class="error-msg" hidden></p>
+          </div>
+        </div>
+
+        <div class="actions">
+          <a class="btn btn-primary" id="shareAppLink" href="#">Share the app</a>
+          <a class="btn btn-secondary" href="mailto:support@saimonsoft.com?subject=Career%20Helper%20—%20support">
+            Contact support
+          </a>
+        </div>
+
+        <div class="support-block">
+          <strong>Need help?</strong> Email
+          <a href="mailto:support@saimonsoft.com">support@saimonsoft.com</a>
+          and include your account email so we can assist quickly.
+        </div>
+
+        <a class="back-link" href="/">← Back to sAImon Software home</a>
+      </div>
+
+      <footer>
+        <div class="footer-links">
+          <a href="/documents/sAImon Software - Terms of Service.pdf" target="_blank"
+            >Terms of Service</a
+          >
+          <a href="/documents/sAImon Software - Privacy Policy.pdf" target="_blank"
+            >Privacy Policy</a
+          >
+          <a href="/delete-account.html">Delete account</a>
+        </div>
+        <p class="copyright">&copy; 2026 sAImon Software. All rights reserved.</p>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var userId = params.get("user_id");
+        var apiBase = (params.get("api_base") || "").replace(/\/$/, "");
+
+        var shareSubject = encodeURIComponent(
+          "Try Career Helper — AI cover letters"
+        );
+        var shareBody = encodeURIComponent(
+          "I've been using Career Helper: AI Job Cover Letter Generator by sAImon Software.\n\n" +
+            "Check it out:\n" +
+            "https://www.saimonsoft.com/\n\n" +
+            "(Share this message with anyone who might find it useful.)"
+        );
+        var shareLink = document.getElementById("shareAppLink");
+        shareLink.href = "mailto:?subject=" + shareSubject + "&body=" + shareBody;
+
+        var panel = document.getElementById("subscriptionPanel");
+        var intro = document.getElementById("subscriptionIntro");
+        var errEl = document.getElementById("fetchError");
+
+        if (!userId || !userId.trim()) {
+          return;
+        }
+
+        panel.hidden = false;
+        intro.textContent = "Loading your subscription details…";
+
+        var url =
+          (apiBase ? apiBase : "") +
+          "/api/users/" +
+          encodeURIComponent(userId.trim());
+
+        fetch(url)
+          .then(function (res) {
+            if (!res.ok) {
+              return res.json().then(function (body) {
+                var d =
+                  (body && body.detail) ||
+                  "Could not load account (" + res.status + ").";
+                throw new Error(typeof d === "string" ? d : JSON.stringify(d));
+              });
+            }
+            return res.json();
+          })
+          .then(function (user) {
+            intro.textContent =
+              "Signed in as " + (user.name || "member") + " (" + (user.email || "") + ").";
+            document.getElementById("fieldStatus").textContent =
+              user.subscriptionStatus || "—";
+            document.getElementById("fieldPlan").textContent =
+              user.subscriptionPlan || "—";
+            var end = user.subscriptionCurrentPeriodEnd;
+            if (end) {
+              try {
+                document.getElementById("fieldPeriodEnd").textContent =
+                  new Date(end).toLocaleString(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  });
+              } catch (e) {
+                document.getElementById("fieldPeriodEnd").textContent = String(end);
+              }
+            } else {
+              document.getElementById("fieldPeriodEnd").textContent = "—";
+            }
+          })
+          .catch(function (e) {
+            errEl.hidden = false;
+            errEl.textContent =
+              (e && e.message) ||
+              "Unable to load subscription details. If the API is on another domain, add api_base to the URL (see HTML comment).";
+            intro.textContent =
+              "We could not load subscription details for this account.";
+          });
+      })();
+    </script>
+  </body>
+</html>
