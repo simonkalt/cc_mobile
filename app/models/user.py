@@ -97,6 +97,9 @@ class UserResponse(BaseModel):
     max_credits: int = Field(default=10, ge=0)
     SMSOpt: Optional[str] = None
     SMSOptDate: Optional[datetime] = None
+    subscriptionStatus: Optional[str] = None
+    subscriptionPlan: Optional[str] = None
+    subscriptionCurrentPeriodEnd: Optional[datetime] = None
 
     class Config:
         from_attributes = True

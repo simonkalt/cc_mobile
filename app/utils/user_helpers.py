@@ -140,5 +140,8 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         max_credits=max_credits,
         SMSOpt=user_doc.get("SMSOpt"),
         SMSOptDate=user_doc.get("SMSOptDate"),
+        subscriptionStatus=user_doc.get("subscriptionStatus"),
+        subscriptionPlan=user_doc.get("subscriptionPlan"),
+        subscriptionCurrentPeriodEnd=user_doc.get("subscriptionCurrentPeriodEnd"),
     )
 

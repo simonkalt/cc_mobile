@@ -20,6 +20,9 @@ class Settings:
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
 
+    # Google Analytics (GA4) — injected into website/index.html when serving /
+    GOOGLE_ANALYTICS_TAG: Optional[str] = os.getenv("GOOGLE_ANALYTICS_TAG")
+
     # Third-party / server-to-server integration (set in .secrets, not committed)
     SERVICE_AUTH_KEY: Optional[str] = os.getenv("SERVICE_AUTH_KEY")
     INTEGRATION_AUTH_ENDPOINTS_FILE: str = os.getenv(
