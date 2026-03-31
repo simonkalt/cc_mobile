@@ -164,7 +164,10 @@ class Settings:
     USE_DOCX_COMPONENTS: bool = os.getenv("USE_DOCX_COMPONENTS", "false").lower() == "true"
     LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8124"))
     ENFORCE_STRONG_PASSWORDS: bool = os.getenv("ENFORCE_STRONG_PASSWORDS", "false").lower() == "true"
-    ENABLE_GENERATION_TIMING_CHART: bool = os.getenv("ENABLE_GENERATION_TIMING_CHART", "true").lower() == "true"
+    # ASCII timing chart in logs for cover-letter routes. Default off.
+    # Only LOG_TIMING is honored (ENABLE_GENERATION_TIMING_CHART is ignored to avoid stale env turning logs on).
+    _LOG_TIMING_ENV = (os.getenv("LOG_TIMING") or "").strip().lower()
+    LOG_TIMING: bool = _LOG_TIMING_ENV in ("1", "true", "yes")
 
     # When true: skip Redis/local caches for cover-letter generation (result, resume text, user profile)
     # and skip on-disk PDF cache used by generate-pdf / print-preview (avoids stale formatting while testing).

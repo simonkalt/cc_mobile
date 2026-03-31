@@ -29,6 +29,9 @@ from app.utils.user_helpers import (
     USERS_COLLECTION,
 )
 from app.utils.letter_template_selection import (
+    log_letter_template_prefs_save_incoming,
+    log_letter_template_prefs_save_skipped_selection_due_to_auto,
+    log_letter_template_prefs_save_update_doc,
     normalize_letter_template_selection_for_storage,
 )
 
@@ -558,9 +561,26 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
     if updates.preferences is not None:
         # Handle preferences update - support nested structure
         if isinstance(updates.preferences, dict):
+            if "appSettings" not in updates.preferences:
+                _mis = [
+                    k
+                    for k in updates.preferences.keys()
+                    if isinstance(k, str)
+                    and ("letter" in k.lower() or "template" in k.lower())
+                ]
+                if _mis:
+                    logger.warning(
+                        "PUT user %s: letter/template keys under preferences root (expected nested "
+                        "preferences.appSettings): %s",
+                        user_id,
+                        _mis,
+                    )
             # Check if this is a partial update (has appSettings nested structure)
             if "appSettings" in updates.preferences:
                 app_settings = updates.preferences.get("appSettings", {})
+                log_letter_template_prefs_save_incoming(
+                    user_id, app_settings, source="user_service.update_user"
+                )
                 if isinstance(app_settings, dict):
                     # Update printProperties if present
                     if "printProperties" in app_settings:
@@ -680,6 +700,18 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                             user_id,
                             normalized,
                         )
+                    log_letter_template_prefs_save_skipped_selection_due_to_auto(
+                        user_id,
+                        app_settings,
+                        source="user_service.update_user",
+                    )
+                else:
+                    logger.warning(
+                        "PUT user %s: preferences.appSettings is not a dict (type=%s); "
+                        "skipping nested appSettings updates including letter templates",
+                        user_id,
+                        type(app_settings).__name__,
+                    )
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]
@@ -692,7 +724,11 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         update_doc["avatarUrl"] = updates.avatarUrl
     if updates.last_llm_used is not None:
         update_doc["last_llm_used"] = updates.last_llm_used
-    
+
+    log_letter_template_prefs_save_update_doc(
+        user_id, update_doc, source="user_service.update_user"
+    )
+
     try:
         result = collection.update_one(
             {"_id": user_id_obj},

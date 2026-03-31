@@ -80,9 +80,10 @@ When Settings are saved, the frontend updates user preferences via:
 ## Backward compatibility
 
 - Existing users may have neither field.
-- Treat missing `letterTemplateAutoPick` as `true`.
+- Treat missing `letterTemplateAutoPick` as `true` for **API/default semantics**.
 - Treat missing `letterTemplateSelection` as `null`.
 - Do not fail reads if field is absent in older stored documents.
+- **Cover letter generation:** if `letterTemplateSelection` is set but `letterTemplateAutoPick` is missing (older clients), the server still uses the selected file so layout matches the picker; explicit `letterTemplateAutoPick: true` keeps AI/random template choice and ignores a stale selection.
 
 ## Example update payloads
 
@@ -115,15 +116,12 @@ When Settings are saved, the frontend updates user preferences via:
 }
 ```
 
-## Next integration step
+## Cover letter generation (implemented)
 
-After server persistence is in place, generation should read:
+`get_job_info` in `app/services/cover_letter_service.py` calls `resolve_cover_letter_template_for_generation` (`app/utils/template_loader.py`), which:
 
-- `preferences.appSettings.letterTemplateAutoPick`
-- `preferences.appSettings.letterTemplateSelection.name`
-- `preferences.appSettings.letterTemplateSelection.index`
+- Reads `preferences.appSettings.letterTemplateAutoPick` and `letterTemplateSelection` from the loaded user context.
+- If `letterTemplateAutoPick === false` and `letterTemplateSelection` has non-empty `name` and `index`, loads `templates/{category}/{index}.template` where the folder’s display name matches `name` (same rules as `GET /api/letter-templates`).
+- Otherwise uses the existing flow: personality profile name → template category → random file in that category (and formal fallback).
 
-and apply logic:
-
-- if `letterTemplateAutoPick === true`: use AI/default template selection flow.
-- if `letterTemplateAutoPick === false` and selection exists: use selected `{name, index}` template.
+Result caching includes a `template_pref` fragment so changing manual vs auto or `{name, index}` does not reuse a letter generated with a different layout.

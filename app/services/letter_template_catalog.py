@@ -19,6 +19,13 @@ def _folder_display_name(folder: str) -> str:
     return re.sub(r"[_-]+", " ", folder).strip().title()
 
 
+def folder_display_name_for_category(folder_name: str) -> str:
+    """
+    Public alias for catalog display names (must match GET /api/letter-templates `name`).
+    """
+    return _folder_display_name(folder_name)
+
+
 def _natural_sort_key(stem: str) -> tuple:
     """Sort stems like 1, 2, 10 numerically when possible."""
     parts = re.split(r"(\d+)", stem)
