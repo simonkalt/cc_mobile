@@ -163,6 +163,8 @@ def _resolve_user_profile_cache_key(user_id: Optional[str], user_email: Optional
 def _get_cached_user_profile(
     *, user_id: Optional[str], user_email: Optional[str]
 ) -> Optional[Dict[str, Any]]:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return None
     key = _resolve_user_profile_cache_key(user_id, user_email)
     if not key:
         return None
@@ -179,6 +181,8 @@ def _get_cached_user_profile(
 def _set_cached_user_profile(
     *, user_id: Optional[str], user_email: Optional[str], payload: Dict[str, Any]
 ) -> None:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return
     key = _resolve_user_profile_cache_key(user_id, user_email)
     if not key:
         return
@@ -193,6 +197,8 @@ def _build_resume_cache_key(user_id: Optional[str], resume: str, is_plain_text: 
 
 
 def _get_cached_resume_text(cache_key: str) -> Optional[str]:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return None
     redis_key = f"cache:{cache_key}"
     cached = _redis_get_text(redis_key)
     if cached:
@@ -201,6 +207,8 @@ def _get_cached_resume_text(cache_key: str) -> Optional[str]:
 
 
 def _set_cached_resume_text(cache_key: str, value: str) -> None:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return
     redis_key = f"cache:{cache_key}"
     _redis_set_text(redis_key, value, _RESUME_CACHE_TTL_SECONDS)
     _local_set_text(_local_resume_cache, cache_key, value, _RESUME_CACHE_TTL_SECONDS)
@@ -212,6 +220,8 @@ def _build_result_cache_key(payload: Dict[str, Any]) -> str:
 
 
 def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return None
     redis_key = f"cache:{cache_key}"
     cached = _redis_get_json(redis_key)
     if cached:
@@ -227,6 +237,8 @@ def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
 
 
 def _set_cached_result(cache_key: str, value: Dict[str, Any]) -> None:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return
     if _is_error_result(value):
         return
     redis_key = f"cache:{cache_key}"

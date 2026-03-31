@@ -166,6 +166,12 @@ class Settings:
     ENFORCE_STRONG_PASSWORDS: bool = os.getenv("ENFORCE_STRONG_PASSWORDS", "false").lower() == "true"
     ENABLE_GENERATION_TIMING_CHART: bool = os.getenv("ENABLE_GENERATION_TIMING_CHART", "true").lower() == "true"
 
+    # When true: skip Redis/local caches for cover-letter generation (result, resume text, user profile)
+    # and skip on-disk PDF cache used by generate-pdf / print-preview (avoids stale formatting while testing).
+    DISABLE_COVER_LETTER_CACHING: bool = (
+        os.getenv("DISABLE_COVER_LETTER_CACHING", "false").lower() == "true"
+    )
+
 
 # Global settings instance
 settings = Settings()

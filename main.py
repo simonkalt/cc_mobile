@@ -355,6 +355,7 @@ try:
         email,
         subscriptions,
         linkedin,
+        letter_templates,
     )
 
     app.include_router(job_url.router)
@@ -369,6 +370,7 @@ try:
     app.include_router(email.router)
     app.include_router(subscriptions.router)
     app.include_router(linkedin.router)
+    app.include_router(letter_templates.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:
