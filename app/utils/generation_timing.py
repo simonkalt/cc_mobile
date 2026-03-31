@@ -1,6 +1,6 @@
 """
 Lightweight per-request timing tracker for letter generation.
-Set ENABLE_GENERATION_TIMING_CHART=false to disable all logs.
+Enable with LOG_TIMING=true (or 1 / yes). Default off. ENABLE_GENERATION_TIMING_CHART is not read.
 """
 from __future__ import annotations
 
