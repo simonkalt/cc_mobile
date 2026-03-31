@@ -8,6 +8,9 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 from app.db.mongodb import get_collection, is_connected
+from app.utils.letter_template_selection import (
+    normalize_letter_template_selection_for_storage,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -43,12 +46,19 @@ class PersonalityProfile(BaseModel):
     description: str
 
 
+class LetterTemplateSelection(BaseModel):
+    name: str
+    index: str
+
+
 class AppSettings(BaseModel):
     printProperties: Optional[PrintProperties] = None
     personalityProfiles: Optional[List[PersonalityProfile]] = None
     selectedModel: Optional[str] = None
     lastResumeUsed: Optional[str] = None
     last_personality_profile_used: Optional[str] = None
+    letterTemplateAutoPick: Optional[bool] = True
+    letterTemplateSelection: Optional[LetterTemplateSelection] = None
 
 
 class UserPreferences(BaseModel):
@@ -266,7 +276,9 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
                 "personalityProfiles": [],
                 "selectedModel": None,
                 "lastResumeUsed": None,
-                "last_personality_profile_used": None
+                "last_personality_profile_used": None,
+                "letterTemplateAutoPick": True,
+                "letterTemplateSelection": None,
             },
             # Form field defaults - ensure all form fields start empty for new users
             "formDefaults": {
@@ -501,6 +513,38 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     # Update last_personality_profile_used
                     if "last_personality_profile_used" in app_settings:
                         update_doc["preferences.appSettings.last_personality_profile_used"] = app_settings["last_personality_profile_used"]
+                    if "letterTemplateAutoPick" in app_settings:
+                        raw_auto = app_settings["letterTemplateAutoPick"]
+                        if not isinstance(raw_auto, bool):
+                            raise HTTPException(
+                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="letterTemplateAutoPick must be a boolean.",
+                            )
+                        update_doc["preferences.appSettings.letterTemplateAutoPick"] = (
+                            raw_auto
+                        )
+                        if raw_auto is True:
+                            update_doc[
+                                "preferences.appSettings.letterTemplateSelection"
+                            ] = None
+                            logger.info(
+                                "Set letterTemplateAutoPick=true for user %s; cleared letterTemplateSelection",
+                                user_id,
+                            )
+                    if "letterTemplateSelection" in app_settings and not (
+                        app_settings.get("letterTemplateAutoPick") is True
+                    ):
+                        normalized = normalize_letter_template_selection_for_storage(
+                            app_settings["letterTemplateSelection"]
+                        )
+                        update_doc["preferences.appSettings.letterTemplateSelection"] = (
+                            normalized
+                        )
+                        logger.info(
+                            "Updated letterTemplateSelection for user %s: %s",
+                            user_id,
+                            normalized,
+                        )
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]

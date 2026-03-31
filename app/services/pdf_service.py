@@ -411,6 +411,8 @@ def get_cached_pdf(cache_identity: str, content_hash: str) -> Optional[bytes]:
     Return cached PDF bytes if we have a stored PDF for this user and its hash matches.
     Otherwise return None.
     """
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return None
     if not cache_identity or not content_hash:
         return None
     safe_id = _safe_cache_identity(cache_identity)
@@ -434,6 +436,8 @@ def set_cached_pdf(cache_identity: str, content_hash: str, pdf_bytes: bytes) -> 
     """
     Store PDF and content hash for this user. Deletes any existing cached PDF for this user first.
     """
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return
     if not cache_identity or not content_hash:
         return
     safe_id = _safe_cache_identity(cache_identity)

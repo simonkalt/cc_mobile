@@ -9,7 +9,7 @@ import base64
 import hmac
 import hashlib
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 from bson import ObjectId
 from fastapi import HTTPException, status
 
@@ -27,6 +27,9 @@ from app.utils.user_helpers import (
     user_doc_to_response,
     normalize_personality_profiles,
     USERS_COLLECTION,
+)
+from app.utils.letter_template_selection import (
+    normalize_letter_template_selection_for_storage,
 )
 
 logger = logging.getLogger(__name__)
@@ -207,7 +210,9 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             "personalityProfiles": personality_profiles,
             "selectedModel": None,
             "lastResumeUsed": None,
-            "last_personality_profile_used": None
+            "last_personality_profile_used": None,
+            "letterTemplateAutoPick": True,
+            "letterTemplateSelection": None,
         },
         "formDefaults": {
             "companyName": "",
@@ -642,6 +647,39 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     # Update last_personality_profile_used
                     if "last_personality_profile_used" in app_settings:
                         update_doc["preferences.appSettings.last_personality_profile_used"] = app_settings["last_personality_profile_used"]
+                    # Letter layout: AI pick vs manual template (see LETTER_TEMPLATE_SELECTION_SERVER_IMPLEMENTATION.md)
+                    if "letterTemplateAutoPick" in app_settings:
+                        raw_auto = app_settings["letterTemplateAutoPick"]
+                        if not isinstance(raw_auto, bool):
+                            raise HTTPException(
+                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="letterTemplateAutoPick must be a boolean.",
+                            )
+                        update_doc["preferences.appSettings.letterTemplateAutoPick"] = (
+                            raw_auto
+                        )
+                        if raw_auto is True:
+                            update_doc[
+                                "preferences.appSettings.letterTemplateSelection"
+                            ] = None
+                            logger.info(
+                                "Set letterTemplateAutoPick=true for user %s; cleared letterTemplateSelection",
+                                user_id,
+                            )
+                    if "letterTemplateSelection" in app_settings and not (
+                        app_settings.get("letterTemplateAutoPick") is True
+                    ):
+                        normalized = normalize_letter_template_selection_for_storage(
+                            app_settings["letterTemplateSelection"]
+                        )
+                        update_doc["preferences.appSettings.letterTemplateSelection"] = (
+                            normalized
+                        )
+                        logger.info(
+                            "Updated letterTemplateSelection for user %s: %s",
+                            user_id,
+                            normalized,
+                        )
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]

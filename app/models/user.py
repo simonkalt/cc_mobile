@@ -34,12 +34,21 @@ class PersonalityProfile(BaseModel):
     description: str
 
 
+class LetterTemplateSelection(BaseModel):
+    """User-chosen layout template from GET /api/letter-templates (name + index)."""
+
+    name: str
+    index: str
+
+
 class AppSettings(BaseModel):
     printProperties: Optional[PrintProperties] = None
     personalityProfiles: Optional[List[PersonalityProfile]] = None
     selectedModel: Optional[str] = None
     lastResumeUsed: Optional[str] = None
     last_personality_profile_used: Optional[str] = None
+    letterTemplateAutoPick: Optional[bool] = True
+    letterTemplateSelection: Optional[LetterTemplateSelection] = None
 
 
 class UserPreferences(BaseModel):
