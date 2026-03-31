@@ -11,7 +11,7 @@ import re
 import hashlib
 import time
 from datetime import timedelta
-from typing import Optional, Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status  # type: ignore[import-untyped]
 from dotenv import dotenv_values
@@ -28,7 +28,14 @@ except ImportError:
 from app.core.config import settings
 from app.models.user import UserResponse
 from app.utils.html_normalizer import html_p_to_br, collapse_br_pairs, double_break_after_groups
-from app.utils.template_loader import get_template_for_profile
+from app.utils.template_loader import (
+    coalesce_letter_template_app_settings,
+    letter_template_cache_stamp,
+    manual_letter_template_selection_active,
+    merge_request_letter_template_prefs,
+    resolve_cover_letter_template_for_generation,
+    use_file_template_in_prompt,
+)
 from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
 from app.utils.redis_utils import get_redis_client
@@ -163,6 +170,8 @@ def _resolve_user_profile_cache_key(user_id: Optional[str], user_email: Optional
 def _get_cached_user_profile(
     *, user_id: Optional[str], user_email: Optional[str]
 ) -> Optional[Dict[str, Any]]:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return None
     key = _resolve_user_profile_cache_key(user_id, user_email)
     if not key:
         return None
@@ -179,6 +188,8 @@ def _get_cached_user_profile(
 def _set_cached_user_profile(
     *, user_id: Optional[str], user_email: Optional[str], payload: Dict[str, Any]
 ) -> None:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return
     key = _resolve_user_profile_cache_key(user_id, user_email)
     if not key:
         return
@@ -193,6 +204,8 @@ def _build_resume_cache_key(user_id: Optional[str], resume: str, is_plain_text: 
 
 
 def _get_cached_resume_text(cache_key: str) -> Optional[str]:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return None
     redis_key = f"cache:{cache_key}"
     cached = _redis_get_text(redis_key)
     if cached:
@@ -201,9 +214,58 @@ def _get_cached_resume_text(cache_key: str) -> Optional[str]:
 
 
 def _set_cached_resume_text(cache_key: str, value: str) -> None:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return
     redis_key = f"cache:{cache_key}"
     _redis_set_text(redis_key, value, _RESUME_CACHE_TTL_SECONDS)
     _local_set_text(_local_resume_cache, cache_key, value, _RESUME_CACHE_TTL_SECONDS)
+
+
+def _merge_fresh_letter_template_prefs(
+    user_ctx: Dict[str, Any], fresh_user: UserResponse
+) -> None:
+    """Overlay DB values so Redis user-profile cache cannot stale layout prefs."""
+    fp = fresh_user.preferences if isinstance(fresh_user.preferences, dict) else {}
+    fa = fp.get("appSettings")
+    if not isinstance(fa, dict):
+        return
+    prefs = user_ctx.setdefault("preferences", {})
+    if not isinstance(prefs, dict):
+        user_ctx["preferences"] = {}
+        prefs = user_ctx["preferences"]
+    app = prefs.setdefault("appSettings", {})
+    if not isinstance(app, dict):
+        prefs["appSettings"] = {}
+        app = prefs["appSettings"]
+    for key in ("letterTemplateAutoPick", "letterTemplateSelection"):
+        if key in fa:
+            app[key] = fa[key]
+
+
+def _template_preference_cache_fragment(user_ctx: Optional[Dict[str, Any]]) -> str:
+    """Stable string so result cache differentiates manual vs profile-based template."""
+    if not isinstance(user_ctx, dict):
+        return "auto"
+    prefs = user_ctx.get("preferences")
+    if not isinstance(prefs, dict):
+        return "auto"
+    app = prefs.get("appSettings")
+    if not isinstance(app, dict):
+        return "auto"
+    return letter_template_cache_stamp(app)
+
+
+def _ordered_unique_placeholders_from_template(template_content: str) -> list[str]:
+    """<<tokens>> in file order (unique). Drives LLM instructions so we do not ask for unused fields."""
+    found = re.findall(r"<<([^>]+)>>", template_content)
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in found:
+        t = raw.strip()
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
 
 
 def _build_result_cache_key(payload: Dict[str, Any]) -> str:
@@ -212,6 +274,8 @@ def _build_result_cache_key(payload: Dict[str, Any]) -> str:
 
 
 def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return None
     redis_key = f"cache:{cache_key}"
     cached = _redis_get_json(redis_key)
     if cached:
@@ -227,6 +291,8 @@ def _get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
 
 
 def _set_cached_result(cache_key: str, value: Dict[str, Any]) -> None:
+    if settings.DISABLE_COVER_LETTER_CACHING:
+        return
     if _is_error_result(value):
         return
     redis_key = f"cache:{cache_key}"
@@ -544,6 +610,9 @@ def get_job_info(
     is_plain_text: bool = False,
     current_user: Optional[UserResponse] = None,
     timing: Optional[GenerationTiming] = None,
+    letter_template_name: Optional[str] = None,
+    letter_template_index: Optional[Any] = None,
+    letter_template_auto_pick: Optional[bool] = None,
 ):
     """
     Generate cover letter based on job information using specified LLM.
@@ -740,6 +809,7 @@ def get_job_info(
     selected_profile = None
     profile_source = "user_custom"
     user_ctx: Optional[Dict[str, Any]] = _user_to_cache_payload(current_user) if current_user else None
+    user_ctx_from_profile_cache = False
 
     # Require user_id or user_email to access personality profiles
     if not user_id and not user_email:
@@ -752,6 +822,8 @@ def get_job_info(
     try:
         if not user_ctx:
             user_ctx = _get_cached_user_profile(user_id=user_id, user_email=user_email)
+            if user_ctx:
+                user_ctx_from_profile_cache = True
 
         if not user_ctx and user_id:
             try:
@@ -780,6 +852,20 @@ def get_job_info(
 
         if not user_ctx:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        if user_ctx_from_profile_cache:
+            merge_uid = user_ctx.get("id") if isinstance(user_ctx, dict) else None
+            if merge_uid:
+                try:
+                    _merge_fresh_letter_template_prefs(
+                        user_ctx, get_user_by_id(str(merge_uid))
+                    )
+                except Exception as merge_exc:
+                    logger.warning(
+                        "Could not refresh letter template prefs from DB: %s",
+                        merge_exc,
+                    )
+
         _set_cached_user_profile(user_id=user_id, user_email=user_email, payload=user_ctx)
 
         # Get user's custom personality profiles
@@ -895,14 +981,63 @@ Apply this personality throughout the entire cover letter. This instruction take
         f"Personality instruction prepared ({len(critical_instructions)} chars): {selected_profile[:100]}..."
     )
 
-    # Build template structure instruction - align letter layout with template (pinned: set USE_TEMPLATE_IN_PROMPT=false to revert)
+    # Build template structure instruction - user-selected file vs profile→category→random
     template_instruction = ""
-    if settings.USE_TEMPLATE_IN_PROMPT:
-        template_content = get_template_for_profile(matched_profile_name or tone)
+    _prefs_for_template = (
+        user_ctx.get("preferences") if isinstance(user_ctx, dict) else None
+    )
+    _app_for_template = (
+        _prefs_for_template.get("appSettings")
+        if isinstance(_prefs_for_template, dict)
+        else None
+    )
+    if not isinstance(_app_for_template, dict):
+        _app_for_template = {}
+    _app_for_template = coalesce_letter_template_app_settings(_app_for_template)
+    _app_for_template = merge_request_letter_template_prefs(
+        _app_for_template,
+        letter_template_name=letter_template_name,
+        letter_template_index=letter_template_index,
+        letter_template_auto_pick=letter_template_auto_pick,
+    )
+    logger.info(
+        "Letter template prefs for this request: manual_active=%s letterTemplateAutoPick=%s "
+        "letterTemplateSelection=%s request_name=%r request_index=%r",
+        manual_letter_template_selection_active(_app_for_template),
+        _app_for_template.get("letterTemplateAutoPick"),
+        _app_for_template.get("letterTemplateSelection"),
+        letter_template_name,
+        letter_template_index,
+    )
+    _include_file_template = use_file_template_in_prompt(
+        _app_for_template, settings.USE_TEMPLATE_IN_PROMPT
+    )
+    if _include_file_template:
+        template_content = resolve_cover_letter_template_for_generation(
+            profile_name=matched_profile_name or tone,
+            app_settings=_app_for_template,
+        )
         if template_content:
+            ph = _ordered_unique_placeholders_from_template(template_content)
+            ph_line = (
+                ", ".join(f"<<{t}>>" for t in ph)
+                if ph
+                else "(no <<placeholders>> detected — keep literal lines as-is)"
+            )
+            body_para_note = ""
+            if any("body paragraph" in t.lower() for t in ph):
+                body_para_note = (
+                    " Each <<body paragraph>> line in the template becomes one body paragraph "
+                    "(use the template's blank lines between them)."
+                )
             template_instruction = f"""
 === TEMPLATE STRUCTURE - MATCH LINE BREAKS EXACTLY ===
 Your "content" output MUST follow this template line-for-line so paragraph and line breaks are consistent.
+
+LAYOUT OVERRIDES (highest priority — conflicts with default cover-letter header rules):
+- Do NOT add sender phone, email, street address, or city/state/zip lines unless the template below contains <<placeholders>> for those fields on their own lines.
+- Do NOT prepend a contact block or letterhead above the first line of the template.
+- Replace only placeholders that appear in the template; the JSON input may include address/phone for use inside body text if relevant, but not for extra header lines.
 
 RULES:
 - Each non-blank line in the template = one line in your content (use one newline (\\n) after it before the next line).
@@ -914,12 +1049,16 @@ TEMPLATE (copy its structure; replace placeholders with real data):
 {template_content}
 ---
 
-Placeholders: <<date>>, <<name>>, <<phone>>, <<email>>, <<address>>, <<city, state, zip>>, <<hiring manager>>, <<company name>>, <<company address>>, <<position title>>, <<salutation>>, <<body paragraph>> (repeat for each body paragraph), <<complimentary close>> — replace with actual resume/job data. Generate the right number of <<body paragraph>> blocks.
+Placeholders present in this template (replace with resume/job data): {ph_line}.{body_para_note}
 === END TEMPLATE STRUCTURE ===
 """
-            logger.info("Template structure instruction added to prompt (USE_TEMPLATE_IN_PROMPT=true)")
-    if not template_instruction and not settings.USE_TEMPLATE_IN_PROMPT:
-        logger.debug("Template omitted from prompt (USE_TEMPLATE_IN_PROMPT=false)")
+            logger.info(
+                "Template structure instruction added (use_file_template_in_prompt=True, "
+                "USE_TEMPLATE_IN_PROMPT=%s)",
+                settings.USE_TEMPLATE_IN_PROMPT,
+            )
+    if not template_instruction and not _include_file_template:
+        logger.debug("Template omitted from prompt (no file template in use)")
     critical_instructions = critical_instructions + template_instruction
 
     # Typography baseline: when user selects a non-default font, pass as baseline for body; LLM may vary for lists/tables
@@ -1034,11 +1173,13 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             "address": address or "",
             "phone_number": phone_number or "",
             "use_template_in_prompt": bool(settings.USE_TEMPLATE_IN_PROMPT),
+            "use_file_template_in_prompt": bool(_include_file_template),
             "use_docx_components": bool(getattr(settings, "USE_DOCX_COMPONENTS", False)),
             "gpt_model": gpt_model,
             "claude_model": claude_model,
             "xai_model": xai_model,
             "ollama_model": ollama_model,
+            "template_pref": _template_preference_cache_fragment(user_ctx),
         }
     )
     cached_result = _get_cached_result(result_cache_key)
