@@ -10,6 +10,76 @@ from fastapi import HTTPException, status
 logger = logging.getLogger(__name__)
 
 
+def apply_letter_template_app_settings_aliases(app_settings: dict) -> None:
+    """
+    Mutate app_settings: copy snake_case letter prefs to camelCase when camel keys are absent.
+    PUT handlers only checked camelCase keys; clients often send snake_case for these two.
+    """
+    if not isinstance(app_settings, dict):
+        return
+    if "letterTemplateAutoPick" not in app_settings and "letter_template_auto_pick" in app_settings:
+        app_settings["letterTemplateAutoPick"] = app_settings["letter_template_auto_pick"]
+    if "letterTemplateSelection" not in app_settings and "letter_template_selection" in app_settings:
+        app_settings["letterTemplateSelection"] = app_settings["letter_template_selection"]
+
+
+def coerce_letter_template_auto_pick_for_update(raw: Any) -> bool:
+    """
+    JSON often sends booleans as strings or 0/1. Used only when letterTemplateAutoPick is present.
+    """
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        s = raw.strip().lower()
+        if s in ("true", "1", "yes"):
+            return True
+        if s in ("false", "0", "no", ""):
+            return False
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        if raw == 1:
+            return True
+        if raw == 0:
+            return False
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="letterTemplateAutoPick must be a boolean (or common JSON equivalents: true/false, \"true\"/\"false\", 1/0).",
+    )
+
+
+def _coerce_selection_name_index_strings(raw: dict) -> Tuple[str, str]:
+    """Allow index as int (e.g. JSON number) — strict str-only caused silent 422 and no DB write."""
+    name_raw = raw.get("name")
+    index_raw = raw.get("index")
+    if name_raw is None or index_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="letterTemplateSelection must include name and index.",
+        )
+    name = str(name_raw).strip()
+    if isinstance(index_raw, str):
+        index = index_raw.strip()
+    elif isinstance(index_raw, bool):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="letterTemplateSelection.index must be a string or number, not a boolean.",
+        )
+    elif isinstance(index_raw, float):
+        if not index_raw.is_integer():
+            index = str(index_raw).strip()
+        else:
+            index = str(int(index_raw))
+    elif isinstance(index_raw, int):
+        index = str(index_raw)
+    else:
+        index = str(index_raw).strip()
+    if not name or not index:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="letterTemplateSelection.name and letterTemplateSelection.index must be non-empty after trim.",
+        )
+    return name, index
+
+
 def log_letter_template_prefs_save_incoming(
     user_id: str, app_settings: Any, *, source: str = "update_user"
 ) -> None:
@@ -56,10 +126,9 @@ def log_letter_template_prefs_save_incoming(
         related,
     )
     if auto_k == "letter_template_auto_pick" or sel_k == "letter_template_selection":
-        logger.warning(
-            "[%s] letter template save: user_id=%s client used snake_case field names under appSettings; "
-            "persistence only reads camelCase (letterTemplateAutoPick / letterTemplateSelection). "
-            "Either send camelCase or extend the server to map snake_case.",
+        logger.info(
+            "[%s] letter template save: user_id=%s snake_case letter prefs present under appSettings; "
+            "server maps them to camelCase before persist.",
             source,
             user_id,
         )
@@ -112,20 +181,7 @@ def normalize_letter_template_selection_for_storage(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="letterTemplateSelection must be an object with string name and index, or null.",
         )
-    name = raw.get("name")
-    index = raw.get("index")
-    if not isinstance(name, str) or not isinstance(index, str):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="letterTemplateSelection.name and letterTemplateSelection.index must be strings.",
-        )
-    name = name.strip()
-    index = index.strip()
-    if not name or not index:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="letterTemplateSelection.name and letterTemplateSelection.index must be non-empty after trim.",
-        )
+    name, index = _coerce_selection_name_index_strings(raw)
     try:
         from app.services.letter_template_catalog import list_letter_templates_from_disk
 
