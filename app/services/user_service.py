@@ -29,6 +29,8 @@ from app.utils.user_helpers import (
     USERS_COLLECTION,
 )
 from app.utils.letter_template_selection import (
+    apply_letter_template_app_settings_aliases,
+    coerce_letter_template_auto_pick_for_update,
     log_letter_template_prefs_save_incoming,
     log_letter_template_prefs_save_skipped_selection_due_to_auto,
     log_letter_template_prefs_save_update_doc,
@@ -582,6 +584,14 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     user_id, app_settings, source="user_service.update_user"
                 )
                 if isinstance(app_settings, dict):
+                    app_settings = dict(app_settings)
+                    apply_letter_template_app_settings_aliases(app_settings)
+                    if "letterTemplateAutoPick" in app_settings:
+                        app_settings["letterTemplateAutoPick"] = (
+                            coerce_letter_template_auto_pick_for_update(
+                                app_settings["letterTemplateAutoPick"]
+                            )
+                        )
                     # Update printProperties if present
                     if "printProperties" in app_settings:
                         print_props = app_settings["printProperties"]
@@ -670,11 +680,6 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     # Letter layout: AI pick vs manual template (see LETTER_TEMPLATE_SELECTION_SERVER_IMPLEMENTATION.md)
                     if "letterTemplateAutoPick" in app_settings:
                         raw_auto = app_settings["letterTemplateAutoPick"]
-                        if not isinstance(raw_auto, bool):
-                            raise HTTPException(
-                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail="letterTemplateAutoPick must be a boolean.",
-                            )
                         update_doc["preferences.appSettings.letterTemplateAutoPick"] = (
                             raw_auto
                         )
