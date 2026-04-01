@@ -106,6 +106,7 @@ try:
         sms,
         email,
         integration,
+        letter_templates,
     )
     app.include_router(job_url.router)
     app.include_router(llm_config.router)
@@ -118,6 +119,7 @@ try:
     app.include_router(sms.router)
     app.include_router(email.router)
     app.include_router(integration.router)
+    app.include_router(letter_templates.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 
