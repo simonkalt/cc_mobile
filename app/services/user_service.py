@@ -9,7 +9,7 @@ import base64
 import hmac
 import hashlib
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 from bson import ObjectId
 from fastapi import HTTPException, status
 
@@ -27,6 +27,12 @@ from app.utils.user_helpers import (
     user_doc_to_response,
     normalize_personality_profiles,
     USERS_COLLECTION,
+)
+from app.utils.letter_template_selection import (
+    log_letter_template_prefs_save_incoming,
+    log_letter_template_prefs_save_skipped_selection_due_to_auto,
+    log_letter_template_prefs_save_update_doc,
+    normalize_letter_template_selection_for_storage,
 )
 
 logger = logging.getLogger(__name__)
@@ -207,7 +213,9 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             "personalityProfiles": personality_profiles,
             "selectedModel": None,
             "lastResumeUsed": None,
-            "last_personality_profile_used": None
+            "last_personality_profile_used": None,
+            "letterTemplateAutoPick": True,
+            "letterTemplateSelection": None,
         },
         "formDefaults": {
             "companyName": "",
@@ -553,9 +561,26 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
     if updates.preferences is not None:
         # Handle preferences update - support nested structure
         if isinstance(updates.preferences, dict):
+            if "appSettings" not in updates.preferences:
+                _mis = [
+                    k
+                    for k in updates.preferences.keys()
+                    if isinstance(k, str)
+                    and ("letter" in k.lower() or "template" in k.lower())
+                ]
+                if _mis:
+                    logger.warning(
+                        "PUT user %s: letter/template keys under preferences root (expected nested "
+                        "preferences.appSettings): %s",
+                        user_id,
+                        _mis,
+                    )
             # Check if this is a partial update (has appSettings nested structure)
             if "appSettings" in updates.preferences:
                 app_settings = updates.preferences.get("appSettings", {})
+                log_letter_template_prefs_save_incoming(
+                    user_id, app_settings, source="user_service.update_user"
+                )
                 if isinstance(app_settings, dict):
                     # Update printProperties if present
                     if "printProperties" in app_settings:
@@ -623,12 +648,70 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                     # Update selectedModel
                     if "selectedModel" in app_settings:
                         update_doc["preferences.appSettings.selectedModel"] = app_settings["selectedModel"]
-                    # Update lastResumeUsed
+                    # Update lastResumeUsed (accept camelCase and legacy snake_case keys)
+                    last_resume_value_set = False
                     if "lastResumeUsed" in app_settings:
                         update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["lastResumeUsed"]
+                        last_resume_value_set = True
+                    elif "last_resume_used" in app_settings:
+                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["last_resume_used"]
+                        last_resume_value_set = True
+                    elif "last_resume" in app_settings:
+                        update_doc["preferences.appSettings.lastResumeUsed"] = app_settings["last_resume"]
+                        last_resume_value_set = True
+                    if last_resume_value_set:
+                        logger.info(
+                            "Updated lastResumeUsed for user %s",
+                            user_id,
+                        )
                     # Update last_personality_profile_used
                     if "last_personality_profile_used" in app_settings:
                         update_doc["preferences.appSettings.last_personality_profile_used"] = app_settings["last_personality_profile_used"]
+                    # Letter layout: AI pick vs manual template (see LETTER_TEMPLATE_SELECTION_SERVER_IMPLEMENTATION.md)
+                    if "letterTemplateAutoPick" in app_settings:
+                        raw_auto = app_settings["letterTemplateAutoPick"]
+                        if not isinstance(raw_auto, bool):
+                            raise HTTPException(
+                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="letterTemplateAutoPick must be a boolean.",
+                            )
+                        update_doc["preferences.appSettings.letterTemplateAutoPick"] = (
+                            raw_auto
+                        )
+                        if raw_auto is True:
+                            update_doc[
+                                "preferences.appSettings.letterTemplateSelection"
+                            ] = None
+                            logger.info(
+                                "Set letterTemplateAutoPick=true for user %s; cleared letterTemplateSelection",
+                                user_id,
+                            )
+                    if "letterTemplateSelection" in app_settings and not (
+                        app_settings.get("letterTemplateAutoPick") is True
+                    ):
+                        normalized = normalize_letter_template_selection_for_storage(
+                            app_settings["letterTemplateSelection"]
+                        )
+                        update_doc["preferences.appSettings.letterTemplateSelection"] = (
+                            normalized
+                        )
+                        logger.info(
+                            "Updated letterTemplateSelection for user %s: %s",
+                            user_id,
+                            normalized,
+                        )
+                    log_letter_template_prefs_save_skipped_selection_due_to_auto(
+                        user_id,
+                        app_settings,
+                        source="user_service.update_user",
+                    )
+                else:
+                    logger.warning(
+                        "PUT user %s: preferences.appSettings is not a dict (type=%s); "
+                        "skipping nested appSettings updates including letter templates",
+                        user_id,
+                        type(app_settings).__name__,
+                    )
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]
@@ -641,7 +724,11 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         update_doc["avatarUrl"] = updates.avatarUrl
     if updates.last_llm_used is not None:
         update_doc["last_llm_used"] = updates.last_llm_used
-    
+
+    log_letter_template_prefs_save_update_doc(
+        user_id, update_doc, source="user_service.update_user"
+    )
+
     try:
         result = collection.update_one(
             {"_id": user_id_obj},

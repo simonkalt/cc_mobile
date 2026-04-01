@@ -1,7 +1,7 @@
 """
 Cover letter related Pydantic models
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, Any
 
 
@@ -15,6 +15,8 @@ class ChatRequest(BaseModel):
 
 
 class JobInfoRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     llm: str
     date_input: str
     company_name: str
@@ -30,10 +32,16 @@ class JobInfoRequest(BaseModel):
     user_email: Optional[str] = None  # Optional user email to access custom personality profiles
     client_generate_start_ms: Optional[int] = None  # Optional: epoch ms from frontend click on "Generate Letter"
     print_properties: Optional[Dict[str, Any]] = None  # Optional: margins (inches), fontFamily, fontSize, lineHeight, pageSize; applied when building .docx
+    # Optional: use this layout for this generation (overrides DB if present). Matches GET /api/letter-templates name + index.
+    letter_template_name: Optional[str] = Field(None, alias="letterTemplateName")
+    letter_template_index: Optional[Any] = Field(None, alias="letterTemplateIndex")
+    letter_template_auto_pick: Optional[bool] = Field(None, alias="letterTemplateAutoPick")
 
 
 class CoverLetterWithTextResumeRequest(BaseModel):
     """Request model for generating cover letter with pasted resume text"""
+    model_config = ConfigDict(populate_by_name=True)
+
     llm: str
     date_input: str
     company_name: str
@@ -49,6 +57,9 @@ class CoverLetterWithTextResumeRequest(BaseModel):
     user_email: Optional[str] = None  # Optional user email to access custom personality profiles
     client_generate_start_ms: Optional[int] = None  # Optional: epoch ms from frontend click on "Generate Letter"
     print_properties: Optional[Dict[str, Any]] = None  # Optional: margins (inches), fontFamily, fontSize, lineHeight, pageSize; applied when building .docx
+    letter_template_name: Optional[str] = Field(None, alias="letterTemplateName")
+    letter_template_index: Optional[Any] = Field(None, alias="letterTemplateIndex")
+    letter_template_auto_pick: Optional[bool] = Field(None, alias="letterTemplateAutoPick")
 
 
 class SaveCoverLetterRequest(BaseModel):

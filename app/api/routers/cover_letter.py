@@ -271,7 +271,7 @@ async def handle_job_info(
         f"Received job info request for LLM: {request.llm}, Company: {request.company_name}"
     )
     timing = GenerationTiming(
-        enabled=settings.ENABLE_GENERATION_TIMING_CHART,
+        enabled=settings.LOG_TIMING,
         flow_name="cover_letter:/api/job-info",
         client_start_ms=request.client_generate_start_ms,
     )
@@ -295,6 +295,9 @@ async def handle_job_info(
             user_email=request.user_email,
             current_user=current_user,
             timing=timing,
+            letter_template_name=request.letter_template_name,
+            letter_template_index=request.letter_template_index,
+            letter_template_auto_pick=request.letter_template_auto_pick,
         )
         timing.checkpoint("get_job_info_done")
         logger.info("get_job_info() completed for /api/job-info")
@@ -309,7 +312,7 @@ async def handle_job_info(
         payload.pop("markdown", None)
         _write_client_payload_log(payload)
         timing.checkpoint("response_ready")
-        if settings.ENABLE_GENERATION_TIMING_CHART:
+        if settings.LOG_TIMING:
             logger.info("\n%s", timing.chart())
         logger.info("handle_job_info completed, returning payload")
         return payload
@@ -347,7 +350,7 @@ async def generate_cover_letter_with_text_resume(
         f"Received cover letter request with text resume for LLM: {request.llm}, Company: {request.company_name}"
     )
     timing = GenerationTiming(
-        enabled=settings.ENABLE_GENERATION_TIMING_CHART,
+        enabled=settings.LOG_TIMING,
         flow_name="cover_letter:/api/cover-letter/generate-with-text-resume",
         client_start_ms=request.client_generate_start_ms,
     )
@@ -375,6 +378,9 @@ async def generate_cover_letter_with_text_resume(
             is_plain_text=True,  # Skip file processing for pasted text
             current_user=current_user,
             timing=timing,
+            letter_template_name=request.letter_template_name,
+            letter_template_index=request.letter_template_index,
+            letter_template_auto_pick=request.letter_template_auto_pick,
         )
         timing.checkpoint("get_job_info_done")
         logger.info("get_job_info() completed for /api/cover-letter/generate-with-text-resume")
@@ -388,7 +394,7 @@ async def generate_cover_letter_with_text_resume(
         payload.pop("markdown", None)
         _write_client_payload_log(payload)
         timing.checkpoint("response_ready")
-        if settings.ENABLE_GENERATION_TIMING_CHART:
+        if settings.LOG_TIMING:
             logger.info("\n%s", timing.chart())
         logger.info("generate_cover_letter_with_text_resume completed, returning payload")
         return payload
@@ -482,7 +488,7 @@ async def handle_chat(
             logger.info("Detected job info request in /chat endpoint, routing to job-info handler")
             client_start_ms = body.get("client_generate_start_ms")
             timing = GenerationTiming(
-                enabled=settings.ENABLE_GENERATION_TIMING_CHART,
+                enabled=settings.LOG_TIMING,
                 flow_name="cover_letter:/api/chat(job-info)",
                 client_start_ms=client_start_ms if isinstance(client_start_ms, int) else None,
             )
@@ -526,6 +532,9 @@ async def handle_chat(
                 user_email=job_request.user_email,
                 current_user=current_user,
                 timing=timing,
+                letter_template_name=job_request.letter_template_name,
+                letter_template_index=job_request.letter_template_index,
+                letter_template_auto_pick=job_request.letter_template_auto_pick,
             )
             timing.checkpoint("get_job_info_done")
             payload = _normalize_generation_response(result, job_request)
@@ -536,7 +545,7 @@ async def handle_chat(
             payload.pop("markdown", None)
             _write_client_payload_log(payload)
             timing.checkpoint("response_ready")
-            if settings.ENABLE_GENERATION_TIMING_CHART:
+            if settings.LOG_TIMING:
                 logger.info("\n%s", timing.chart())
             return payload
         else:

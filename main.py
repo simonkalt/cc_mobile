@@ -16,6 +16,11 @@ import base64
 import re
 import warnings
 from dotenv import load_dotenv
+
+# Load .env / .secrets early so os.getenv (e.g. GOOGLE_ANALYTICS_TAG) works for root routes
+_main_root = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_main_root, ".env"))
+load_dotenv(os.path.join(_main_root, ".secrets"), override=True)
 from openai import OpenAI
 import anthropic
 
@@ -350,6 +355,7 @@ try:
         email,
         subscriptions,
         linkedin,
+        letter_templates,
     )
 
     app.include_router(job_url.router)
@@ -364,6 +370,7 @@ try:
     app.include_router(email.router)
     app.include_router(subscriptions.router)
     app.include_router(linkedin.router)
+    app.include_router(letter_templates.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:
@@ -1101,17 +1108,58 @@ except ImportError:
 # The original function definition (~690 lines) has been moved to app/services/cover_letter_service.py
 
 
+def _inject_gtag_into_index_html(html: str) -> str:
+    """If GOOGLE_ANALYTICS_TAG is set (GA4 id like G-XXXXXXXX), inject gtag before </head>."""
+    gtag = (os.getenv("GOOGLE_ANALYTICS_TAG") or "").strip()
+    if not gtag or not re.fullmatch(r"G-[A-Za-z0-9]+", gtag):
+        return html
+    from urllib.parse import quote
+
+    id_url = quote(gtag, safe="")
+    # Escape for use inside gtag('config', '...')
+    id_js = gtag.replace("\\", "\\\\").replace("'", "\\'")
+    snippet = (
+        f'<script async src="https://www.googletagmanager.com/gtag/js?id={id_url}"></script>\n'
+        "<script>\n"
+        "  window.dataLayer = window.dataLayer || [];\n"
+        "  function gtag(){dataLayer.push(arguments);}\n"
+        "  gtag('js', new Date());\n"
+        f"  gtag('config', '{id_js}');\n"
+        "</script>\n"
+    )
+    if "</head>" not in html:
+        return html
+    return html.replace("</head>", snippet + "  </head>", 1)
+
+
 # Serve webpage at root (/) so root URL shows website/index.html
 @app.get("/")
 def read_root():
     project_root = os.path.dirname(os.path.abspath(__file__))
     index_path = os.path.join(project_root, "website", "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path, media_type="text/html")
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
+        html = _inject_gtag_into_index_html(html)
+        return HTMLResponse(content=html, media_type="text/html")
     # Fallback if website/index.html is missing
     return JSONResponse(
         content={"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
     )
+
+
+@app.get("/subscribed")
+@app.get("/subscribed/")
+def subscribed_landing_page():
+    """
+    Post-checkout thank-you page (also mounted under /website/subscribed/).
+    Query string (e.g. ?user_id=...&api_base=...) is preserved by the client; this only serves HTML.
+    """
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "subscribed", "index.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Subscribed page not found"})
 
 
 @app.get("/api/health")

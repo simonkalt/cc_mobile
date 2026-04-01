@@ -20,6 +20,9 @@ class Settings:
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
 
+    # Google Analytics (GA4) — injected into website/index.html when serving /
+    GOOGLE_ANALYTICS_TAG: Optional[str] = os.getenv("GOOGLE_ANALYTICS_TAG")
+
     # Third-party / server-to-server integration (set in .secrets, not committed)
     SERVICE_AUTH_KEY: Optional[str] = os.getenv("SERVICE_AUTH_KEY")
     INTEGRATION_AUTH_ENDPOINTS_FILE: str = os.getenv(
@@ -161,7 +164,16 @@ class Settings:
     USE_DOCX_COMPONENTS: bool = os.getenv("USE_DOCX_COMPONENTS", "false").lower() == "true"
     LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8124"))
     ENFORCE_STRONG_PASSWORDS: bool = os.getenv("ENFORCE_STRONG_PASSWORDS", "false").lower() == "true"
-    ENABLE_GENERATION_TIMING_CHART: bool = os.getenv("ENABLE_GENERATION_TIMING_CHART", "true").lower() == "true"
+    # ASCII timing chart in logs for cover-letter routes. Default off.
+    # Only LOG_TIMING is honored (ENABLE_GENERATION_TIMING_CHART is ignored to avoid stale env turning logs on).
+    _LOG_TIMING_ENV = (os.getenv("LOG_TIMING") or "").strip().lower()
+    LOG_TIMING: bool = _LOG_TIMING_ENV in ("1", "true", "yes")
+
+    # When true: skip Redis/local caches for cover-letter generation (result, resume text, user profile)
+    # and skip on-disk PDF cache used by generate-pdf / print-preview (avoids stale formatting while testing).
+    DISABLE_COVER_LETTER_CACHING: bool = (
+        os.getenv("DISABLE_COVER_LETTER_CACHING", "false").lower() == "true"
+    )
 
 
 # Global settings instance
