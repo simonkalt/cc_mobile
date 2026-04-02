@@ -24,6 +24,7 @@ from app.models.subscription import (
 from app.services.subscription_service import (
     get_user_subscription,
     create_subscription,
+    finalize_subscription_from_stripe,
     upgrade_subscription,
     cancel_subscription,
     create_payment_intent,
@@ -543,13 +544,37 @@ def subscribe(request: SubscribeRequest, current_user: UserResponse = Depends(ge
     Returns:
         Subscription information
     """
+    logger.info(
+        "Subscribe finalize start: user_id=%s price_id=%s subscription_id=%s payment_intent_id=%s payment_method_id=%s trial_days=%s",
+        request.user_id,
+        request.price_id,
+        request.subscription_id,
+        request.payment_intent_id,
+        request.payment_method_id,
+        request.trial_days,
+    )
     try:
-        subscription = create_subscription(
-            user_id=request.user_id,
-            price_id=request.price_id,
-            payment_intent_id=request.payment_intent_id,
-            payment_method_id=request.payment_method_id,
-            trial_days=request.trial_days,
+        if request.subscription_id:
+            subscription = finalize_subscription_from_stripe(
+                user_id=request.user_id,
+                subscription_id=request.subscription_id,
+                price_id=request.price_id,
+            )
+        else:
+            # Backward-compatible fallback for older clients still using legacy finalize.
+            subscription = create_subscription(
+                user_id=request.user_id,
+                price_id=request.price_id,
+                payment_intent_id=request.payment_intent_id,
+                payment_method_id=request.payment_method_id,
+                trial_days=request.trial_days,
+            )
+
+        logger.info(
+            "Subscribe create_subscription returned: user_id=%s stripe_subscription_id=%s stripe_status=%s",
+            request.user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
         )
 
         # Get updated subscription info
@@ -565,6 +590,15 @@ def subscribe(request: SubscribeRequest, current_user: UserResponse = Depends(ge
         except Exception:
             generation_credits = None
             max_credits = None
+
+        logger.info(
+            "Subscribe finalize response: user_id=%s subscriptionId=%s status=%s plan=%s period_end=%s",
+            request.user_id,
+            subscription_info.subscriptionId,
+            subscription_info.subscriptionStatus,
+            subscription_info.subscriptionPlan,
+            subscription_info.subscriptionCurrentPeriodEnd,
+        )
 
         return {
             "subscription_id": subscription.id,
@@ -600,8 +634,24 @@ def upgrade(request: UpgradeRequest, current_user: UserResponse = Depends(get_cu
             user_id=request.user_id, new_price_id=request.new_price_id
         )
 
+        logger.info(
+            "Subscribe create_subscription returned: user_id=%s stripe_subscription_id=%s stripe_status=%s",
+            request.user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+        )
+
         # Get updated subscription info
         subscription_info = get_user_subscription(request.user_id)
+
+        logger.info(
+            "Subscribe finalize response: user_id=%s subscriptionId=%s status=%s plan=%s period_end=%s",
+            request.user_id,
+            subscription_info.subscriptionId,
+            subscription_info.subscriptionStatus,
+            subscription_info.subscriptionPlan,
+            subscription_info.subscriptionCurrentPeriodEnd,
+        )
 
         return {
             "message": "Subscription upgraded successfully",
@@ -634,8 +684,24 @@ def cancel(request: CancelRequest, current_user: UserResponse = Depends(get_curr
             user_id=request.user_id, cancel_immediately=request.cancel_immediately
         )
 
+        logger.info(
+            "Subscribe create_subscription returned: user_id=%s stripe_subscription_id=%s stripe_status=%s",
+            request.user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+        )
+
         # Get updated subscription info
         subscription_info = get_user_subscription(request.user_id)
+
+        logger.info(
+            "Subscribe finalize response: user_id=%s subscriptionId=%s status=%s plan=%s period_end=%s",
+            request.user_id,
+            subscription_info.subscriptionId,
+            subscription_info.subscriptionStatus,
+            subscription_info.subscriptionPlan,
+            subscription_info.subscriptionCurrentPeriodEnd,
+        )
 
         return {
             "message": "Subscription canceled successfully",
