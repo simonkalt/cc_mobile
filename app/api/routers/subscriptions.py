@@ -4,8 +4,9 @@ Subscription management API routes
 
 import logging
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from app.core.auth import get_current_user
+from app.core.config import settings
 from app.models.user import UserResponse
 
 from app.models.subscription import (
@@ -31,6 +32,7 @@ from app.services.subscription_service import (
     get_payment_intent_status,
     get_subscription_plans,
     get_raw_stripe_products,
+    handle_stripe_webhook_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -717,3 +719,50 @@ def cancel(request: CancelRequest, current_user: UserResponse = Depends(get_curr
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error canceling subscription: {str(e)}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Stripe Webhook
+# ---------------------------------------------------------------------------
+
+@router.post("/stripe/webhook", include_in_schema=False)
+async def stripe_webhook(request: Request):
+    """
+    Receive Stripe webhook events and update local DB accordingly.
+
+    Configure in Stripe Dashboard -> Developers -> Webhooks:
+      URL:    https://your-domain/api/stripe/webhook
+      Events: customer.subscription.created, customer.subscription.updated,
+              customer.subscription.deleted, customer.deleted
+    """
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+    if not webhook_secret:
+        logger.error("STRIPE_WEBHOOK_SECRET not configured; rejecting webhook")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Webhook secret not configured")
+
+    try:
+        import stripe as stripe_mod
+    except ImportError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Stripe library not available")
+
+    try:
+        event = stripe_mod.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except stripe_mod.error.SignatureVerificationError:
+        logger.warning("Stripe webhook signature verification failed")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid signature")
+    except Exception as e:
+        logger.error("Stripe webhook construct_event error: %s", e)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Webhook error: {e}")
+
+    logger.info("Stripe webhook received: %s (id=%s)", event.get("type"), event.get("id"))
+
+    try:
+        result = handle_stripe_webhook_event(dict(event))
+    except Exception as e:
+        logger.error("Error handling webhook event %s: %s", event.get("type"), e)
+        return {"status": "error", "detail": str(e)}
+
+    return {"status": "ok", **result}

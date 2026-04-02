@@ -19,7 +19,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.core.config import settings
 from app.models.user import UserResponse
 from app.services.user_service import get_user_by_id
+from app.db.mongodb import get_collection
+from app.utils.user_helpers import USERS_COLLECTION
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
 
@@ -214,4 +219,59 @@ async def get_current_user(
             detail="User account is inactive",
         )
     return user
+
+
+async def get_current_admin_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict:
+    """
+    Resolve an admin user from a bearer token that carries the admin_verified claim.
+    Returns the raw MongoDB user document (not UserResponse) so callers have full access.
+    """
+    payload = _verify_token(credentials.credentials)
+
+    if not payload.get("admin_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin 2FA verification required",
+        )
+
+    user_id: Optional[str] = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing user ID",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    from bson import ObjectId
+
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        )
+
+    user_doc = collection.find_one({"_id": ObjectId(user_id)})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if not user_doc.get("super_user"):
+        logger.warning("Non-super_user %s attempted admin access", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized for admin access",
+        )
+
+    if not user_doc.get("isActive", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin account is inactive",
+        )
+
+    return user_doc
 

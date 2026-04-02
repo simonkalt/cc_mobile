@@ -224,7 +224,6 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                             customer=stripe_customer_id,
                             status="all",
                             limit=100,
-                            expand=["data.items.data.price.product"],
                         )
                         subs_data = subs.data if hasattr(subs, "data") else []
                         if subs_data:
@@ -244,7 +243,9 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                                     best_sub.id,
                                     getattr(best_sub, "status", None),
                                 )
-                                stripe_sub = best_sub
+                                stripe_sub = stripe_to_use.Subscription.retrieve(
+                                    best_sub.id, expand=["items.data.price.product"],
+                                )
                                 subscription_id = best_sub.id
                     except Exception as choose_exc:
                         logger.warning(
@@ -330,11 +331,45 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                 if update_doc:
                     collection.update_one({"_id": user_id_obj}, {"$set": update_doc})
         except Exception as e:
-            logger.warning(
-                "Could not sync subscription state from Stripe for user %s: %s",
-                user_id,
-                e,
+            err_str = str(e).lower()
+            is_not_found = (
+                "no such" in err_str
+                or "does not exist" in err_str
+                or "resource_missing" in err_str
+                or (hasattr(e, "http_status") and getattr(e, "http_status", 0) == 404)
             )
+            if is_not_found:
+                logger.warning(
+                    "Stripe resource not found for user %s (sub=%s, cust=%s). "
+                    "Resetting local subscription to free. Error: %s",
+                    user_id, subscription_id, user.get("stripeCustomerId"), e,
+                )
+                reset_doc = {
+                    "subscriptionId": None,
+                    "subscriptionStatus": "free",
+                    "subscriptionPlan": "free",
+                    "priceId": None,
+                    "subscriptionProductId": None,
+                    "subscriptionCurrentPeriodEnd": None,
+                    "cancelAtPeriodEnd": False,
+                    "canceledAt": None,
+                    "dateUpdated": datetime.utcnow(),
+                }
+                collection.update_one({"_id": user_id_obj}, {"$set": reset_doc})
+                subscription_status = "free"
+                subscription_plan = "free"
+                subscription_id = None
+                price_id = None
+                product_id = None
+                current_period_end = None
+                cancel_at_period_end = False
+                canceled_at = None
+            else:
+                logger.warning(
+                    "Could not sync subscription state from Stripe for user %s: %s",
+                    user_id,
+                    e,
+                )
     
     # If we still don't have product_id stored but have a subscription, try to get it from Stripe
     if not product_id and subscription_id and STRIPE_AVAILABLE:
@@ -2045,5 +2080,127 @@ def get_subscription_plans(force_refresh: bool = False) -> dict:
     result = {"plans": plans}
     _stripe_plans_cache = result
     _stripe_plans_cache_time = datetime.now()
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Stripe webhook handling
+# ---------------------------------------------------------------------------
+
+def _user_id_for_stripe_customer(customer_id: str) -> Optional[str]:
+    """Look up our user _id by stripeCustomerId."""
+    if not is_connected():
+        return None
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        return None
+    doc = collection.find_one({"stripeCustomerId": customer_id}, {"_id": 1})
+    return str(doc["_id"]) if doc else None
+
+
+def handle_stripe_webhook_event(event: dict) -> dict:
+    """
+    Process a verified Stripe webhook event and update the local DB.
+
+    Returns a dict with a summary of what happened.
+    """
+    event_type = event.get("type", "")
+    data_obj = (event.get("data") or {}).get("object") or {}
+    result = {"event": event_type, "action": "ignored"}
+
+    # --- subscription events ---
+    if event_type.startswith("customer.subscription."):
+        sub_id = data_obj.get("id")
+        customer_id = data_obj.get("customer")
+        if not customer_id:
+            return result
+
+        user_id = _user_id_for_stripe_customer(customer_id)
+        if not user_id:
+            logger.warning("Webhook %s: no local user for Stripe customer %s", event_type, customer_id)
+            result["action"] = "no_user"
+            return result
+
+        stripe_status = data_obj.get("status", "free")
+        current_period_end_ts = data_obj.get("current_period_end")
+        current_period_end = (
+            datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
+            if current_period_end_ts
+            else None
+        )
+        cancel_at_period_end = bool(data_obj.get("cancel_at_period_end", False))
+        canceled_at_ts = data_obj.get("canceled_at")
+        canceled_at = (
+            datetime.fromtimestamp(canceled_at_ts, tz=timezone.utc)
+            if canceled_at_ts
+            else None
+        )
+
+        price_id = None
+        product_id = None
+        items = (data_obj.get("items") or {}).get("data") or []
+        if items:
+            price_obj = items[0].get("price") or {}
+            price_id = price_obj.get("id")
+            prod = price_obj.get("product")
+            if isinstance(prod, str):
+                product_id = prod
+            elif isinstance(prod, dict):
+                product_id = prod.get("id")
+
+        update_user_subscription(
+            user_id=user_id,
+            subscription_id=sub_id,
+            subscription_status=stripe_status,
+            subscription_plan=price_id or "free",
+            subscription_product_id=product_id,
+            price_id=price_id,
+            current_period_end=current_period_end,
+            cancel_at_period_end=cancel_at_period_end,
+            canceled_at=canceled_at,
+        )
+
+        logger.info(
+            "Webhook %s: updated user %s -> status=%s sub=%s",
+            event_type, user_id, stripe_status, sub_id,
+        )
+        result["action"] = "updated"
+        result["user_id"] = user_id
+        result["status"] = stripe_status
+        return result
+
+    # --- customer.deleted ---
+    if event_type == "customer.deleted":
+        customer_id = data_obj.get("id")
+        if not customer_id:
+            return result
+
+        user_id = _user_id_for_stripe_customer(customer_id)
+        if not user_id:
+            result["action"] = "no_user"
+            return result
+
+        collection = get_collection(USERS_COLLECTION)
+        if collection:
+            collection.update_one(
+                {"stripeCustomerId": customer_id},
+                {"$set": {
+                    "subscriptionId": None,
+                    "subscriptionStatus": "free",
+                    "subscriptionPlan": "free",
+                    "priceId": None,
+                    "subscriptionProductId": None,
+                    "subscriptionCurrentPeriodEnd": None,
+                    "cancelAtPeriodEnd": False,
+                    "canceledAt": None,
+                    "stripeCustomerId": None,
+                    "dateUpdated": datetime.utcnow(),
+                }},
+            )
+        logger.info("Webhook customer.deleted: reset user %s (customer %s)", user_id, customer_id)
+        result["action"] = "reset_to_free"
+        result["user_id"] = user_id
+        return result
 
     return result
