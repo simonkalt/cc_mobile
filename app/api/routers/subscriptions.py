@@ -24,6 +24,7 @@ from app.models.subscription import (
 from app.services.subscription_service import (
     get_user_subscription,
     create_subscription,
+    finalize_subscription_from_stripe,
     upgrade_subscription,
     cancel_subscription,
     create_payment_intent,
@@ -544,21 +545,30 @@ def subscribe(request: SubscribeRequest, current_user: UserResponse = Depends(ge
         Subscription information
     """
     logger.info(
-        "Subscribe finalize start: user_id=%s price_id=%s payment_intent_id=%s payment_method_id=%s trial_days=%s",
+        "Subscribe finalize start: user_id=%s price_id=%s subscription_id=%s payment_intent_id=%s payment_method_id=%s trial_days=%s",
         request.user_id,
         request.price_id,
+        request.subscription_id,
         request.payment_intent_id,
         request.payment_method_id,
         request.trial_days,
     )
     try:
-        subscription = create_subscription(
-            user_id=request.user_id,
-            price_id=request.price_id,
-            payment_intent_id=request.payment_intent_id,
-            payment_method_id=request.payment_method_id,
-            trial_days=request.trial_days,
-        )
+        if request.subscription_id:
+            subscription = finalize_subscription_from_stripe(
+                user_id=request.user_id,
+                subscription_id=request.subscription_id,
+                price_id=request.price_id,
+            )
+        else:
+            # Backward-compatible fallback for older clients still using legacy finalize.
+            subscription = create_subscription(
+                user_id=request.user_id,
+                price_id=request.price_id,
+                payment_intent_id=request.payment_intent_id,
+                payment_method_id=request.payment_method_id,
+                trial_days=request.trial_days,
+            )
 
         logger.info(
             "Subscribe create_subscription returned: user_id=%s stripe_subscription_id=%s stripe_status=%s",
