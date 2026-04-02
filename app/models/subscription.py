@@ -9,10 +9,13 @@ from datetime import datetime
 class SubscriptionResponse(BaseModel):
     """Subscription information response"""
     subscriptionId: Optional[str] = None
-    subscriptionStatus: str = "free"  # free, active, canceled, past_due, trialing
+    subscriptionStatus: str = "free"  # free or Stripe-native status (active, trialing, incomplete, ...)
     subscriptionPlan: str = "free"  # free, basic, premium, enterprise
     productId: Optional[str] = None  # Stripe Product ID
+    priceId: Optional[str] = None  # Stripe Price ID
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
+    cancelAtPeriodEnd: Optional[bool] = None
+    canceledAt: Optional[datetime] = None
     lastPaymentDate: Optional[datetime] = None
     stripeCustomerId: Optional[str] = None
     generation_credits: int = Field(default=10, ge=0)
@@ -30,12 +33,15 @@ class CreatePaymentIntentResponse(BaseModel):
     client_secret: str
     customer_id: Optional[str] = None
     customer_ephemeral_key_secret: Optional[str] = None
+    subscription_id: Optional[str] = None
+    payment_intent_id: Optional[str] = None
 
 
 class SubscribeRequest(BaseModel):
     """Request to create a new subscription"""
     user_id: str
     price_id: str  # Stripe Price ID (e.g., price_xxx)
+    subscription_id: Optional[str] = None  # Preferred for PaymentSheet finalize flow
     payment_intent_id: Optional[str] = None  # PaymentIntent ID from PaymentSheet
     payment_method_id: Optional[str] = None  # Legacy support - for card payment
     trial_days: Optional[int] = None
