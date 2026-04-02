@@ -23,6 +23,28 @@ from app.models.subscription import SubscriptionResponse
 
 logger = logging.getLogger(__name__)
 
+
+def _metadata_to_plain_dict(metadata_obj: object) -> dict:
+    """Stripe metadata can be StripeObject-like; normalize to plain dict."""
+    if metadata_obj is None:
+        return {}
+    if isinstance(metadata_obj, dict):
+        return dict(metadata_obj)
+    try:
+        # StripeObject supports .to_dict_recursive()
+        to_dict_recursive = getattr(metadata_obj, "to_dict_recursive", None)
+        if callable(to_dict_recursive):
+            raw = to_dict_recursive()
+            if isinstance(raw, dict):
+                return dict(raw)
+    except Exception:
+        pass
+    try:
+        # Last resort for mapping-like objects
+        return dict(metadata_obj)  # type: ignore[arg-type]
+    except Exception:
+        return {}
+
 # Stripe API version - must be consistent across all endpoints
 STRIPE_API_VERSION = "2023-10-16"
 
@@ -355,6 +377,16 @@ def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None)
     Returns:
         Stripe customer ID
     """
+    logger.info(
+        "create_subscription start: user_id=%s price_id=%s payment_intent_id=%s payment_method_id=%s customer_id=%s trial_days=%s",
+        user_id,
+        price_id,
+        payment_intent_id,
+        payment_method_id,
+        customer_id,
+        trial_days,
+    )
+
     # Use _get_stripe_module() to ensure API key is properly configured
     stripe_to_use = _get_stripe_module()
     
@@ -743,7 +775,15 @@ def create_subscription(
         try:
             # Step 1: Retrieve PaymentIntent
             payment_intent = stripe_to_use.PaymentIntent.retrieve(payment_intent_id)
-            logger.debug(f"Retrieved PaymentIntent {payment_intent_id}, status: {payment_intent.status}")
+            logger.info(
+                "create_subscription payment_intent snapshot: id=%s status=%s customer=%s amount=%s currency=%s payment_method=%s",
+                payment_intent_id,
+                getattr(payment_intent, "status", None),
+                getattr(payment_intent, "customer", None),
+                getattr(payment_intent, "amount", None),
+                getattr(payment_intent, "currency", None),
+                getattr(payment_intent, "payment_method", None),
+            )
 
             # Handle different payment intent statuses
             if payment_intent.status == "succeeded":
@@ -956,6 +996,12 @@ def create_subscription(
             logger.warning(f"Could not retrieve product ID from price {price_id}: {e}")
         
         subscription = stripe_to_use.Subscription.create(**subscription_params)
+        logger.info(
+            "create_subscription stripe create returned: user_id=%s subscription_id=%s status=%s",
+            user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+        )
         
         # Note: PaymentIntent is already confirmed by PaymentSheet before this point
         # The subscription creates an invoice with its own PaymentIntent (status: "incomplete")
@@ -1014,7 +1060,18 @@ def create_subscription(
             stripe_customer_id=customer_id,
             current_period_end=current_period_end,
         )
-        
+
+        saved_user = collection.find_one({"_id": user_id_obj}) or {}
+        logger.info(
+            "create_subscription DB after save: user_id=%s subscriptionId=%s subscriptionStatus=%s subscriptionPlan=%s productId=%s periodEnd=%s",
+            user_id,
+            saved_user.get("subscriptionId"),
+            saved_user.get("subscriptionStatus"),
+            saved_user.get("subscriptionPlan"),
+            saved_user.get("subscriptionProductId"),
+            saved_user.get("subscriptionCurrentPeriodEnd"),
+        )
+
         logger.info(f"Created subscription {subscription.id} for user {user_id}")
         return subscription
     except stripe_to_use.error.StripeError as e:
@@ -1235,7 +1292,7 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
 
                 # Apply campaign filter if provided
                 if campaign_filter:
-                    product_metadata = product.metadata or {}
+                    product_metadata = _metadata_to_plain_dict(getattr(product, "metadata", None))
                     # Check if campaign filter matches any metadata value
                     if campaign_filter not in product_metadata.values():
                         # Also check if it's a key
@@ -1342,7 +1399,7 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                             logger.debug(f"Using Stripe features field for product {product.id}: {len(features)} features")
                         elif product.metadata:
                             # Fallback to metadata if native fields are not available
-                            feature_list = product.metadata.get("features")
+                            feature_list = _metadata_to_plain_dict(getattr(product, "metadata", None)).get("features")
                             if feature_list:
                                 # Features might be comma-separated or JSON
                                 try:
@@ -1372,8 +1429,9 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                         # Determine if this is a popular/recommended plan
                         # Check metadata or default annual to popular
                         popular = False
-                        if product.metadata:
-                            popular_str = product.metadata.get("popular", "false").lower()
+                        meta = _metadata_to_plain_dict(getattr(product, "metadata", None))
+                        if meta:
+                            popular_str = str(meta.get("popular", "false")).lower()
                             popular = popular_str in ("true", "1", "yes")
                         elif interval == "year":
                             popular = True  # Default annual to popular
@@ -1518,7 +1576,7 @@ def get_raw_stripe_products(force_refresh: bool = False) -> dict:
                 "images": product.images if hasattr(product, "images") else [],
                 "livemode": product.livemode,
                 "marketing_features": None,
-                "metadata": product.metadata or {},
+                "metadata": _metadata_to_plain_dict(getattr(product, "metadata", None)),
                 "name": product.name,
                 "package_dimensions": getattr(product, "package_dimensions", None),
                 "shippable": getattr(product, "shippable", None),
