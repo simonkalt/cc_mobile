@@ -371,6 +371,9 @@ try:
     app.include_router(subscriptions.router)
     app.include_router(linkedin.router)
     app.include_router(letter_templates.router)
+
+    from app.api.routers import admin
+    app.include_router(admin.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:
@@ -1160,6 +1163,17 @@ def subscribed_landing_page():
     if os.path.exists(path):
         return FileResponse(path, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Subscribed page not found"})
+
+
+@app.get("/admin")
+@app.get("/admin/")
+def admin_portal():
+    """Serve the admin SPA."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "admin", "index.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Admin portal not found"})
 
 
 @app.get("/api/health")
