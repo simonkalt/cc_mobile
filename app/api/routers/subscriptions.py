@@ -757,12 +757,16 @@ async def stripe_webhook(request: Request):
         logger.error("Stripe webhook construct_event error: %s", e)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Webhook error: {e}")
 
-    logger.info("Stripe webhook received: %s (id=%s)", event.get("type"), event.get("id"))
+    # Convert StripeObject to plain dict so .get() works in the handler
+    import json as _json
+    event_dict = _json.loads(payload)
+
+    logger.info("Stripe webhook received: %s (id=%s)", event_dict.get("type"), event_dict.get("id"))
 
     try:
-        result = handle_stripe_webhook_event(dict(event))
+        result = handle_stripe_webhook_event(event_dict)
     except Exception as e:
-        logger.error("Error handling webhook event %s: %s", event.get("type"), e)
+        logger.error("Error handling webhook event %s: %s", event_dict.get("type"), e)
         return {"status": "error", "detail": str(e)}
 
     return {"status": "ok", **result}

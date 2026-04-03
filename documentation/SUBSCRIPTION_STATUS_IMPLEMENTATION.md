@@ -1,4 +1,4 @@
-# Subscription Status — Frontend Implementation Contract
+      # Subscription Status — Frontend Implementation Contract
 
 This document defines how every Stripe subscription status maps to frontend behavior
 in the Billing tab. Backend must return these exact `subscriptionStatus` strings.
@@ -34,15 +34,16 @@ real `subscriptionId` prevents the frontend from identifying which plan is curre
 
 ## Grace-Period Cancellation ("Cancels on Date X")
 
-When a user cancels but their paid period has not yet ended, Stripe can report status as
-either:
+When a user cancels but their paid period has not yet ended, Stripe sets
+`cancel_at_period_end: true` while the status remains `active`. This is the **only**
+signal the frontend uses to determine a grace-period state.
 
-- `active` + `cancel_at_period_end: true` — most common form
-- `canceled` + `current_period_end` still in the future — less common
+> **Important:** A subscription with `status: "canceled"` AND `cancel_at_period_end: false`
+> is an **immediate cancellation** — access was revoked at that moment. Even if
+> `current_period_end` is still in the future, the subscription is not in a grace period
+> and must be treated as fully inactive.
 
-In both cases the frontend needs to know it is a **scheduled cancellation** still within
-the paid period. Backend must surface at least one of the following fields alongside the
-subscription object so the frontend can detect this state:
+Backend must surface the following fields alongside the subscription object:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -69,8 +70,8 @@ trialing            | true               | any                | any             
 incomplete          | any                | any                | any               | NO
 incomplete_expired  | any                | any                | any               | NO
 past_due            | any                | any                | any               | NO
-canceled            | true               | any                | true (in period)  | YES (grace)
-canceled            | true               | any                | false             | NO
+canceled (cancelAtPeriodEnd=true)  | true | any | true (in period)  | YES (grace)
+canceled (cancelAtPeriodEnd=false) | any  | any | —                 | NO (immediate cancel)
 unpaid              | any                | any                | any               | NO
 ```
 
@@ -99,3 +100,8 @@ unpaid              | any                | any                | any             
       one** (precedence: `active` > `trialing` > `incomplete` > `past_due`). Do not
       return an `incomplete` subscription as the primary subscription if an `active` one
       also exists.
+- [ ] On `POST /api/subscriptions/create-payment-intent`, if Stripe returns a
+      `resource_missing` error for the stored `stripeCustomerId`, the backend must
+      create a new Stripe customer for the user, update the stored `stripeCustomerId`,
+      and retry the payment-intent creation transparently. A stale customer ID causes a
+      hard 402 that blocks the user from subscribing.

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError, EmailStr, Field
@@ -1149,6 +1149,12 @@ def read_root():
     return JSONResponse(
         content={"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Browsers request /favicon.ico by default; static assets live under /website/."""
+    return RedirectResponse(url="/website/images/1.png", status_code=302)
 
 
 @app.get("/subscribed")
