@@ -1,6 +1,10 @@
 # DOCX to PDF API Documentation
 
-This endpoint converts a **Word `.docx` file** to **PDF** on the server. Use it when the cover letter (or other document) is edited as `.docx`—for example in a document editor or WebView—and you need a PDF that matches the `.docx` layout. Conversion uses **LibreOffice headless** (`soffice`), not the Markdown/HTML PDF pipeline used by `POST /api/files/generate-pdf`.
+> **Removed from this Python API (2026).** `POST /api/files/docx-to-pdf` is **disabled** and returns **HTTP 410 Gone**. **LibreOffice** and **WeasyPrint** are no longer used or required in this repo for PDFs. Use the **Syncfusion (.NET)** service for `.docx` → PDF and other PDF workflows. The document below is **historical**.
+
+---
+
+This endpoint ~~converts~~ *previously converted* a **Word `.docx` file** to **PDF** on the server. It used **LibreOffice headless** (`soffice`), not the Markdown/HTML PDF pipeline used by `POST /api/files/generate-pdf` (also removed).
 
 ## Endpoint
 

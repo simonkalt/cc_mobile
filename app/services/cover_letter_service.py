@@ -27,7 +27,11 @@ except ImportError:
 
 from app.core.config import settings
 from app.models.user import UserResponse
-from app.utils.html_normalizer import html_p_to_br, collapse_br_pairs, double_break_after_groups
+from app.utils.html_normalizer import (
+    html_p_to_br,
+    normalize_br_variants,
+    double_break_after_groups,
+)
 from app.utils.template_loader import (
     coalesce_letter_template_app_settings,
     letter_template_cache_stamp,
@@ -1587,7 +1591,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         if markdown_content and today_date_iso and today_date != today_date_iso:
             markdown_content = markdown_content.replace(today_date_iso, today_date)
         raw_html = html_p_to_br(raw_html)
-        raw_html = collapse_br_pairs(raw_html)
+        raw_html = normalize_br_variants(raw_html)
         raw_html = double_break_after_groups(raw_html)
 
         styled_html = raw_html

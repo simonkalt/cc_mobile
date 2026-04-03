@@ -1,10 +1,4 @@
 {
-  "endpoints": [
-    {
-      "method": "POST",
-      "path": "/api/files/docx-to-pdf",
-      "enabled": true,
-      "notes": "DOCX conversion consumed by external integration; requires X-Service-Auth."
-    }
-  ]
+  "endpoints": [],
+  "_comment": "POST /api/files/docx-to-pdf and other PDF routes are disabled (410 Gone); PDF creation is handled by the Syncfusion .NET service. Re-enable rules here only if you restore server-side PDF endpoints."
 }

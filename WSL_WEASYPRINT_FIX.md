@@ -1,5 +1,7 @@
 # WeasyPrint in WSL - Complete Fix
 
+> **Note (2026):** This API no longer installs or uses WeasyPrint for PDF generation. Keep this doc only if you maintain a fork that still uses it. See `documentation/PDF_SERVER_SIDE_REMOVED.md`.
+
 ## The Problem
 
 WeasyPrint **CAN work in WSL**, but you need to:
