@@ -109,6 +109,8 @@ class UserResponse(BaseModel):
     subscriptionStatus: Optional[str] = None
     subscriptionPlan: Optional[str] = None
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
+    super_user: Optional[bool] = False
+    archived: Optional[bool] = False
 
     class Config:
         from_attributes = True

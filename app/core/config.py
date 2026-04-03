@@ -23,6 +23,10 @@ class Settings:
     # Google Analytics (GA4) — injected into website/index.html when serving /
     GOOGLE_ANALYTICS_TAG: Optional[str] = os.getenv("GOOGLE_ANALYTICS_TAG")
 
+    # Marketing site (/) — app store badge links, injected into website/index.html
+    PLAY_STORE_URL: Optional[str] = os.getenv("PLAY_STORE_URL")
+    IOS_APP_STORE_URL: Optional[str] = os.getenv("IOS_APP_STORE_URL")
+
     # Third-party / server-to-server integration (set in .secrets, not committed)
     SERVICE_AUTH_KEY: Optional[str] = os.getenv("SERVICE_AUTH_KEY")
     INTEGRATION_AUTH_ENDPOINTS_FILE: str = os.getenv(

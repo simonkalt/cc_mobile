@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>sAImon Software - Career Helper: AI Cover Letter Generator</title>
+    <link rel="icon" href="/website/images/1.png" type="image/png" />
     <link rel="stylesheet" href="/website/styles.css" />
     <!-- Google Analytics (gtag.js): injected server-side from env GOOGLE_ANALYTICS_TAG when serving / -->
   </head>
@@ -105,26 +106,27 @@
         <div class="cta-section">
           <span class="cta-label">Get Started</span>
           <div class="app-store-buttons">
-            <div
+            <!-- Injected on GET /: PLAY_STORE_URL, IOS_APP_STORE_URL -->
+            <a
               class="app-store-button"
               id="googlePlayBtn"
-              onclick="alert('Coming soon.')"
+              __PLAY_STORE_ATTRS__
             >
               <img
                 src="/website/images/footer-google-play.avif"
                 alt="Get it on Google Play"
               />
-            </div>
-            <div
+            </a>
+            <a
               class="app-store-button"
               id="appStoreBtn"
-              onclick="alert('Coming soon.')"
+              __IOS_APP_STORE_ATTRS__
             >
               <img
                 src="/website/images/footer-app-store.avif"
                 alt="Download on the App Store"
               />
-            </div>
+            </a>
           </div>
         </div>
       </div>
