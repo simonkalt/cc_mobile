@@ -143,5 +143,7 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         subscriptionStatus=user_doc.get("subscriptionStatus"),
         subscriptionPlan=user_doc.get("subscriptionPlan"),
         subscriptionCurrentPeriodEnd=user_doc.get("subscriptionCurrentPeriodEnd"),
+        super_user=user_doc.get("super_user", False),
+        archived=user_doc.get("archived", False),
     )
 

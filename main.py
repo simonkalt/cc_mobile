@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError, EmailStr, Field
@@ -371,6 +371,9 @@ try:
     app.include_router(subscriptions.router)
     app.include_router(linkedin.router)
     app.include_router(letter_templates.router)
+
+    from app.api.routers import admin
+    app.include_router(admin.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:
@@ -1132,6 +1135,40 @@ def _inject_gtag_into_index_html(html: str) -> str:
     return html.replace("</head>", snippet + "  </head>", 1)
 
 
+def _inject_store_urls_into_index_html(html: str) -> str:
+    """
+    Replace __PLAY_STORE_ATTRS__ / __IOS_APP_STORE_ATTRS__ with href + rel for store badges.
+    If env URL is unset, keep prior \"Coming soon\" behavior via onclick.
+    """
+    import html as html_module
+
+    play = (os.getenv("PLAY_STORE_URL") or "").strip()
+    ios = (os.getenv("IOS_APP_STORE_URL") or "").strip()
+
+    if play:
+        safe = html_module.escape(play, quote=True)
+        play_attrs = f'href="{safe}" target="_blank" rel="noopener noreferrer"'
+    else:
+        play_attrs = (
+            'href="#" onclick="alert(\'Coming soon.\'); return false;" role="button" '
+            'aria-disabled="true"'
+        )
+
+    if ios:
+        safe_ios = html_module.escape(ios, quote=True)
+        ios_attrs = f'href="{safe_ios}" target="_blank" rel="noopener noreferrer"'
+    else:
+        ios_attrs = (
+            'href="#" onclick="alert(\'Coming soon.\'); return false;" role="button" '
+            'aria-disabled="true"'
+        )
+
+    return (
+        html.replace("__PLAY_STORE_ATTRS__", play_attrs)
+        .replace("__IOS_APP_STORE_ATTRS__", ios_attrs)
+    )
+
+
 # Serve webpage at root (/) so root URL shows website/index.html
 @app.get("/")
 def read_root():
@@ -1141,11 +1178,28 @@ def read_root():
         with open(index_path, "r", encoding="utf-8") as f:
             html = f.read()
         html = _inject_gtag_into_index_html(html)
+        html = _inject_store_urls_into_index_html(html)
         return HTMLResponse(content=html, media_type="text/html")
     # Fallback if website/index.html is missing
     return JSONResponse(
         content={"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Browsers request /favicon.ico by default; static assets live under /website/."""
+    return RedirectResponse(url="/website/images/1.png", status_code=302)
+
+
+@app.get("/delete-account.html", include_in_schema=False)
+def delete_account_page():
+    """Marketing footer links use /delete-account.html; file lives under website/."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "delete-account.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Delete account page not found"})
 
 
 @app.get("/subscribed")
@@ -1160,6 +1214,17 @@ def subscribed_landing_page():
     if os.path.exists(path):
         return FileResponse(path, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Subscribed page not found"})
+
+
+@app.get("/admin")
+@app.get("/admin/")
+def admin_portal():
+    """Serve the admin SPA."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "admin", "index.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Admin portal not found"})
 
 
 @app.get("/api/health")

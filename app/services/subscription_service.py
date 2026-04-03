@@ -23,6 +23,56 @@ from app.models.subscription import SubscriptionResponse
 
 logger = logging.getLogger(__name__)
 
+
+
+
+def _stripe_feature_name(feature_obj: object) -> str:
+    """Extract a readable marketing feature name from Stripe dict/StripeObject values."""
+    if feature_obj is None:
+        return ""
+    if isinstance(feature_obj, str):
+        return feature_obj.strip()
+    if isinstance(feature_obj, dict):
+        return str(feature_obj.get("name") or "").strip()
+    try:
+        # StripeObject supports attribute access and key indexing
+        name_attr = getattr(feature_obj, "name", None)
+        if isinstance(name_attr, str) and name_attr.strip():
+            return name_attr.strip()
+    except Exception:
+        pass
+    try:
+        name_key = feature_obj["name"]  # type: ignore[index]
+        if isinstance(name_key, str) and name_key.strip():
+            return name_key.strip()
+        if name_key is not None:
+            return str(name_key).strip()
+    except Exception:
+        pass
+    # Last resort: avoid dumping full JSON-ish object strings in UI bullets
+    return str(feature_obj).strip()
+
+def _metadata_to_plain_dict(metadata_obj: object) -> dict:
+    """Stripe metadata can be StripeObject-like; normalize to plain dict."""
+    if metadata_obj is None:
+        return {}
+    if isinstance(metadata_obj, dict):
+        return dict(metadata_obj)
+    try:
+        # StripeObject supports .to_dict_recursive()
+        to_dict_recursive = getattr(metadata_obj, "to_dict_recursive", None)
+        if callable(to_dict_recursive):
+            raw = to_dict_recursive()
+            if isinstance(raw, dict):
+                return dict(raw)
+    except Exception:
+        pass
+    try:
+        # Last resort for mapping-like objects
+        return dict(metadata_obj)  # type: ignore[arg-type]
+    except Exception:
+        return {}
+
 # Stripe API version - must be consistent across all endpoints
 STRIPE_API_VERSION = "2023-10-16"
 
@@ -30,6 +80,18 @@ STRIPE_API_VERSION = "2023-10-16"
 _stripe_plans_cache: Optional[Dict] = None
 _stripe_plans_cache_time: Optional[datetime] = None
 _stripe_plans_cache_ttl: timedelta = timedelta(minutes=5)  # Cache for 5 minutes
+
+
+_SUBSCRIPTION_STATUS_PRECEDENCE = {
+    "active": 0,
+    "trialing": 1,
+    "incomplete": 2,
+    "past_due": 3,
+    "unpaid": 4,
+    "paused": 5,
+    "canceled": 6,
+    "incomplete_expired": 7,
+}
 
 
 def _get_stripe_module():
@@ -138,7 +200,10 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     subscription_status = user.get("subscriptionStatus", "free")
     subscription_plan = user.get("subscriptionPlan", "free")
     product_id = user.get("subscriptionProductId")
+    price_id = user.get("priceId") or user.get("subscriptionPlan")
     current_period_end = user.get("subscriptionCurrentPeriodEnd")
+    cancel_at_period_end = bool(user.get("cancelAtPeriodEnd", False))
+    canceled_at = user.get("canceledAt")
 
     # Sync with Stripe when we have a subscription ID to avoid stale "expired" dates in DB
     if subscription_id and STRIPE_AVAILABLE:
@@ -150,53 +215,161 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                     expand=["items.data.price.product"],
                 )
 
+                # If multiple subscriptions exist for the customer, choose the most relevant one:
+                # active > trialing > incomplete > past_due > ...
+                stripe_customer_id = user.get("stripeCustomerId")
+                if stripe_customer_id:
+                    try:
+                        subs = stripe_to_use.Subscription.list(
+                            customer=stripe_customer_id,
+                            status="all",
+                            limit=100,
+                        )
+                        subs_data = subs.data if hasattr(subs, "data") else []
+                        if subs_data:
+                            def _rank(sub_obj: object) -> tuple:
+                                status_value = str(getattr(sub_obj, "status", "") or "")
+                                precedence = _SUBSCRIPTION_STATUS_PRECEDENCE.get(status_value, 99)
+                                cpe = int(getattr(sub_obj, "current_period_end", 0) or 0)
+                                created = int(getattr(sub_obj, "created", 0) or 0)
+                                return (precedence, -cpe, -created)
+
+                            best_sub = sorted(subs_data, key=_rank)[0]
+                            if getattr(best_sub, "id", None) and best_sub.id != subscription_id:
+                                logger.info(
+                                    "Switching to most relevant Stripe subscription for user %s: db_sub=%s -> chosen_sub=%s (status=%s)",
+                                    user_id,
+                                    subscription_id,
+                                    best_sub.id,
+                                    getattr(best_sub, "status", None),
+                                )
+                                stripe_sub = stripe_to_use.Subscription.retrieve(
+                                    best_sub.id, expand=["items.data.price.product"],
+                                )
+                                subscription_id = best_sub.id
+                    except Exception as choose_exc:
+                        logger.warning(
+                            "Could not choose most relevant subscription for user %s: %s",
+                            user_id,
+                            choose_exc,
+                        )
+
                 stripe_status = getattr(stripe_sub, "status", None)
+                logger.info(
+                    "Stripe subscription snapshot user_id=%s sub_id=%s status=%s "
+                    "cancel_at_period_end=%s canceled_at=%s ended_at=%s current_period_end=%s",
+                    user_id,
+                    subscription_id,
+                    stripe_status,
+                    getattr(stripe_sub, "cancel_at_period_end", None),
+                    getattr(stripe_sub, "canceled_at", None),
+                    getattr(stripe_sub, "ended_at", None),
+                    getattr(stripe_sub, "current_period_end", None),
+                )
+                try:
+                    latest_invoice = getattr(stripe_sub, "latest_invoice", None)
+                    invoice_status = getattr(latest_invoice, "status", None) if latest_invoice else None
+                    invoice_pi = getattr(latest_invoice, "payment_intent", None) if latest_invoice else None
+                    invoice_pi_status = getattr(invoice_pi, "status", None) if invoice_pi else None
+                    logger.info(
+                        "Stripe subscription billing snapshot user_id=%s sub_id=%s invoice_status=%s payment_intent_status=%s",
+                        user_id,
+                        subscription_id,
+                        invoice_status,
+                        invoice_pi_status,
+                    )
+                except Exception:
+                    pass
                 if stripe_status:
-                    # Preserve existing DB status vocabulary while mapping Stripe values
-                    status_map = {
-                        "active": "active",
-                        "trialing": "active",
-                        "past_due": "past_due",
-                        "canceled": "canceled",
-                        "unpaid": "canceled",
-                        "incomplete": "canceled",
-                        "incomplete_expired": "canceled",
-                    }
-                    subscription_status = status_map.get(stripe_status, subscription_status)
+                    # Preserve Stripe-native status strings for frontend contract.
+                    subscription_status = str(stripe_status)
 
                 if getattr(stripe_sub, "current_period_end", None):
                     # Use UTC timezone so API returns an explicit timezone-aware timestamp.
                     current_period_end = datetime.fromtimestamp(
                         stripe_sub.current_period_end, tz=timezone.utc
                     )
+                cancel_at_period_end = bool(getattr(stripe_sub, "cancel_at_period_end", False))
+                if getattr(stripe_sub, "canceled_at", None):
+                    canceled_at = datetime.fromtimestamp(stripe_sub.canceled_at, tz=timezone.utc)
+                else:
+                    canceled_at = None
 
                 # Keep product_id in sync if available from expanded Stripe response
                 items_data = stripe_sub.items.data if hasattr(stripe_sub.items, "data") else []
                 if items_data and len(items_data) > 0:
                     price_obj = items_data[0].price
+                    if hasattr(price_obj, "id") and price_obj.id:
+                        price_id = price_obj.id
                     if hasattr(price_obj, "product") and price_obj.product:
                         if isinstance(price_obj.product, str):
                             product_id = price_obj.product
                         elif hasattr(price_obj.product, "id"):
                             product_id = price_obj.product.id
+                    if price_id:
+                        subscription_plan = price_id
 
                 # Persist fresh Stripe values to MongoDB
                 update_doc = {}
+                if subscription_id != user.get("subscriptionId"):
+                    update_doc["subscriptionId"] = subscription_id
                 if subscription_status != user.get("subscriptionStatus"):
                     update_doc["subscriptionStatus"] = subscription_status
+                if subscription_plan and subscription_plan != user.get("subscriptionPlan"):
+                    update_doc["subscriptionPlan"] = subscription_plan
+                if price_id and price_id != user.get("priceId"):
+                    update_doc["priceId"] = price_id
                 if current_period_end != user.get("subscriptionCurrentPeriodEnd"):
                     update_doc["subscriptionCurrentPeriodEnd"] = current_period_end
                 if product_id and product_id != user.get("subscriptionProductId"):
                     update_doc["subscriptionProductId"] = product_id
+                if cancel_at_period_end != bool(user.get("cancelAtPeriodEnd", False)):
+                    update_doc["cancelAtPeriodEnd"] = cancel_at_period_end
+                if canceled_at != user.get("canceledAt"):
+                    update_doc["canceledAt"] = canceled_at
 
                 if update_doc:
                     collection.update_one({"_id": user_id_obj}, {"$set": update_doc})
         except Exception as e:
-            logger.warning(
-                "Could not sync subscription state from Stripe for user %s: %s",
-                user_id,
-                e,
+            err_str = str(e).lower()
+            is_not_found = (
+                "no such" in err_str
+                or "does not exist" in err_str
+                or "resource_missing" in err_str
+                or (hasattr(e, "http_status") and getattr(e, "http_status", 0) == 404)
             )
+            if is_not_found:
+                logger.warning(
+                    "Stripe resource not found for user %s (sub=%s, cust=%s). "
+                    "Resetting local subscription to free. Error: %s",
+                    user_id, subscription_id, user.get("stripeCustomerId"), e,
+                )
+                reset_doc = {
+                    "subscriptionId": None,
+                    "subscriptionStatus": "free",
+                    "subscriptionPlan": "free",
+                    "priceId": None,
+                    "subscriptionProductId": None,
+                    "subscriptionCurrentPeriodEnd": None,
+                    "cancelAtPeriodEnd": False,
+                    "canceledAt": None,
+                    "dateUpdated": datetime.utcnow(),
+                }
+                collection.update_one({"_id": user_id_obj}, {"$set": reset_doc})
+                subscription_status = "free"
+                subscription_plan = "free"
+                subscription_id = None
+                price_id = None
+                product_id = None
+                current_period_end = None
+                cancel_at_period_end = False
+                canceled_at = None
+            else:
+                logger.warning(
+                    "Could not sync subscription state from Stripe for user %s: %s",
+                    user_id,
+                    e,
+                )
     
     # If we still don't have product_id stored but have a subscription, try to get it from Stripe
     if not product_id and subscription_id and STRIPE_AVAILABLE:
@@ -215,6 +388,9 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                 items_data = subscription.items.data if hasattr(subscription.items, 'data') else []
                 if items_data and len(items_data) > 0:
                     price_obj = items_data[0].price
+                    if hasattr(price_obj, "id") and price_obj.id:
+                        price_id = price_obj.id
+                        subscription_plan = price_obj.id
                     
                     # Try to get product ID from expanded price object first
                     if hasattr(price_obj, "product") and price_obj.product:
@@ -240,7 +416,11 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                         logger.info(f"Found product ID {product_id} for subscription {subscription_id}")
                         collection.update_one(
                             {"_id": user_id_obj},
-                            {"$set": {"subscriptionProductId": product_id}}
+                            {"$set": {
+                                "subscriptionProductId": product_id,
+                                "priceId": price_id,
+                                "subscriptionPlan": subscription_plan,
+                            }}
                         )
                     else:
                         logger.warning(f"Could not extract product ID from subscription {subscription_id}")
@@ -265,12 +445,24 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
         except (TypeError, ValueError):
             generation_credits = max_credits if str(subscription_status).lower() == "free" else 0
     
+    # Contract: do not return "free" plan if a real subscription exists.
+    if subscription_id and (not subscription_plan or subscription_plan == "free"):
+        if price_id:
+            subscription_plan = price_id
+        elif product_id:
+            subscription_plan = product_id
+    if subscription_id and not subscription_status:
+        subscription_status = "incomplete"
+
     return SubscriptionResponse(
         subscriptionId=subscription_id,
         subscriptionStatus=subscription_status,
         subscriptionPlan=subscription_plan,
         productId=product_id,
+        priceId=price_id,
         subscriptionCurrentPeriodEnd=current_period_end,
+        cancelAtPeriodEnd=cancel_at_period_end,
+        canceledAt=canceled_at,
         lastPaymentDate=user.get("lastPaymentDate"),
         stripeCustomerId=user.get("stripeCustomerId"),
         generation_credits=generation_credits,
@@ -287,6 +479,9 @@ def update_user_subscription(
     stripe_customer_id: Optional[str] = None,
     current_period_end: Optional[datetime] = None,
     last_payment_date: Optional[datetime] = None,
+    price_id: Optional[str] = None,
+    cancel_at_period_end: Optional[bool] = None,
+    canceled_at: Optional[datetime] = None,
 ) -> None:
     """
     Update user's subscription information in database
@@ -325,8 +520,11 @@ def update_user_subscription(
         "subscriptionId": subscription_id,
         "subscriptionStatus": subscription_status,
         "subscriptionPlan": subscription_plan,
+        "priceId": price_id,
         "subscriptionProductId": subscription_product_id,
         "subscriptionCurrentPeriodEnd": current_period_end,
+        "cancelAtPeriodEnd": cancel_at_period_end,
+        "canceledAt": canceled_at,
         "lastPaymentDate": last_payment_date,
         "stripeCustomerId": stripe_customer_id,
         "dateUpdated": datetime.utcnow(),
@@ -355,27 +553,24 @@ def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None)
     Returns:
         Stripe customer ID
     """
-    # Use _get_stripe_module() to ensure API key is properly configured
     stripe_to_use = _get_stripe_module()
-    
+
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0"
         )
-    
-    # Verify API key is set
+
     if not stripe_to_use.api_key:
         stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
         if not stripe_api_key:
             logger.error("Stripe API key not configured (STRIPE_API_KEY or STRIPE_TEST_API_KEY)")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
+                detail="Stripe API key not configured",
             )
         stripe_to_use.api_key = stripe_api_key
-        logger.debug("Stripe API key set in create_stripe_customer")
-    
+
     try:
         customer = stripe_to_use.Customer.create(email=email, name=name, metadata={"user_id": user_id})
         logger.info(f"Created Stripe customer {customer.id} for user {user_id}")
@@ -532,56 +727,123 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
         # Get or create Stripe customer
         stripe_customer_id = user.get("stripeCustomerId")
         if not stripe_customer_id:
-            # No customer ID in database - create new customer
             stripe_customer_id = create_stripe_customer(
                 user_id=user_id, email=user.get("email", ""), name=user.get("name")
             )
-            # Update user with customer ID
             update_user_subscription(user_id=user_id, stripe_customer_id=stripe_customer_id)
         else:
-            # Customer ID exists in database - verify it exists in Stripe
             try:
                 stripe_to_use.Customer.retrieve(stripe_customer_id)
-                logger.debug(f"Verified existing Stripe customer {stripe_customer_id} for user {user_id}")
             except stripe_to_use.error.InvalidRequestError as e:
-                # Customer doesn't exist in Stripe (maybe deleted or wrong account)
                 if "No such customer" in str(e) or e.code == "resource_missing":
-                    logger.warning(
-                        f"Customer {stripe_customer_id} not found in Stripe for user {user_id}, creating new customer"
-                    )
                     stripe_customer_id = create_stripe_customer(
                         user_id=user_id, email=user.get("email", ""), name=user.get("name")
                     )
-                    # Update user with new customer ID
                     update_user_subscription(user_id=user_id, stripe_customer_id=stripe_customer_id)
                 else:
-                    # Some other error - re-raise it
                     raise
 
-        # Get price details
-        price = stripe_to_use.Price.retrieve(price_id)
+        # SUBSCRIPTION-FIRST FLOW:
+        # Create the subscription first in default_incomplete and return invoice PI client_secret.
+        _sub_kwargs = dict(
+            items=[{"price": price_id}],
+            payment_behavior="default_incomplete",
+            payment_settings={
+                "payment_method_types": ["card"],
+                "save_default_payment_method": "on_subscription",
+            },
+            metadata={"user_id": user_id},
+            expand=["latest_invoice.payment_intent", "items.data.price.product"],
+        )
 
-        # Create PaymentIntent
-        payment_intent = stripe_to_use.PaymentIntent.create(
-            amount=int(price.unit_amount),  # Amount in cents
-            currency=price.currency,
-            customer=stripe_customer_id,
-            payment_method_types=["card"],
-            metadata={"user_id": user_id, "price_id": price_id, "subscription_type": "new"},
+        try:
+            sub = stripe_to_use.Subscription.create(customer=stripe_customer_id, **_sub_kwargs)
+        except stripe_to_use.error.InvalidRequestError as sub_err:
+            err_str = str(sub_err)
+            is_stale = (
+                "No such customer" in err_str
+                or getattr(sub_err, "code", None) == "resource_missing"
+            )
+            if is_stale:
+                logger.warning(
+                    "Stale stripeCustomerId %s during Subscription.create for user %s; recreating customer",
+                    stripe_customer_id, user_id,
+                )
+                stripe_customer_id = create_stripe_customer(
+                    user_id=user_id, email=user.get("email", ""), name=user.get("name")
+                )
+                update_user_subscription(user_id=user_id, stripe_customer_id=stripe_customer_id)
+                sub = stripe_to_use.Subscription.create(customer=stripe_customer_id, **_sub_kwargs)
+            else:
+                raise
+        latest_invoice = getattr(sub, "latest_invoice", None)
+        invoice_pi = getattr(latest_invoice, "payment_intent", None) if latest_invoice else None
+        if not invoice_pi:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Subscription created but latest invoice payment intent is missing",
+            )
+
+        # Keep DB in sync with pre-confirmation state (typically incomplete)
+        product_id = None
+        try:
+            items_data = sub.items.data if hasattr(sub.items, "data") else []
+            if items_data:
+                price_obj = items_data[0].price
+                if hasattr(price_obj, "product") and price_obj.product:
+                    if isinstance(price_obj.product, str):
+                        product_id = price_obj.product
+                    elif hasattr(price_obj.product, "id"):
+                        product_id = price_obj.product.id
+        except Exception:
+            product_id = None
+        current_period_end = (
+            datetime.fromtimestamp(sub.current_period_end)
+            if getattr(sub, "current_period_end", None)
+            else None
+        )
+        update_user_subscription(
+            user_id=user_id,
+            subscription_id=sub.id,
+            subscription_status=getattr(sub, "status", "incomplete"),
+            subscription_plan=price_id,
+            price_id=price_id,
+            subscription_product_id=product_id,
+            stripe_customer_id=stripe_customer_id,
+            current_period_end=current_period_end,
+            cancel_at_period_end=bool(getattr(sub, "cancel_at_period_end", False)),
+            canceled_at=(
+                datetime.fromtimestamp(sub.canceled_at, tz=timezone.utc)
+                if getattr(sub, "canceled_at", None)
+                else None
+            ),
         )
 
         # Create ephemeral key for customer (allows PaymentSheet to access customer)
         ephemeral_key = stripe_to_use.EphemeralKey.create(
             customer=stripe_customer_id,
-            stripe_version=STRIPE_API_VERSION,  # Use consistent Stripe API version
+            stripe_version=STRIPE_API_VERSION,
         )
 
-        logger.info(f"Created PaymentIntent {payment_intent.id} for user {user_id}")
+        pi_id = invoice_pi.id if hasattr(invoice_pi, "id") else str(invoice_pi)
+        pi_client_secret = (
+            invoice_pi.client_secret if hasattr(invoice_pi, "client_secret") else None
+        )
+        logger.info(
+            "Created subscription-first payment sheet payload user_id=%s sub_id=%s sub_status=%s invoice_pi_id=%s invoice_pi_status=%s",
+            user_id,
+            sub.id,
+            getattr(sub, "status", None),
+            pi_id,
+            getattr(invoice_pi, "status", None),
+        )
 
         response_data = {
-            "client_secret": payment_intent.client_secret,
+            "client_secret": pi_client_secret,
             "customer_id": stripe_customer_id,
             "customer_ephemeral_key_secret": ephemeral_key.secret,
+            "subscription_id": sub.id,
+            "payment_intent_id": pi_id,
         }
         
         # Validate all required fields are present
@@ -631,6 +893,83 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating payment intent: {str(e)}",
         )
+
+
+def finalize_subscription_from_stripe(user_id: str, subscription_id: str, price_id: str) -> dict:
+    """
+    Finalize a subscription created in create_payment_intent() after client confirms
+    the invoice PaymentIntent in PaymentSheet.
+    """
+    stripe_to_use = _get_stripe_module()
+    if stripe_to_use is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe library not available",
+        )
+
+    sub = stripe_to_use.Subscription.retrieve(
+        subscription_id,
+        expand=["latest_invoice.payment_intent", "items.data.price.product"],
+    )
+    latest_invoice = getattr(sub, "latest_invoice", None)
+    invoice_pi = getattr(latest_invoice, "payment_intent", None) if latest_invoice else None
+    invoice_pi_status = getattr(invoice_pi, "status", None) if invoice_pi else None
+    logger.info(
+        "finalize_subscription_from_stripe snapshot user_id=%s sub_id=%s sub_status=%s invoice_status=%s invoice_pi_status=%s",
+        user_id,
+        subscription_id,
+        getattr(sub, "status", None),
+        getattr(latest_invoice, "status", None) if latest_invoice else None,
+        invoice_pi_status,
+    )
+
+    # Optional hard check: if invoice PI isn't successful yet, surface as 402.
+    if invoice_pi_status and invoice_pi_status not in ("succeeded",):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "status": invoice_pi_status,
+                "message": "Subscription payment is not completed yet.",
+                "subscription_id": subscription_id,
+                "payment_intent_id": getattr(invoice_pi, "id", None),
+                "client_secret": getattr(invoice_pi, "client_secret", None),
+            },
+        )
+
+    product_id = None
+    try:
+        items_data = sub.items.data if hasattr(sub.items, "data") else []
+        if items_data:
+            price_obj = items_data[0].price
+            if hasattr(price_obj, "product") and price_obj.product:
+                if isinstance(price_obj.product, str):
+                    product_id = price_obj.product
+                elif hasattr(price_obj.product, "id"):
+                    product_id = price_obj.product.id
+    except Exception:
+        product_id = None
+
+    current_period_end = (
+        datetime.fromtimestamp(sub.current_period_end)
+        if getattr(sub, "current_period_end", None)
+        else None
+    )
+    update_user_subscription(
+        user_id=user_id,
+        subscription_id=sub.id,
+        subscription_status=getattr(sub, "status", "incomplete"),
+        subscription_plan=price_id,
+        price_id=price_id,
+        subscription_product_id=product_id,
+        current_period_end=current_period_end,
+        cancel_at_period_end=bool(getattr(sub, "cancel_at_period_end", False)),
+        canceled_at=(
+            datetime.fromtimestamp(sub.canceled_at, tz=timezone.utc)
+            if getattr(sub, "canceled_at", None)
+            else None
+        ),
+    )
+    return sub
 
 
 def create_subscription(
@@ -743,7 +1082,15 @@ def create_subscription(
         try:
             # Step 1: Retrieve PaymentIntent
             payment_intent = stripe_to_use.PaymentIntent.retrieve(payment_intent_id)
-            logger.debug(f"Retrieved PaymentIntent {payment_intent_id}, status: {payment_intent.status}")
+            logger.info(
+                "create_subscription payment_intent snapshot: id=%s status=%s customer=%s amount=%s currency=%s payment_method=%s",
+                payment_intent_id,
+                getattr(payment_intent, "status", None),
+                getattr(payment_intent, "customer", None),
+                getattr(payment_intent, "amount", None),
+                getattr(payment_intent, "currency", None),
+                getattr(payment_intent, "payment_method", None),
+            )
 
             # Handle different payment intent statuses
             if payment_intent.status == "succeeded":
@@ -956,6 +1303,12 @@ def create_subscription(
             logger.warning(f"Could not retrieve product ID from price {price_id}: {e}")
         
         subscription = stripe_to_use.Subscription.create(**subscription_params)
+        logger.info(
+            "create_subscription stripe create returned: user_id=%s subscription_id=%s status=%s",
+            user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+        )
         
         # Note: PaymentIntent is already confirmed by PaymentSheet before this point
         # The subscription creates an invoice with its own PaymentIntent (status: "incomplete")
@@ -965,6 +1318,17 @@ def create_subscription(
         subscription = stripe_to_use.Subscription.retrieve(
             subscription.id,
             expand=["latest_invoice.payment_intent"]
+        )
+        logger.info(
+            "create_subscription post-create Stripe snapshot user_id=%s sub_id=%s status=%s "
+            "cancel_at_period_end=%s canceled_at=%s ended_at=%s current_period_end=%s",
+            user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+            getattr(subscription, "cancel_at_period_end", None),
+            getattr(subscription, "canceled_at", None),
+            getattr(subscription, "ended_at", None),
+            getattr(subscription, "current_period_end", None),
         )
         
         # Pay the subscription's invoice using the confirmed payment method
@@ -1002,6 +1366,23 @@ def create_subscription(
                     logger.info(f"✅ Invoice PaymentIntent {invoice_pi_id} already succeeded")
                 else:
                     logger.info(f"ℹ️ Invoice PaymentIntent {invoice_pi_id} status: {invoice_payment_intent.status}")
+
+        # Refresh once more after invoice confirmation attempt; the original object can be stale.
+        subscription = stripe_to_use.Subscription.retrieve(
+            subscription.id,
+            expand=["latest_invoice.payment_intent"],
+        )
+        logger.info(
+            "create_subscription final Stripe snapshot user_id=%s sub_id=%s status=%s "
+            "cancel_at_period_end=%s canceled_at=%s ended_at=%s current_period_end=%s",
+            user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+            getattr(subscription, "cancel_at_period_end", None),
+            getattr(subscription, "canceled_at", None),
+            getattr(subscription, "ended_at", None),
+            getattr(subscription, "current_period_end", None),
+        )
         
         # Update user subscription info
         current_period_end = datetime.fromtimestamp(subscription.current_period_end)
@@ -1010,11 +1391,29 @@ def create_subscription(
             subscription_id=subscription.id,
             subscription_status=subscription.status,
             subscription_plan=price_id,  # Store price_id as plan identifier
+            price_id=price_id,
             subscription_product_id=product_id,  # Store product ID
             stripe_customer_id=customer_id,
             current_period_end=current_period_end,
+            cancel_at_period_end=bool(getattr(subscription, "cancel_at_period_end", False)),
+            canceled_at=(
+                datetime.fromtimestamp(subscription.canceled_at, tz=timezone.utc)
+                if getattr(subscription, "canceled_at", None)
+                else None
+            ),
         )
-        
+
+        saved_user = collection.find_one({"_id": user_id_obj}) or {}
+        logger.info(
+            "create_subscription DB after save: user_id=%s subscriptionId=%s subscriptionStatus=%s subscriptionPlan=%s productId=%s periodEnd=%s",
+            user_id,
+            saved_user.get("subscriptionId"),
+            saved_user.get("subscriptionStatus"),
+            saved_user.get("subscriptionPlan"),
+            saved_user.get("subscriptionProductId"),
+            saved_user.get("subscriptionCurrentPeriodEnd"),
+        )
+
         logger.info(f"Created subscription {subscription.id} for user {user_id}")
         return subscription
     except stripe_to_use.error.StripeError as e:
@@ -1098,8 +1497,15 @@ def upgrade_subscription(user_id: str, new_price_id: str) -> dict:
             subscription_id=updated_subscription.id,
             subscription_status=updated_subscription.status,
             subscription_plan=new_price_id,
+            price_id=new_price_id,
             subscription_product_id=product_id,  # Store product ID
             current_period_end=current_period_end,
+            cancel_at_period_end=bool(getattr(updated_subscription, "cancel_at_period_end", False)),
+            canceled_at=(
+                datetime.fromtimestamp(updated_subscription.canceled_at, tz=timezone.utc)
+                if getattr(updated_subscription, "canceled_at", None)
+                else None
+            ),
         )
         
         logger.info(f"Upgraded subscription {updated_subscription.id} for user {user_id}")
@@ -1153,9 +1559,20 @@ def cancel_subscription(user_id: str, cancel_immediately: bool = False) -> dict:
             user_id=user_id,
             subscription_id=canceled_subscription.id,
             subscription_status=subscription_status,
+            subscription_plan=(
+                subscription_info.subscriptionPlan
+                if subscription_info.subscriptionPlan != "free"
+                else "free"
+            ),
             current_period_end=(
                 datetime.fromtimestamp(canceled_subscription.current_period_end)
                 if canceled_subscription.current_period_end
+                else None
+            ),
+            cancel_at_period_end=bool(getattr(canceled_subscription, "cancel_at_period_end", False)),
+            canceled_at=(
+                datetime.fromtimestamp(canceled_subscription.canceled_at, tz=timezone.utc)
+                if getattr(canceled_subscription, "canceled_at", None)
                 else None
             ),
         )
@@ -1235,7 +1652,7 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
 
                 # Apply campaign filter if provided
                 if campaign_filter:
-                    product_metadata = product.metadata or {}
+                    product_metadata = _metadata_to_plain_dict(getattr(product, "metadata", None))
                     # Check if campaign filter matches any metadata value
                     if campaign_filter not in product_metadata.values():
                         # Also check if it's a key
@@ -1317,18 +1734,14 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                             # Stripe's native marketing_features field (array of objects with "name" property)
                             marketing_features = product.marketing_features
                             if isinstance(marketing_features, (list, tuple)):
-                                # Extract the "name" from each feature object
                                 features = [
-                                    feat.get("name") if isinstance(feat, dict) else str(feat)
+                                    _stripe_feature_name(feat)
                                     for feat in marketing_features
-                                    if feat and (isinstance(feat, dict) and feat.get("name") or not isinstance(feat, dict))
+                                    if _stripe_feature_name(feat)
                                 ]
                             else:
-                                # Handle single feature object
-                                if isinstance(marketing_features, dict):
-                                    features = [marketing_features.get("name", "")]
-                                else:
-                                    features = [str(marketing_features)]
+                                one = _stripe_feature_name(marketing_features)
+                                features = [one] if one else []
                             logger.debug(
                                 f"Using native Stripe marketing_features field for product {product.id}: {len(features)} features"
                             )
@@ -1342,7 +1755,7 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                             logger.debug(f"Using Stripe features field for product {product.id}: {len(features)} features")
                         elif product.metadata:
                             # Fallback to metadata if native fields are not available
-                            feature_list = product.metadata.get("features")
+                            feature_list = _metadata_to_plain_dict(getattr(product, "metadata", None)).get("features")
                             if feature_list:
                                 # Features might be comma-separated or JSON
                                 try:
@@ -1372,8 +1785,9 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                         # Determine if this is a popular/recommended plan
                         # Check metadata or default annual to popular
                         popular = False
-                        if product.metadata:
-                            popular_str = product.metadata.get("popular", "false").lower()
+                        meta = _metadata_to_plain_dict(getattr(product, "metadata", None))
+                        if meta:
+                            popular_str = str(meta.get("popular", "false")).lower()
                             popular = popular_str in ("true", "1", "yes")
                         elif interval == "year":
                             popular = True  # Default annual to popular
@@ -1518,7 +1932,7 @@ def get_raw_stripe_products(force_refresh: bool = False) -> dict:
                 "images": product.images if hasattr(product, "images") else [],
                 "livemode": product.livemode,
                 "marketing_features": None,
-                "metadata": product.metadata or {},
+                "metadata": _metadata_to_plain_dict(getattr(product, "metadata", None)),
                 "name": product.name,
                 "package_dimensions": getattr(product, "package_dimensions", None),
                 "shippable": getattr(product, "shippable", None),
@@ -1533,9 +1947,9 @@ def get_raw_stripe_products(force_refresh: bool = False) -> dict:
             # Preserve marketing_features as objects with name property
             if hasattr(product, "marketing_features") and product.marketing_features:
                 product_dict["marketing_features"] = [
-                    {"name": feat.get("name") if isinstance(feat, dict) else str(feat)}
+                    {"name": _stripe_feature_name(feat)}
                     for feat in product.marketing_features
-                    if feat
+                    if _stripe_feature_name(feat)
                 ]
 
             products_data.append(product_dict)
@@ -1673,5 +2087,127 @@ def get_subscription_plans(force_refresh: bool = False) -> dict:
     result = {"plans": plans}
     _stripe_plans_cache = result
     _stripe_plans_cache_time = datetime.now()
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Stripe webhook handling
+# ---------------------------------------------------------------------------
+
+def _user_id_for_stripe_customer(customer_id: str) -> Optional[str]:
+    """Look up our user _id by stripeCustomerId."""
+    if not is_connected():
+        return None
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        return None
+    doc = collection.find_one({"stripeCustomerId": customer_id}, {"_id": 1})
+    return str(doc["_id"]) if doc else None
+
+
+def handle_stripe_webhook_event(event: dict) -> dict:
+    """
+    Process a verified Stripe webhook event and update the local DB.
+
+    Returns a dict with a summary of what happened.
+    """
+    event_type = event.get("type", "")
+    data_obj = (event.get("data") or {}).get("object") or {}
+    result = {"event": event_type, "action": "ignored"}
+
+    # --- subscription events ---
+    if event_type.startswith("customer.subscription."):
+        sub_id = data_obj.get("id")
+        customer_id = data_obj.get("customer")
+        if not customer_id:
+            return result
+
+        user_id = _user_id_for_stripe_customer(customer_id)
+        if not user_id:
+            logger.warning("Webhook %s: no local user for Stripe customer %s", event_type, customer_id)
+            result["action"] = "no_user"
+            return result
+
+        stripe_status = data_obj.get("status", "free")
+        current_period_end_ts = data_obj.get("current_period_end")
+        current_period_end = (
+            datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc)
+            if current_period_end_ts
+            else None
+        )
+        cancel_at_period_end = bool(data_obj.get("cancel_at_period_end", False))
+        canceled_at_ts = data_obj.get("canceled_at")
+        canceled_at = (
+            datetime.fromtimestamp(canceled_at_ts, tz=timezone.utc)
+            if canceled_at_ts
+            else None
+        )
+
+        price_id = None
+        product_id = None
+        items = (data_obj.get("items") or {}).get("data") or []
+        if items:
+            price_obj = items[0].get("price") or {}
+            price_id = price_obj.get("id")
+            prod = price_obj.get("product")
+            if isinstance(prod, str):
+                product_id = prod
+            elif isinstance(prod, dict):
+                product_id = prod.get("id")
+
+        update_user_subscription(
+            user_id=user_id,
+            subscription_id=sub_id,
+            subscription_status=stripe_status,
+            subscription_plan=price_id or "free",
+            subscription_product_id=product_id,
+            price_id=price_id,
+            current_period_end=current_period_end,
+            cancel_at_period_end=cancel_at_period_end,
+            canceled_at=canceled_at,
+        )
+
+        logger.info(
+            "Webhook %s: updated user %s -> status=%s sub=%s",
+            event_type, user_id, stripe_status, sub_id,
+        )
+        result["action"] = "updated"
+        result["user_id"] = user_id
+        result["status"] = stripe_status
+        return result
+
+    # --- customer.deleted ---
+    if event_type == "customer.deleted":
+        customer_id = data_obj.get("id")
+        if not customer_id:
+            return result
+
+        user_id = _user_id_for_stripe_customer(customer_id)
+        if not user_id:
+            result["action"] = "no_user"
+            return result
+
+        collection = get_collection(USERS_COLLECTION)
+        if collection:
+            collection.update_one(
+                {"stripeCustomerId": customer_id},
+                {"$set": {
+                    "subscriptionId": None,
+                    "subscriptionStatus": "free",
+                    "subscriptionPlan": "free",
+                    "priceId": None,
+                    "subscriptionProductId": None,
+                    "subscriptionCurrentPeriodEnd": None,
+                    "cancelAtPeriodEnd": False,
+                    "canceledAt": None,
+                    "stripeCustomerId": None,
+                    "dateUpdated": datetime.utcnow(),
+                }},
+            )
+        logger.info("Webhook customer.deleted: reset user %s (customer %s)", user_id, customer_id)
+        result["action"] = "reset_to_free"
+        result["user_id"] = user_id
+        return result
 
     return result

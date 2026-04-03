@@ -4,8 +4,9 @@ Subscription management API routes
 
 import logging
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from app.core.auth import get_current_user
+from app.core.config import settings
 from app.models.user import UserResponse
 
 from app.models.subscription import (
@@ -24,12 +25,14 @@ from app.models.subscription import (
 from app.services.subscription_service import (
     get_user_subscription,
     create_subscription,
+    finalize_subscription_from_stripe,
     upgrade_subscription,
     cancel_subscription,
     create_payment_intent,
     get_payment_intent_status,
     get_subscription_plans,
     get_raw_stripe_products,
+    handle_stripe_webhook_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -543,13 +546,37 @@ def subscribe(request: SubscribeRequest, current_user: UserResponse = Depends(ge
     Returns:
         Subscription information
     """
+    logger.info(
+        "Subscribe finalize start: user_id=%s price_id=%s subscription_id=%s payment_intent_id=%s payment_method_id=%s trial_days=%s",
+        request.user_id,
+        request.price_id,
+        request.subscription_id,
+        request.payment_intent_id,
+        request.payment_method_id,
+        request.trial_days,
+    )
     try:
-        subscription = create_subscription(
-            user_id=request.user_id,
-            price_id=request.price_id,
-            payment_intent_id=request.payment_intent_id,
-            payment_method_id=request.payment_method_id,
-            trial_days=request.trial_days,
+        if request.subscription_id:
+            subscription = finalize_subscription_from_stripe(
+                user_id=request.user_id,
+                subscription_id=request.subscription_id,
+                price_id=request.price_id,
+            )
+        else:
+            # Backward-compatible fallback for older clients still using legacy finalize.
+            subscription = create_subscription(
+                user_id=request.user_id,
+                price_id=request.price_id,
+                payment_intent_id=request.payment_intent_id,
+                payment_method_id=request.payment_method_id,
+                trial_days=request.trial_days,
+            )
+
+        logger.info(
+            "Subscribe create_subscription returned: user_id=%s stripe_subscription_id=%s stripe_status=%s",
+            request.user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
         )
 
         # Get updated subscription info
@@ -565,6 +592,15 @@ def subscribe(request: SubscribeRequest, current_user: UserResponse = Depends(ge
         except Exception:
             generation_credits = None
             max_credits = None
+
+        logger.info(
+            "Subscribe finalize response: user_id=%s subscriptionId=%s status=%s plan=%s period_end=%s",
+            request.user_id,
+            subscription_info.subscriptionId,
+            subscription_info.subscriptionStatus,
+            subscription_info.subscriptionPlan,
+            subscription_info.subscriptionCurrentPeriodEnd,
+        )
 
         return {
             "subscription_id": subscription.id,
@@ -600,8 +636,24 @@ def upgrade(request: UpgradeRequest, current_user: UserResponse = Depends(get_cu
             user_id=request.user_id, new_price_id=request.new_price_id
         )
 
+        logger.info(
+            "Subscribe create_subscription returned: user_id=%s stripe_subscription_id=%s stripe_status=%s",
+            request.user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+        )
+
         # Get updated subscription info
         subscription_info = get_user_subscription(request.user_id)
+
+        logger.info(
+            "Subscribe finalize response: user_id=%s subscriptionId=%s status=%s plan=%s period_end=%s",
+            request.user_id,
+            subscription_info.subscriptionId,
+            subscription_info.subscriptionStatus,
+            subscription_info.subscriptionPlan,
+            subscription_info.subscriptionCurrentPeriodEnd,
+        )
 
         return {
             "message": "Subscription upgraded successfully",
@@ -634,8 +686,24 @@ def cancel(request: CancelRequest, current_user: UserResponse = Depends(get_curr
             user_id=request.user_id, cancel_immediately=request.cancel_immediately
         )
 
+        logger.info(
+            "Subscribe create_subscription returned: user_id=%s stripe_subscription_id=%s stripe_status=%s",
+            request.user_id,
+            getattr(subscription, "id", None),
+            getattr(subscription, "status", None),
+        )
+
         # Get updated subscription info
         subscription_info = get_user_subscription(request.user_id)
+
+        logger.info(
+            "Subscribe finalize response: user_id=%s subscriptionId=%s status=%s plan=%s period_end=%s",
+            request.user_id,
+            subscription_info.subscriptionId,
+            subscription_info.subscriptionStatus,
+            subscription_info.subscriptionPlan,
+            subscription_info.subscriptionCurrentPeriodEnd,
+        )
 
         return {
             "message": "Subscription canceled successfully",
@@ -651,3 +719,54 @@ def cancel(request: CancelRequest, current_user: UserResponse = Depends(get_curr
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error canceling subscription: {str(e)}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Stripe Webhook
+# ---------------------------------------------------------------------------
+
+@router.post("/stripe/webhook", include_in_schema=False)
+async def stripe_webhook(request: Request):
+    """
+    Receive Stripe webhook events and update local DB accordingly.
+
+    Configure in Stripe Dashboard -> Developers -> Webhooks:
+      URL:    https://your-domain/api/stripe/webhook
+      Events: customer.subscription.created, customer.subscription.updated,
+              customer.subscription.deleted, customer.deleted
+    """
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+    if not webhook_secret:
+        logger.error("STRIPE_WEBHOOK_SECRET not configured; rejecting webhook")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Webhook secret not configured")
+
+    try:
+        import stripe as stripe_mod
+    except ImportError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Stripe library not available")
+
+    try:
+        event = stripe_mod.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except stripe_mod.error.SignatureVerificationError:
+        logger.warning("Stripe webhook signature verification failed")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid signature")
+    except Exception as e:
+        logger.error("Stripe webhook construct_event error: %s", e)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Webhook error: {e}")
+
+    # Convert StripeObject to plain dict so .get() works in the handler
+    import json as _json
+    event_dict = _json.loads(payload)
+
+    logger.info("Stripe webhook received: %s (id=%s)", event_dict.get("type"), event_dict.get("id"))
+
+    try:
+        result = handle_stripe_webhook_event(event_dict)
+    except Exception as e:
+        logger.error("Error handling webhook event %s: %s", event_dict.get("type"), e)
+        return {"status": "error", "detail": str(e)}
+
+    return {"status": "ok", **result}

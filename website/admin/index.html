@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Portal</title>
+  <link rel="stylesheet" href="/website/admin/admin.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="/website/admin/admin.js"></script>
+</head>
+<body x-data>
+
+  <!-- ================================================================== -->
+  <!-- LOGIN VIEW                                                         -->
+  <!-- ================================================================== -->
+  <template x-if="$store.auth.view === 'login'">
+    <div class="auth-wrapper">
+      <div class="card card-sm auth-card">
+        <h2>Admin Portal</h2>
+        <p class="subtitle">Sign in with your super-user account</p>
+
+        <template x-if="$store.auth.error">
+          <div class="alert alert-error" x-text="$store.auth.error"></div>
+        </template>
+
+        <form @submit.prevent="$store.auth.login()">
+          <div class="form-group">
+            <label for="login-email">Email</label>
+            <input id="login-email" type="email" x-model="$store.auth.email"
+                   placeholder="admin@example.com" required />
+          </div>
+
+          <div class="form-group">
+            <label for="login-pass">Password</label>
+            <input id="login-pass" type="password" x-model="$store.auth.password"
+                   placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" required />
+          </div>
+
+          <div class="form-group">
+            <label for="login-delivery">2FA Delivery</label>
+            <select id="login-delivery" x-model="$store.auth.deliveryMethod">
+              <option value="sms">SMS</option>
+              <option value="email">Email</option>
+            </select>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full"
+                  :disabled="$store.auth.loading">
+            <template x-if="$store.auth.loading"><span class="spinner"></span></template>
+            <span x-show="!$store.auth.loading">Sign In</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <!-- ================================================================== -->
+  <!-- 2FA VIEW                                                           -->
+  <!-- ================================================================== -->
+  <template x-if="$store.auth.view === 'twofa'">
+    <div class="auth-wrapper">
+      <div class="card card-sm auth-card" x-data="{ code: '' }">
+        <h2>Verification</h2>
+        <p class="subtitle">Enter the 6-digit code sent to your device</p>
+
+        <template x-if="$store.auth.error">
+          <div class="alert alert-error" x-text="$store.auth.error"></div>
+        </template>
+
+        <form @submit.prevent="$store.auth.verify(code)">
+          <div class="form-group">
+            <label for="twofa-code">Verification Code</label>
+            <input id="twofa-code" type="text" x-model="code"
+                   placeholder="000000" maxlength="6" pattern="[0-9]{6}"
+                   inputmode="numeric" autocomplete="one-time-code" required
+                   style="text-align:center; font-size:1.5rem; letter-spacing:0.4em" />
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full"
+                  :disabled="$store.auth.loading || code.length !== 6">
+            <template x-if="$store.auth.loading"><span class="spinner"></span></template>
+            <span x-show="!$store.auth.loading">Verify</span>
+          </button>
+        </form>
+
+        <div style="margin-top:16px; display:flex; justify-content:space-between">
+          <button class="btn-link" @click="$store.auth.resend()">Resend code</button>
+          <button class="btn-link" @click="$store.auth.view = 'login'">Back to login</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ================================================================== -->
+  <!-- GRID VIEW (dashboard)                                              -->
+  <!-- ================================================================== -->
+  <template x-if="$store.auth.view === 'grid'">
+    <div class="admin-container">
+
+      <!-- Header -->
+      <div class="admin-header">
+        <h1>User Management</h1>
+        <div class="admin-header-actions">
+          <span class="admin-user-badge" x-text="$store.auth.email"></span>
+          <button class="btn btn-ghost btn-sm" @click="$store.auth.logout()">Sign Out</button>
+        </div>
+      </div>
+
+      <!-- Table card -->
+      <div class="card card-full">
+
+        <!-- Toolbar: search + filter -->
+        <div class="toolbar">
+          <input type="text" class="search-input"
+                 placeholder="Search name, email, or phone..."
+                 x-model="$store.users.search"
+                 @keyup.enter="$store.users.applySearch()"
+                 @input.debounce.400ms="$store.users.applySearch()" />
+          <select @change="$store.users.applyFilter()" x-model="$store.users.statusFilter">
+            <option value="">All Active</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="archived">Archived</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" @click="$store.users.load()"
+                  :disabled="$store.users.loading">
+            Refresh
+          </button>
+        </div>
+
+        <!-- Loading indicator -->
+        <div x-show="$store.users.loading" style="text-align:center; padding:30px">
+          <span class="spinner" style="width:28px; height:28px"></span>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrapper" x-show="!$store.users.loading">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th @click="$store.users.toggleSort('name')">
+                  Name
+                  <span class="sort-arrow" :class="{ active: $store.users.sort === 'name' }"
+                        x-text="$store.users.sort === 'name' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
+                </th>
+                <th @click="$store.users.toggleSort('email')">
+                  Email
+                  <span class="sort-arrow" :class="{ active: $store.users.sort === 'email' }"
+                        x-text="$store.users.sort === 'email' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
+                </th>
+                <th @click="$store.users.toggleSort('phone')">
+                  Phone
+                  <span class="sort-arrow" :class="{ active: $store.users.sort === 'phone' }"
+                        x-text="$store.users.sort === 'phone' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
+                </th>
+                <th @click="$store.users.toggleSort('isActive')">
+                  Status
+                  <span class="sort-arrow" :class="{ active: $store.users.sort === 'isActive' }"
+                        x-text="$store.users.sort === 'isActive' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
+                </th>
+                <th @click="$store.users.toggleSort('lastLogin')">
+                  Last Login
+                  <span class="sort-arrow" :class="{ active: $store.users.sort === 'lastLogin' }"
+                        x-text="$store.users.sort === 'lastLogin' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
+                </th>
+                <th @click="$store.users.toggleSort('subscriptionStatus')">
+                  Subscription
+                  <span class="sort-arrow" :class="{ active: $store.users.sort === 'subscriptionStatus' }"
+                        x-text="$store.users.sort === 'subscriptionStatus' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="u in $store.users.items" :key="u.id">
+                <tr @click="$store.users.selectRow(u.id)"
+                    :class="{ selected: $store.users.selectedId === u.id }">
+                  <td>
+                    <span x-text="u.name"></span>
+                    <template x-if="u.super_user">
+                      <span class="badge badge-super" style="margin-left:6px">Admin</span>
+                    </template>
+                  </td>
+                  <td x-text="u.email"></td>
+                  <td x-text="u.phone || '\u2014'"></td>
+                  <td>
+                    <template x-if="u.archived">
+                      <span class="badge badge-archived">Archived</span>
+                    </template>
+                    <template x-if="!u.archived && u.isActive">
+                      <span class="badge badge-active">Active</span>
+                    </template>
+                    <template x-if="!u.archived && !u.isActive">
+                      <span class="badge badge-inactive">Inactive</span>
+                    </template>
+                  </td>
+                  <td x-text="formatDate(u.lastLogin)"></td>
+                  <td>
+                    <span class="badge" :class="subStatusClass(u.subscriptionStatus)"
+                          x-text="u.subscriptionStatus || 'free'"></span>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="$store.users.items.length === 0 && !$store.users.loading">
+                <tr><td colspan="6" style="text-align:center; padding:40px; color:#999">No users found</td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Paging -->
+        <div class="paging" x-show="$store.users.total > 0">
+          <button @click="$store.users.prevPage()" :disabled="$store.users.page <= 1">&laquo; Prev</button>
+          <span x-text="$store.users.rangeText"></span>
+          <button @click="$store.users.nextPage()" :disabled="$store.users.page >= $store.users.pages">Next &raquo;</button>
+        </div>
+
+      </div><!-- /card -->
+
+
+      <!-- ============================================================== -->
+      <!-- DETAIL MODAL                                                   -->
+      <!-- ============================================================== -->
+      <template x-if="$store.detail.visible">
+        <div class="modal-backdrop" @click.self="$store.detail.close()">
+          <div class="modal">
+
+            <div class="modal-header">
+              <h3 x-text="$store.detail.user ? $store.detail.user.name : 'Loading...'"></h3>
+              <button class="modal-close" @click="$store.detail.close()">&times;</button>
+            </div>
+
+            <div class="modal-body">
+
+              <!-- Loading -->
+              <div x-show="$store.detail.loading" style="text-align:center; padding:30px">
+                <span class="spinner" style="width:28px; height:28px"></span>
+              </div>
+
+              <!-- Error -->
+              <template x-if="$store.detail.error">
+                <div class="alert alert-error" x-text="$store.detail.error"></div>
+              </template>
+
+              <!-- Content -->
+              <template x-if="$store.detail.user && !$store.detail.loading">
+                <div>
+
+                  <!-- Tabs -->
+                  <div class="tabs">
+                    <button class="tab-btn" :class="{ active: $store.detail.tab === 'profile' }"
+                            @click="$store.detail.tab = 'profile'">Profile</button>
+                    <button class="tab-btn" :class="{ active: $store.detail.tab === 'preferences' }"
+                            @click="$store.detail.tab = 'preferences'">Preferences</button>
+                    <button class="tab-btn" :class="{ active: $store.detail.tab === 'subscription' }"
+                            @click="$store.detail.tab = 'subscription'">Subscription</button>
+                    <button class="tab-btn" :class="{ active: $store.detail.tab === 'stats' }"
+                            @click="$store.detail.tab = 'stats'">Stats</button>
+                    <button class="tab-btn" :class="{ active: $store.detail.tab === 'templates' }"
+                            @click="$store.detail.tab = 'templates'">Templates</button>
+                  </div>
+
+                  <!-- ---- PROFILE TAB ---- -->
+                  <div x-show="$store.detail.tab === 'profile'">
+
+                    <!-- View mode -->
+                    <template x-if="!$store.detail.editing">
+                      <div class="detail-grid">
+                        <span class="label">Name</span>
+                        <span class="value" x-text="$store.detail.user.name"></span>
+
+                        <span class="label">Email</span>
+                        <span class="value" x-text="$store.detail.user.email"></span>
+
+                        <span class="label">Phone</span>
+                        <span class="value" x-text="$store.detail.user.phone || '\u2014'"></span>
+
+                        <span class="label">Active</span>
+                        <span class="value">
+                          <span class="badge" :class="$store.detail.user.isActive ? 'badge-active' : 'badge-inactive'"
+                                x-text="$store.detail.user.isActive ? 'Yes' : 'No'"></span>
+                        </span>
+
+                        <span class="label">Email Verified</span>
+                        <span class="value" x-text="$store.detail.user.isEmailVerified ? 'Yes' : 'No'"></span>
+
+                        <span class="label">Roles</span>
+                        <span class="value" x-text="($store.detail.user.roles || []).join(', ')"></span>
+
+                        <span class="label">Super User</span>
+                        <span class="value">
+                          <template x-if="$store.detail.user.super_user"><span class="badge badge-super">Yes</span></template>
+                          <template x-if="!$store.detail.user.super_user"><span>No</span></template>
+                        </span>
+
+                        <span class="label">Archived</span>
+                        <span class="value">
+                          <template x-if="$store.detail.user.archived"><span class="badge badge-archived">Yes</span></template>
+                          <template x-if="!$store.detail.user.archived"><span>No</span></template>
+                        </span>
+
+                        <span class="label">Created</span>
+                        <span class="value" x-text="formatDate($store.detail.user.dateCreated)"></span>
+
+                        <span class="label">Updated</span>
+                        <span class="value" x-text="formatDate($store.detail.user.dateUpdated)"></span>
+
+                        <span class="label">Last Login</span>
+                        <span class="value" x-text="formatDate($store.detail.user.lastLogin)"></span>
+
+                        <span class="label">Avatar</span>
+                        <span class="value" x-text="$store.detail.user.avatarUrl || '\u2014'"></span>
+                      </div>
+                    </template>
+
+                    <!-- Edit mode -->
+                    <template x-if="$store.detail.editing">
+                      <div class="detail-grid">
+                        <span class="label">Name</span>
+                        <span class="value"><input type="text" x-model="$store.detail.editData.name" /></span>
+
+                        <span class="label">Email</span>
+                        <span class="value"><input type="email" x-model="$store.detail.editData.email" /></span>
+
+                        <span class="label">Phone</span>
+                        <span class="value"><input type="text" x-model="$store.detail.editData.phone" /></span>
+
+                        <span class="label">Active</span>
+                        <span class="value">
+                          <select x-model.boolean="$store.detail.editData.isActive"
+                                  @change="$store.detail.editData.isActive = ($event.target.value === 'true')">
+                            <option value="true" :selected="$store.detail.editData.isActive === true">Yes</option>
+                            <option value="false" :selected="$store.detail.editData.isActive === false">No</option>
+                          </select>
+                        </span>
+
+                        <span class="label">Roles</span>
+                        <span class="value"><input type="text" x-model="$store.detail.editData.roles" placeholder="user, admin" /></span>
+
+                        <span class="label">Credits</span>
+                        <span class="value"><input type="number" x-model="$store.detail.editData.generation_credits" min="0" /></span>
+
+                        <span class="label">Max Credits</span>
+                        <span class="value"><input type="number" x-model="$store.detail.editData.max_credits" min="0" /></span>
+
+                        <span class="label">Super User</span>
+                        <span class="value">
+                          <select @change="$store.detail.editData.super_user = ($event.target.value === 'true')">
+                            <option value="true" :selected="$store.detail.editData.super_user === true">Yes</option>
+                            <option value="false" :selected="$store.detail.editData.super_user === false">No</option>
+                          </select>
+                        </span>
+                      </div>
+                    </template>
+
+                    <!-- Action buttons -->
+                    <div class="modal-actions">
+                      <template x-if="!$store.detail.editing">
+                        <div style="display:flex; gap:10px; width:100%; justify-content:flex-end">
+                          <button class="btn btn-primary btn-sm" @click="$store.detail.startEdit()">Edit</button>
+                          <template x-if="!$store.detail.user.archived">
+                            <button class="btn btn-danger btn-sm" @click="$store.detail.archive()"
+                                    :disabled="$store.detail.saving">Archive</button>
+                          </template>
+                          <template x-if="$store.detail.user.archived">
+                            <button class="btn btn-secondary btn-sm" @click="$store.detail.unarchive()"
+                                    :disabled="$store.detail.saving">Unarchive</button>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="$store.detail.editing">
+                        <div style="display:flex; gap:10px; width:100%; justify-content:flex-end">
+                          <button class="btn btn-secondary btn-sm" @click="$store.detail.cancelEdit()">Cancel</button>
+                          <button class="btn btn-primary btn-sm" @click="$store.detail.save()"
+                                  :disabled="$store.detail.saving">
+                            <template x-if="$store.detail.saving"><span class="spinner"></span></template>
+                            <span x-show="!$store.detail.saving">Save</span>
+                          </button>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- ---- PREFERENCES TAB ---- -->
+                  <div x-show="$store.detail.tab === 'preferences'">
+                    <div class="detail-grid">
+                      <span class="label">Theme</span>
+                      <span class="value"
+                            x-text="($store.detail.user.preferences && $store.detail.user.preferences.theme) || 'light'"></span>
+
+                      <span class="label">Newsletter</span>
+                      <span class="value"
+                            x-text="($store.detail.user.preferences && $store.detail.user.preferences.newsletterOptIn) ? 'Yes' : 'No'"></span>
+
+                      <span class="label">Selected Model</span>
+                      <span class="value"
+                            x-text="($store.detail.user.preferences && $store.detail.user.preferences.appSettings && $store.detail.user.preferences.appSettings.selectedModel) || '\u2014'"></span>
+
+                      <span class="label">Auto-Pick Template</span>
+                      <span class="value"
+                            x-text="($store.detail.user.preferences && $store.detail.user.preferences.appSettings && $store.detail.user.preferences.appSettings.letterTemplateAutoPick !== undefined) ? ($store.detail.user.preferences.appSettings.letterTemplateAutoPick ? 'Yes' : 'No') : 'Yes'"></span>
+                    </div>
+                    <div class="modal-actions">
+                      <button class="btn btn-secondary btn-sm"
+                              @click="$store.submodal.openJson('Edit Preferences', 'preferences')">
+                        Edit JSON
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- ---- SUBSCRIPTION TAB ---- -->
+                  <div x-show="$store.detail.tab === 'subscription'">
+                    <div class="detail-grid">
+                      <span class="label">Status</span>
+                      <span class="value">
+                        <span class="badge" :class="subStatusClass($store.detail.user.subscriptionStatus)"
+                              x-text="$store.detail.user.subscriptionStatus || 'free'"></span>
+                      </span>
+
+                      <span class="label">Plan</span>
+                      <span class="value" x-text="$store.detail.user.subscriptionPlan || '\u2014'"></span>
+
+                      <span class="label">Period End</span>
+                      <span class="value" x-text="formatDate($store.detail.user.subscriptionCurrentPeriodEnd)"></span>
+
+                      <span class="label">Stripe Customer</span>
+                      <span class="value" x-text="$store.detail.user.stripeCustomerId || '\u2014'"></span>
+                    </div>
+                  </div>
+
+                  <!-- ---- STATS TAB ---- -->
+                  <div x-show="$store.detail.tab === 'stats'">
+                    <div class="detail-grid">
+                      <span class="label">Credits</span>
+                      <span class="value"
+                            x-text="$store.detail.user.generation_credits + ' / ' + $store.detail.user.max_credits"></span>
+
+                      <span class="label">Last Model</span>
+                      <span class="value" x-text="$store.detail.user.last_llm_used || '\u2014'"></span>
+
+                      <span class="label">SMS Opt</span>
+                      <span class="value" x-text="$store.detail.user.SMSOpt || '\u2014'"></span>
+                    </div>
+
+                    <template x-if="$store.detail.user.llm_counts">
+                      <div style="margin-top:16px">
+                        <span class="label" style="display:block; margin-bottom:8px; font-weight:600; color:#555">LLM Usage</span>
+                        <template x-for="[model, count] in Object.entries($store.detail.user.llm_counts)" :key="model">
+                          <div style="display:flex; justify-content:space-between; padding:4px 0; font-size:0.85rem; border-bottom:1px solid #f0f0f0">
+                            <span x-text="model" style="color:#555"></span>
+                            <span x-text="count" style="font-weight:600"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
+                  <!-- ---- TEMPLATES TAB ---- -->
+                  <div x-show="$store.detail.tab === 'templates'">
+                    <div class="detail-grid">
+                      <span class="label">Auto-Pick</span>
+                      <span class="value"
+                            x-text="($store.detail.user.preferences && $store.detail.user.preferences.appSettings && $store.detail.user.preferences.appSettings.letterTemplateAutoPick !== undefined) ? ($store.detail.user.preferences.appSettings.letterTemplateAutoPick ? 'Yes' : 'No') : 'Yes'"></span>
+
+                      <span class="label">Selection</span>
+                      <span class="value"
+                            x-text="($store.detail.user.preferences && $store.detail.user.preferences.appSettings && $store.detail.user.preferences.appSettings.letterTemplateSelection) ? ($store.detail.user.preferences.appSettings.letterTemplateSelection.name + ' #' + $store.detail.user.preferences.appSettings.letterTemplateSelection.index) : '\u2014'"></span>
+
+                      <span class="label">Last Resume</span>
+                      <span class="value"
+                            x-text="($store.detail.user.preferences && $store.detail.user.preferences.appSettings && $store.detail.user.preferences.appSettings.lastResumeUsed) || '\u2014'"></span>
+                    </div>
+
+                    <template x-if="$store.detail.user.preferences && $store.detail.user.preferences.appSettings && $store.detail.user.preferences.appSettings.personalityProfiles">
+                      <div style="margin-top:16px">
+                        <span class="label" style="display:block; margin-bottom:8px; font-weight:600; color:#555">Personality Profiles</span>
+                        <template x-for="p in $store.detail.user.preferences.appSettings.personalityProfiles" :key="p.id">
+                          <div style="background:#f8f9fa; padding:10px 14px; border-radius:8px; margin-bottom:6px; font-size:0.85rem">
+                            <strong x-text="p.name" style="color:#667eea"></strong>
+                            <div x-text="p.description" style="color:#666; margin-top:4px"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
+                </div>
+              </template>
+
+            </div><!-- /modal-body -->
+          </div><!-- /modal -->
+        </div>
+      </template>
+
+
+      <!-- ============================================================== -->
+      <!-- SUB-MODAL (JSON editor)                                        -->
+      <!-- ============================================================== -->
+      <template x-if="$store.submodal.visible">
+        <div class="sub-modal-backdrop" @click.self="$store.submodal.close()">
+          <div class="sub-modal">
+            <div class="modal-header">
+              <h3 x-text="$store.submodal.title"></h3>
+              <button class="modal-close" @click="$store.submodal.close()">&times;</button>
+            </div>
+            <div class="modal-body">
+              <template x-if="$store.submodal.error">
+                <div class="alert alert-error" x-text="$store.submodal.error"></div>
+              </template>
+              <textarea x-model="$store.submodal.jsonText"></textarea>
+              <div class="modal-actions">
+                <button class="btn btn-secondary btn-sm" @click="$store.submodal.close()">Cancel</button>
+                <button class="btn btn-primary btn-sm" @click="$store.submodal.save()"
+                        :disabled="$store.submodal.saving">
+                  <template x-if="$store.submodal.saving"><span class="spinner"></span></template>
+                  <span x-show="!$store.submodal.saving">Save</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+    </div><!-- /admin-container -->
+  </template>
+
+</body>
+</html>
