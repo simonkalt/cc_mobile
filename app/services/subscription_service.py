@@ -553,37 +553,24 @@ def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None)
     Returns:
         Stripe customer ID
     """
-    logger.info(
-        "create_subscription start: user_id=%s price_id=%s payment_intent_id=%s payment_method_id=%s customer_id=%s trial_days=%s",
-        user_id,
-        price_id,
-        payment_intent_id,
-        payment_method_id,
-        customer_id,
-        trial_days,
-    )
-
-    # Use _get_stripe_module() to ensure API key is properly configured
     stripe_to_use = _get_stripe_module()
-    
+
     if stripe_to_use is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stripe library not available. Please ensure stripe>=7.0.0 is installed: pip install stripe>=7.0.0"
         )
-    
-    # Verify API key is set
+
     if not stripe_to_use.api_key:
         stripe_api_key = settings.STRIPE_API_KEY or settings.STRIPE_TEST_API_KEY
         if not stripe_api_key:
             logger.error("Stripe API key not configured (STRIPE_API_KEY or STRIPE_TEST_API_KEY)")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Stripe API key not configured. Please set STRIPE_API_KEY or STRIPE_TEST_API_KEY in environment variables.",
+                detail="Stripe API key not configured",
             )
         stripe_to_use.api_key = stripe_api_key
-        logger.debug("Stripe API key set in create_stripe_customer")
-    
+
     try:
         customer = stripe_to_use.Customer.create(email=email, name=name, metadata={"user_id": user_id})
         logger.info(f"Created Stripe customer {customer.id} for user {user_id}")
@@ -758,8 +745,7 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
 
         # SUBSCRIPTION-FIRST FLOW:
         # Create the subscription first in default_incomplete and return invoice PI client_secret.
-        sub = stripe_to_use.Subscription.create(
-            customer=stripe_customer_id,
+        _sub_kwargs = dict(
             items=[{"price": price_id}],
             payment_behavior="default_incomplete",
             payment_settings={
@@ -769,6 +755,27 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
             metadata={"user_id": user_id},
             expand=["latest_invoice.payment_intent", "items.data.price.product"],
         )
+
+        try:
+            sub = stripe_to_use.Subscription.create(customer=stripe_customer_id, **_sub_kwargs)
+        except stripe_to_use.error.InvalidRequestError as sub_err:
+            err_str = str(sub_err)
+            is_stale = (
+                "No such customer" in err_str
+                or getattr(sub_err, "code", None) == "resource_missing"
+            )
+            if is_stale:
+                logger.warning(
+                    "Stale stripeCustomerId %s during Subscription.create for user %s; recreating customer",
+                    stripe_customer_id, user_id,
+                )
+                stripe_customer_id = create_stripe_customer(
+                    user_id=user_id, email=user.get("email", ""), name=user.get("name")
+                )
+                update_user_subscription(user_id=user_id, stripe_customer_id=stripe_customer_id)
+                sub = stripe_to_use.Subscription.create(customer=stripe_customer_id, **_sub_kwargs)
+            else:
+                raise
         latest_invoice = getattr(sub, "latest_invoice", None)
         invoice_pi = getattr(latest_invoice, "payment_intent", None) if latest_invoice else None
         if not invoice_pi:
