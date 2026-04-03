@@ -1135,6 +1135,40 @@ def _inject_gtag_into_index_html(html: str) -> str:
     return html.replace("</head>", snippet + "  </head>", 1)
 
 
+def _inject_store_urls_into_index_html(html: str) -> str:
+    """
+    Replace __PLAY_STORE_ATTRS__ / __IOS_APP_STORE_ATTRS__ with href + rel for store badges.
+    If env URL is unset, keep prior \"Coming soon\" behavior via onclick.
+    """
+    import html as html_module
+
+    play = (os.getenv("PLAY_STORE_URL") or "").strip()
+    ios = (os.getenv("IOS_APP_STORE_URL") or "").strip()
+
+    if play:
+        safe = html_module.escape(play, quote=True)
+        play_attrs = f'href="{safe}" target="_blank" rel="noopener noreferrer"'
+    else:
+        play_attrs = (
+            'href="#" onclick="alert(\'Coming soon.\'); return false;" role="button" '
+            'aria-disabled="true"'
+        )
+
+    if ios:
+        safe_ios = html_module.escape(ios, quote=True)
+        ios_attrs = f'href="{safe_ios}" target="_blank" rel="noopener noreferrer"'
+    else:
+        ios_attrs = (
+            'href="#" onclick="alert(\'Coming soon.\'); return false;" role="button" '
+            'aria-disabled="true"'
+        )
+
+    return (
+        html.replace("__PLAY_STORE_ATTRS__", play_attrs)
+        .replace("__IOS_APP_STORE_ATTRS__", ios_attrs)
+    )
+
+
 # Serve webpage at root (/) so root URL shows website/index.html
 @app.get("/")
 def read_root():
@@ -1144,6 +1178,7 @@ def read_root():
         with open(index_path, "r", encoding="utf-8") as f:
             html = f.read()
         html = _inject_gtag_into_index_html(html)
+        html = _inject_store_urls_into_index_html(html)
         return HTMLResponse(content=html, media_type="text/html")
     # Fallback if website/index.html is missing
     return JSONResponse(
@@ -1155,6 +1190,16 @@ def read_root():
 def favicon():
     """Browsers request /favicon.ico by default; static assets live under /website/."""
     return RedirectResponse(url="/website/images/1.png", status_code=302)
+
+
+@app.get("/delete-account.html", include_in_schema=False)
+def delete_account_page():
+    """Marketing footer links use /delete-account.html; file lives under website/."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "delete-account.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Delete account page not found"})
 
 
 @app.get("/subscribed")

@@ -73,6 +73,18 @@
         background: #764ba2;
         transform: translateY(-2px);
       }
+      .copy-request-btn {
+        background: none;
+        border: none;
+        color: #667eea;
+        text-decoration: underline;
+        cursor: pointer;
+        font: inherit;
+        padding: 0;
+      }
+      .copy-request-btn:hover {
+        color: #764ba2;
+      }
       .data-section {
         margin: 2.5rem 0;
       }
@@ -135,16 +147,30 @@
           <h3>Steps to request account and data deletion</h3>
           <ol class="steps-list">
             <li>Send an email to us from the <strong>email address associated with your account</strong>.</li>
-            <li>Use the subject line: <strong>Account deletion request – AI Job Cover Letter Generator</strong> (or include the app name so we can identify your request).</li>
+            <li>Use the subject line: <strong>sAImon Software: Delete Account Request</strong> (or include the app name so we can identify your request).</li>
             <li>Optionally, state that you want your account and associated data deleted.</li>
             <li>We will confirm receipt and process your request within a reasonable period (typically within 30 days). We may contact you once to verify your identity.</li>
           </ol>
           <a
             class="cta-delete"
-            href="mailto:support@saimonsoft.com?subject=Account%20deletion%20request%20-%20AI%20Job%20Cover%20Letter%20Generator"
+            id="delete-account-email-cta"
+            href="mailto:support@saimonsoft.com"
+            target="_top"
+            rel="noopener noreferrer"
           >
             Request account deletion via email
           </a>
+          <p class="mailto-fallback" style="margin-top: 1rem; font-size: 0.95rem; color: #555; line-height: 1.5;">
+            If your email app does not open, email
+            <strong><a href="mailto:support@saimonsoft.com" target="_top">support@saimonsoft.com</a></strong>
+            with subject
+            <strong>sAImon Software: Delete Account Request</strong>,
+            or
+            <button type="button" class="copy-request-btn" id="copy-delete-request">
+              copy address &amp; subject
+            </button>
+            to paste into any email app.
+          </p>
         </div>
 
         <div class="data-section">
@@ -185,5 +211,43 @@
         </p>
       </footer>
     </div>
+    <script>
+      (function () {
+        var subject = "sAImon Software: Delete Account Request";
+        var email = "support@saimonsoft.com";
+        var cta = document.getElementById("delete-account-email-cta");
+        if (cta) {
+          cta.href =
+            "mailto:" +
+            email +
+            "?subject=" +
+            encodeURIComponent(subject);
+        }
+        var copyBtn = document.getElementById("copy-delete-request");
+        if (copyBtn) {
+          copyBtn.addEventListener("click", function () {
+            var text =
+              "Email: " +
+              email +
+              "\nSubject: " +
+              subject;
+            function done() {
+              var orig = copyBtn.textContent;
+              copyBtn.textContent = "Copied!";
+              setTimeout(function () {
+                copyBtn.textContent = orig;
+              }, 2000);
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done).catch(function () {
+                window.prompt("Copy this text:", text);
+              });
+            } else {
+              window.prompt("Copy this text:", text);
+            }
+          });
+        }
+      })();
+    </script>
   </body>
 </html>
