@@ -106,26 +106,27 @@
         <div class="cta-section">
           <span class="cta-label">Get Started</span>
           <div class="app-store-buttons">
-            <div
+            <!-- Injected on GET /: PLAY_STORE_URL, IOS_APP_STORE_URL -->
+            <a
               class="app-store-button"
               id="googlePlayBtn"
-              onclick="alert('Coming soon.')"
+              __PLAY_STORE_ATTRS__
             >
               <img
                 src="/website/images/footer-google-play.avif"
                 alt="Get it on Google Play"
               />
-            </div>
-            <div
+            </a>
+            <a
               class="app-store-button"
               id="appStoreBtn"
-              onclick="alert('Coming soon.')"
+              __IOS_APP_STORE_ATTRS__
             >
               <img
                 src="/website/images/footer-app-store.avif"
                 alt="Download on the App Store"
               />
-            </div>
+            </a>
           </div>
         </div>
       </div>
