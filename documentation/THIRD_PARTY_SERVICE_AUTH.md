@@ -88,10 +88,11 @@ print(r.json())
 `/api/integration/*` routes require `X-Service-Auth` by router dependency.
 Additional routes outside that router are controlled by `integration_auth_endpoints.json`.
 
-**Current examples include:**
+**Examples:**
 
 - `GET /api/integration/ping`
-- `POST /api/files/docx-to-pdf`
+
+Additional routes are listed in `integration_auth_endpoints.json` (currently empty for PDF routes; server-side PDF under `/api/files/*` is disabled — see `documentation/PDF_SERVER_SIDE_REMOVED.md`).
 
 Other parts of the API may use end-user JWT (`Authorization: Bearer ...`) or be public.
 

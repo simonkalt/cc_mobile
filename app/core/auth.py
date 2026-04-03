@@ -59,9 +59,10 @@ def _load_integration_auth_rules() -> list[dict]:
     File format:
     {
       "endpoints": [
-        {"method": "POST", "path": "/api/files/docx-to-pdf", "enabled": true}
+        {"method": "POST", "path": "/api/some/integration/route", "enabled": true}
       ]
     }
+    (PDF routes under /api/files/* are disabled; see documentation/PDF_SERVER_SIDE_REMOVED.md.)
     """
     path = Path(settings.INTEGRATION_AUTH_ENDPOINTS_FILE)
     if not path.exists():

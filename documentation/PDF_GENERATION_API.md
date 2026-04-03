@@ -1,6 +1,10 @@
 # PDF Generation API Documentation
 
-This endpoint generates properly formatted PDFs from Markdown content on the server-side, ensuring all Markdown formatting (bold, italic, headings, lists, etc.) is preserved correctly.
+> **Removed from this Python API (2026).** Server-side PDF generation (Markdown/HTML → PDF, print template, and related flows) is **disabled**. The routes `POST /api/files/generate-pdf`, `POST /api/files/print-preview-pdf`, and `POST /api/files/print-template` now return **HTTP 410 Gone** with a message to use the **Syncfusion (.NET)** service for PDF creation. The document below is **historical** and describes the former behavior.
+
+---
+
+This endpoint ~~generates~~ *previously generated* properly formatted PDFs from Markdown content on the server-side, ensuring all Markdown formatting (bold, italic, headings, lists, etc.) was preserved correctly.
 
 ## Endpoint
 

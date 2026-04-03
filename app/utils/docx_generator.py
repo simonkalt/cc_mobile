@@ -2,8 +2,8 @@
 Generate a .docx (Word) document from cover letter content (markdown or HTML).
 
 Preserves bold, italic, and lists in the output. Used so the server can return
-a fully adorned .docx to the client for editing; print preview then uses
-POST /api/files/docx-to-pdf with that (possibly edited) .docx.
+a fully adorned .docx to the client for editing; PDF export is handled by the
+Syncfusion (.NET) service (not POST /api/files/docx-to-pdf on this API).
 
 When USE_DOCX_COMPONENTS is True, the LLM may return three XML components
 (document_xml, numbering_xml, styles_xml) which we assemble into a .docx via

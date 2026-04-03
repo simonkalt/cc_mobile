@@ -1,5 +1,9 @@
 """
-PDF generation service
+PDF generation service (deprecated / not used at runtime).
+
+Server-side PDF creation was removed from the FastAPI app; PDFs are produced by the
+Syncfusion (.NET) service instead. This module is kept for reference and potential reuse.
+Routers in ``app.api.routers.pdf`` return HTTP 410 Gone.
 """
 
 import asyncio
@@ -132,8 +136,11 @@ def _build_print_template_css_and_body(
     width_in = page_size.get("width", 8.5)
     height_in = page_size.get("height", 11.0)
 
+    # LibreOffice HTML→PDF ignores @page margins; use body padding for the same inset (inches).
+    # Keep @page margin 0 so we do not double-apply if an engine honors @page.
     body_style = (
-        "margin: 0; padding: 0; box-sizing: border-box; "
+        f"margin: 0; padding: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in; "
+        "box-sizing: border-box; "
         "white-space: pre-wrap; word-wrap: break-word;"
     )
     if not use_default_fonts:
@@ -147,7 +154,7 @@ def _build_print_template_css_and_body(
     css_block = f"""
 @page {{
   size: {width_in}in {height_in}in;
-  margin: {margin_top}in {margin_right}in {margin_bottom}in {margin_left}in;
+  margin: 0;
 }}
 *, *::before, *::after {{ box-sizing: border-box; }}
 /* Force zero margin/padding on all content so only @page margin applies */

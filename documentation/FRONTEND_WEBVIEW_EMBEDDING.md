@@ -38,16 +38,17 @@ If `#editorContainer` ends up with **0×0** pixels, the editor cannot paint. Tha
 
 ## Share as PDF
 
-See **`DOCX_TO_PDF_API.md`** and **`THIRD_PARTY_SERVICE_AUTH.md`**. When **`CC_MOBILE_SERVICE_KEY`** and **`PDF_API_BASE_URL`** (or **`PdfApi:BaseUrl`**) are set on this service, **`GET /api/config`** returns **`pdfShareViaProxy: true`** and Share uses same-origin **`POST /api/pdf/docx-to-pdf`** (no secret in the browser). Otherwise use query params **`pdf_api_base`** / **`backend_url`** and **`access_token`** for direct calls to the Python API.
+**Update:** PDF creation is handled by the **Syncfusion (.NET)** stack, not by `POST /api/files/docx-to-pdf` on this Python API (that route returns **410 Gone**). See **`PDF_SERVER_SIDE_REMOVED.md`**.
+
+Historical notes: **`DOCX_TO_PDF_API.md`** and **`THIRD_PARTY_SERVICE_AUTH.md`** described the old Python conversion path. If your host still proxies PDF work, point it at your **.NET / Syncfusion** service rather than the FastAPI docx-to-pdf endpoint.
 
 ### Integration auth from frontend (recommended pattern)
 
 If the external DOCX/PDF service requires integration authentication (shared secret), use this pattern:
 
-1. **Frontend/WebView calls your host service only** (same-origin endpoint such as `POST /api/pdf/docx-to-pdf`).
-2. **Host service adds integration auth** server-side (for example `X-Service-Auth: <SERVICE_AUTH_KEY>`) when forwarding to the Python API.
-3. Python API validates the integration auth and processes conversion.
-4. Host service returns result to frontend.
+1. **Frontend/WebView calls your host or .NET PDF service** (not the disabled Python `docx-to-pdf` route).
+2. **Host service** applies integration auth or forwards to the **Syncfusion** pipeline as your architecture defines.
+3. Return the PDF or share payload to the frontend.
 
 This keeps `SERVICE_AUTH_KEY` out of JavaScript, app bundles, and device logs.
 
