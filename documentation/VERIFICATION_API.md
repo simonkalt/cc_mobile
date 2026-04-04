@@ -26,7 +26,7 @@ Every `send-code` endpoint enforces the following **before** any code is generat
 |---------|-------------------|----------------------|----------------------------------|
 | SMS (by email) | `email` | `get_user_by_email` — 404 if no match | Returns generic **200** without sending (prevents user enumeration) |
 | SMS (by phone) | `phone` | MongoDB query on normalised phone — 404 if no match | Returns generic **200** without sending (prevents user enumeration) |
-| SMS (any purpose) | — | Confirms `user.phone` is set after lookup | **400** "User does not have a phone number registered" |
+| SMS (any purpose) | — | Confirms `user.phone` is set after lookup | Returns generic **200** without sending (prevents user enumeration); other purposes → **400** "User does not have a phone number registered" |
 | Email (existing user) | `email` | `get_user_by_email_ignore_case` — 404 if no match | Returns generic **200** without sending (prevents user enumeration) |
 | Email (registration) | `email` | `get_user_by_email` — **409** if user already exists | N/A (registration only) |
 | Admin login | `email` + `password` | Loads user by email; checks `isActive`, `super_user`, password | **401** / **403** |
@@ -72,12 +72,12 @@ Send a 6-digit verification code via SMS.
 
 | Status | Condition |
 |--------|-----------|
-| 400 | Invalid purpose, neither `email` nor `phone` provided, or user has no phone on file |
+| 400 | Invalid purpose, neither `email` nor `phone` provided, or user has no phone on file (non-`forgot_password` only) |
 | 404 | User not found (non-`forgot_password` purposes only) |
 | 500 | SMS provider failure |
 | 503 | Database unavailable |
 
-> **Security note:** For `forgot_password`, a **200** is always returned regardless of whether the user exists, to prevent account enumeration.
+> **Security note:** For `forgot_password`, a **200** is always returned regardless of whether the user exists or has a phone number on file. No error status code is ever returned for this purpose. This prevents account and phone-number enumeration.
 
 ---
 

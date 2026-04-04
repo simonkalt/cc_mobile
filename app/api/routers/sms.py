@@ -147,6 +147,12 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
     # Get phone number
     phone_number = user.phone
     if not phone_number:
+        if request.purpose == "forgot_password":
+            return SendVerificationCodeResponse(
+                success=True,
+                message="If an account exists with this email, a verification code has been sent.",
+                expires_in_minutes=10
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User does not have a phone number registered"
