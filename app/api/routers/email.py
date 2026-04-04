@@ -140,23 +140,10 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             )
     
     # Handle existing user flows (forgot_password, change_password)
-    # Find user by email (case-insensitive so we find them even if casing differs)
+    # Find user by email (case-insensitive so we find them even if casing differs).
+    # NOTE: forgot_password intentionally surfaces the 404 so the frontend can
+    # keep the user on the send-code step.  This trades anti-enumeration for UX.
     user = get_user_by_email_ignore_case(request.email)
-    if not user:
-        # For forgot_password, don't reveal if user exists (security best practice)
-        if request.purpose == "forgot_password":
-            logger.info(
-                "forgot_password: no user found for email (returning 200 without sending)"
-            )
-            return SendVerificationCodeResponse(
-                success=True,
-                message="If an account exists with this email, a verification code has been sent.",
-                expires_in_minutes=10
-            )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
     
     # Send and store verification code.
     # Use the requested email after user lookup succeeds so stale DB email values do not misroute delivery.
