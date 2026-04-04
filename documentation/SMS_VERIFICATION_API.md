@@ -67,12 +67,10 @@ Send a 6-digit verification code via SMS to the user's registered phone number.
 **Error Responses:**
 
 - `400 Bad Request`: Invalid purpose or missing email/phone
-- `404 Not Found`: User not found (non-`forgot_password` purposes only)
-- `400 Bad Request`: User does not have a phone number registered (non-`forgot_password` purposes only)
+- `404 Not Found`: User not found (all purposes including `forgot_password`)
+- `400 Bad Request`: User does not have a phone number registered
 - `500 Internal Server Error`: Failed to send SMS
 - `503 Service Unavailable`: Database connection unavailable
-
-> **Security note:** For `forgot_password`, a **200** is always returned regardless of whether the user/phone exists. No 404 or 400 is ever returned for this purpose.
 
 **Example cURL:**
 
@@ -797,7 +795,7 @@ While not implemented in the API, consider implementing rate limiting on the fro
 
 ### Error Handling Best Practices
 
-- **Forgot Password**: Always returns **200** even if the user doesn't exist or has no phone on file (prevents account/phone enumeration). No 404 or 400 is ever surfaced for this purpose.
+- **Forgot Password**: Returns **404** if the user doesn't exist. The frontend uses this to keep the user on the send-code step and display a "not found" message. This is a deliberate UX-over-enumeration-protection decision.
 - **Other Flows**: Return specific error messages for debugging
 - Log all verification attempts for security auditing
 
