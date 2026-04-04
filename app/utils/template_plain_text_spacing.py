@@ -1,105 +1,82 @@
 """
-Enforce vertical spacing from a line-oriented .template file on plain-text cover
-letter content before DOCX generation.
+Minimal plain-text normalization before DOCX generation.
 
-The DOCX plain-text path treats \\n\\n as paragraph breaks and single \\n as soft
-line breaks inside one paragraph. LLM output often uses only single newlines, so
-blank lines from the template disappear. This module rebuilds the letter using
-the template's empty-line counts between non-empty template rows.
+The DOCX builder maps each input line (including blank lines) 1:1 to a Word
+paragraph with zero extra spacing, so the LLM's newlines directly control
+vertical layout.  The only post-processing that remains here is:
+
+* List compaction  – remove blank lines between consecutive bullet/number items.
+* Triple-newline collapse – safety net for non-template letters where the LLM
+  occasionally emits excessive blank lines.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import List, Optional
-
-logger = logging.getLogger(__name__)
 
 
 def _normalize_newlines(text: str) -> str:
     return (text or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _blanks_between_nonempty_template_lines(template: str) -> List[int]:
-    lines = _normalize_newlines(template).split("\n")
-    indices = [i for i, line in enumerate(lines) if line.strip()]
-    if len(indices) < 2:
-        return []
-    return [indices[i + 1] - indices[i] - 1 for i in range(len(indices) - 1)]
+def _collapse_triple_newlines_in_plain_text(text: str) -> str:
+    """Collapse runs of three or more newlines to exactly two (one blank line)."""
+    return re.sub(r"\n{3,}", "\n\n", _normalize_newlines(text))
 
 
-def enforce_plain_text_line_spacing_from_template(
-    content: str,
-    template: str,
-) -> str:
+def _is_plain_text_list_line(line: str) -> bool:
+    """Match bullet/number list lines (aligned with docx_generator list detection)."""
+    if not line or not line.strip():
+        return False
+    if re.match(r"^\s*(?:\(?[1-9]\d?\)?[.)])\s+", line):
+        return True
+    if re.match(r"^\s*(?:[•◦▪▸\-\*\+])\s+", line):
+        return True
+    return False
+
+
+def compact_blank_lines_between_consecutive_list_lines(lines: List[str]) -> List[str]:
     """
-    Re-space plain text so blank-line runs match the template file layout.
-
-    Parses the template's non-empty lines in order, finds <<body paragraphs>>,
-    and assumes the LLM output has the same logical order: header lines, body
-    (possibly multiple lines/paragraphs), footer lines. If the structure cannot
-    be inferred safely, returns ``content`` unchanged.
+    Drop blank lines between two consecutive list items so bullets/numbers pack tightly.
+    Paragraph-to-list spacing (non-list followed by list) is unchanged.
     """
-    content = _normalize_newlines(content)
-    template = _normalize_newlines(template)
-    if not content.strip() or not template.strip():
-        return content
-
-    t_lines = template.split("\n")
-    nonempty_template = [line.strip() for line in t_lines if line.strip()]
-    if not nonempty_template:
-        return content
-
-    body_ph_re = re.compile(r"<<\s*body\s+paragraphs\s*>>", re.IGNORECASE)
-    body_idx: Optional[int] = None
-    for i, line in enumerate(nonempty_template):
-        if body_ph_re.search(line):
-            body_idx = i
-            break
-    if body_idx is None:
-        return content
-
-    footer_slots = nonempty_template[body_idx + 1 :]
-    num_header = body_idx
-    num_footer = len(footer_slots)
-    if num_header < 1 or num_footer < 1:
-        return content
-
-    gaps = _blanks_between_nonempty_template_lines(template)
-    if len(gaps) != len(nonempty_template) - 1:
-        logger.debug(
-            "template_plain_text_spacing: gap count mismatch (gaps=%s nonempty=%s)",
-            len(gaps),
-            len(nonempty_template),
-        )
-        return content
-
-    lines = content.split("\n")
-    nonempty_indices = [i for i, line in enumerate(lines) if line.strip()]
-    if len(nonempty_indices) < num_header + num_footer + 1:
-        return content
-
-    body_start_line = nonempty_indices[num_header]
-    footer_start_line = nonempty_indices[-num_footer]
-    if body_start_line >= footer_start_line:
-        return content
-
-    header_nonempty = [lines[i].strip() for i in nonempty_indices[:num_header]]
-    footer_nonempty = [lines[i].strip() for i in nonempty_indices[-num_footer:]]
-    body_lines = lines[body_start_line:footer_start_line]
-
     out: List[str] = []
-    for i in range(num_header):
-        out.append(header_nonempty[i])
-        if i < num_header - 1:
-            out.extend([""] * gaps[i])
-    out.extend([""] * gaps[num_header - 1])
-    out.extend(body_lines)
-    out.extend([""] * gaps[num_header])
-    for j in range(num_footer):
-        out.append(footer_nonempty[j])
-        if j < num_footer - 1:
-            out.extend([""] * gaps[num_header + j + 1])
+    for i, line in enumerate(lines):
+        if not line.strip():
+            prev_text = None
+            for j in range(i - 1, -1, -1):
+                if lines[j].strip():
+                    prev_text = lines[j]
+                    break
+            next_text = None
+            for j in range(i + 1, len(lines)):
+                if lines[j].strip():
+                    next_text = lines[j]
+                    break
+            if (
+                prev_text
+                and next_text
+                and _is_plain_text_list_line(prev_text)
+                and _is_plain_text_list_line(next_text)
+            ):
+                continue
+        out.append(line)
+    return out
 
-    return "\n".join(out)
+
+def finalize_plain_text_for_docx(content: str, template: Optional[str]) -> str:
+    """
+    Last pass on plain-text cover letter before DOCX build.
+
+    When a template is present the LLM is trusted to produce the correct spacing;
+    only list compaction runs.  Without a template, excessive blank-line runs
+    (3+ newlines) are collapsed as a safety net.
+    """
+    text = _normalize_newlines(content or "")
+    if not text.strip():
+        return text
+    if not (template and template.strip()):
+        text = _collapse_triple_newlines_in_plain_text(text)
+    lines = compact_blank_lines_between_consecutive_list_lines(text.split("\n"))
+    return "\n".join(lines)
