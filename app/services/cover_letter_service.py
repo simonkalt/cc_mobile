@@ -44,7 +44,7 @@ from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
 from app.utils.redis_utils import get_redis_client
 from app.utils.generation_timing import GenerationTiming
-from app.utils.template_plain_text_spacing import enforce_plain_text_line_spacing_from_template
+from app.utils.template_plain_text_spacing import finalize_plain_text_for_docx
 # from app.utils.docx_generator import insert_line_breaks_in_long_paragraphs
 from app.utils.llm_utils import (
     load_system_prompt,
@@ -274,25 +274,12 @@ def _ordered_unique_placeholders_from_template(template_content: str) -> list[st
 
 
 def _build_template_line_layout_spec(template_content: str) -> str:
-    """
-    Numbered description of each template line and each run of blank lines so the LLM
-    matches the file layout in plain-text `content` (one \\n between lines, including
-    empty lines — not markdown's \"blank line = \\n\\n paragraph gap\" for structure).
-
-    Terminology (aligned with authors who count CRs, not blank lines):
-    - **CR** = one newline character (\\n).
-    - Between two lines of text, **B blank lines** (empty lines) = **B + 1** CRs between
-      the end of the first line and the start of the second. Example: **3 CRs** = **2 blank lines**.
-    """
+    """Annotated line-by-line description of the template for the LLM."""
     text = (template_content or "").replace("\r\n", "\n").replace("\r", "\n")
     lines = text.split("\n")
     if not lines:
         return ""
     parts: list[str] = []
-    parts.append(
-        "TERMINOLOGY: A CR is one newline (\\n). Between two lines of text, "
-        "B blank lines means B+1 CRs between them (e.g. 3 CRs = 2 blank lines)."
-    )
     parts.append(f"LINE-BY-LINE LAYOUT ({len(lines)} lines total, blank lines count as lines):")
     line_no = 1
     i = 0
@@ -304,33 +291,24 @@ def _build_template_line_layout_spec(template_content: str) -> str:
                 j += 1
             run_len = j - i
             if run_len == 1:
-                parts.append(
-                    f"- Line {line_no}: EMPTY (1 blank line between surrounding lines = 2 CRs)"
-                )
+                parts.append(f"- Line {line_no}: [1 blank line]")
             else:
-                crs = run_len + 1
                 parts.append(
-                    f"- Lines {line_no}–{line_no + run_len - 1}: EMPTY "
-                    f"({run_len} blank lines between surrounding lines = {crs} CRs; "
-                    f"keep all; do not collapse)"
+                    f"- Lines {line_no}\u2013{line_no + run_len - 1}: "
+                    f"[{run_len} blank lines]"
                 )
             line_no += run_len
             i = j
         else:
             seg = lines[i][:120]
             if len(lines[i]) > 120:
-                seg += "…"
+                seg += "\u2026"
             parts.append(f"- Line {line_no}: {seg!r}")
             line_no += 1
             i += 1
     parts.append(
-        "HOW TO MAP THIS TO PLAIN TEXT: Walk the template from line 1 to the end. "
-        "Each template row is one line in output, joined with \\n. "
-        "Do not confuse CR count with blank-line count: B blank lines between two lines of "
-        "text = B+1 CRs (e.g. 3 CRs = 2 blank lines). "
-        "Exception — only inside <<body paragraphs>> you may use multiple paragraphs; "
-        "separate those paragraphs with one blank line between them; do not add extra "
-        "blank lines before or after that block beyond what the template shows."
+        "Each line above is one line in your output, joined by \\n. "
+        "Preserve every blank line exactly."
     )
     return "\n".join(parts)
 
@@ -1104,16 +1082,16 @@ Apply this personality throughout the entire cover letter. This instruction take
 === TEMPLATE STRUCTURE - MATCH LINE BREAKS EXACTLY ===
 Your "content" output MUST follow this template line-for-line so vertical layout matches the file.
 
-LAYOUT OVERRIDES (highest priority — conflicts with default cover-letter header rules):
+LAYOUT OVERRIDES (highest priority):
 - Do NOT add sender phone, email, street address, or city/state/zip lines unless the template below contains <<placeholders>> for those fields on their own lines.
 - Do NOT prepend a contact block or letterhead above the first line of the template.
 - Replace only placeholders that appear in the template; the JSON input may include address/phone for use inside body text if relevant, but not for extra header lines.
 
-RULES (plain-text line model — overrides generic \"two newlines between paragraphs\" for fixed blocks):
-- Treat the template as a text file with one line break (\\n) after each line, including empty lines.
-- CR vs blank line: one CR = one \\n. Between two lines of text, B blank lines = B+1 CRs (e.g. 3 CRs = 2 blank lines). Match the template; do not collapse spacing.
-- Do not merge lines, skip blank lines, or collapse multiple blank lines into one.
-- When you return JSON field \"content\", splitting on newline characters must yield the same line count and blank-line runs as the template (except only inside <<body paragraphs>> as noted below).
+RULES:
+- Your "content" output must reproduce this template line-for-line.
+- Replace <<placeholders>> with real data; keep every blank line exactly as shown.
+- Do not collapse, add, or remove blank lines.
+- For <<body paragraphs>>: write one or more paragraphs separated by single blank lines.
 
 {line_layout_spec}
 
@@ -1628,11 +1606,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info("Removed 'content ' prefix from LLM response")
             if today_date_iso and today_date and today_date != today_date_iso:
                 letter_content = letter_content.replace(today_date_iso, today_date)
-            if resolved_template_for_layout:
-                letter_content = enforce_plain_text_line_spacing_from_template(
-                    letter_content,
-                    resolved_template_for_layout,
-                )
+            letter_content = finalize_plain_text_for_docx(
+                letter_content,
+                resolved_template_for_layout,
+            )
             _write_additional_instructions_debug(additional_instructions, letter_content)
             result_payload = {"content": letter_content}
             if timing:

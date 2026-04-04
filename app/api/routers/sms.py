@@ -127,6 +127,12 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
         normalized_phone = normalize_phone_number(request.phone)
         user_doc = collection.find_one({"phone": normalized_phone})
         if not user_doc:
+            if request.purpose == "forgot_password":
+                return SendVerificationCodeResponse(
+                    success=True,
+                    message="If an account exists with this phone number, a verification code has been sent.",
+                    expires_in_minutes=10
+                )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"

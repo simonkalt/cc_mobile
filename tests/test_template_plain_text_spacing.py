@@ -1,42 +1,33 @@
-"""Tests for template-driven plain-text vertical spacing (DOCX pipeline)."""
+"""Tests for plain-text spacing normalization (DOCX pipeline)."""
 
 import unittest
 
 from app.utils.template_plain_text_spacing import (
-    enforce_plain_text_line_spacing_from_template,
-    _blanks_between_nonempty_template_lines,
+    finalize_plain_text_for_docx,
+    compact_blank_lines_between_consecutive_list_lines,
 )
 
 
 class TestTemplatePlainTextSpacing(unittest.TestCase):
-    def test_blanks_between_nonempty_template_lines_counts_empty_rows(self):
-        template = "<<a>>\n\n\n<<b>>\n<<c>>"
-        self.assertEqual(_blanks_between_nonempty_template_lines(template), [2, 0])
-
-    def test_enforce_spacing_inserts_blank_lines_from_template(self):
-        # Four newlines after <<date>> gives three blank lines before hiring manager.
-        template = (
-            "<<date>>\n\n\n\n<<hiring manager>>\n<<company name>>\n\n"
-            "Re: <<position title>>\n\n\n<<salutation>>,\n\n<<body paragraphs>>\n\n\n"
-            "<<complimentary close>>,\n\n<<name>>\n<<email>> | <<phone>>"
+    def test_compact_drops_blank_between_two_list_lines(self):
+        lines = ["• First", "", "• Second"]
+        self.assertEqual(
+            compact_blank_lines_between_consecutive_list_lines(lines),
+            ["• First", "• Second"],
         )
-        content = """April 04, 2026
-Hiring Manager
-Deloitte
-Re: Manager - Generative AI
-Dear Hiring Manager,
 
-First body.
+    def test_finalize_without_template_collapses_triple_newlines_and_lists(self):
+        inp = "Para one.\n\n\n\nPara two.\n\n- Item A\n\n\n- Item B\n\nClosing."
+        out = finalize_plain_text_for_docx(inp, None)
+        self.assertNotIn("\n\n\n", out)
+        self.assertIn("- Item A\n- Item B", out)
 
-Sincerely,
-Jane Doe
-jane@example.com | 555-1234"""
-
-        out = enforce_plain_text_line_spacing_from_template(content, template)
-        lines = out.split("\n")
-        self.assertEqual(lines[0], "April 04, 2026")
-        self.assertEqual(lines[1:4], ["", "", ""])
-        self.assertEqual(lines[4], "Hiring Manager")
+    def test_finalize_with_template_passes_through(self):
+        """When a template is provided, blank-line runs are preserved (LLM is trusted)."""
+        content = "April 04, 2026\n\n\nHiring Manager\nDeloitte\n\nRe: Manager"
+        template = "<<date>>\n\n\n<<hiring manager>>\n<<company name>>\n\nRe: <<position title>>"
+        out = finalize_plain_text_for_docx(content, template)
+        self.assertEqual(out, content)
 
 
 if __name__ == "__main__":

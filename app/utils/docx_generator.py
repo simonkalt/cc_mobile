@@ -42,6 +42,7 @@ _VISUAL_BULLET_RE = re.compile(r"^\s*[•◦▪▸\-\*\+]\s+")
 _VISUAL_NUMBER_RE = re.compile(r"^\s*(?:\(?[1-9]\d?\)?[.)])\s+")
 
 
+
 def _apply_visual_hanging_indent_fallback(doc) -> None:
     """
     Enforce hanging indent on paragraphs that look like list items by text prefix.
@@ -876,8 +877,6 @@ def build_docx_from_content(
         font_family = font_family or "Times New Roman"
         font_size_pt = font_size_pt if font_size_pt else 12
 
-    space_after = Pt(round(font_size_pt * line_height * 0.4))
-
     # List formatting: either OOXML numbering (numPr + numbering.xml) or fallback (indent + text bullet/number).
     _LIST_LEFT = Inches(0.25)
     _LIST_HANG = Inches(-0.25)
@@ -887,6 +886,7 @@ def build_docx_from_content(
     list_number = 0
     for block in blocks:
         p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(0)
         if block["type"] == "li":
             if use_numbering_part:
                 _set_paragraph_num_pr(p, 0, bullet_num_id)
@@ -902,7 +902,6 @@ def build_docx_from_content(
                 p.paragraph_format.first_line_indent = _LIST_HANG
         else:
             list_number = 0
-            p.paragraph_format.space_after = space_after
         last_ended_with_space = True  # avoid leading space before first run
         first_text_run = True  # prepend bullet/number only when not using numbering part
         for run_spec in block["runs"]:
