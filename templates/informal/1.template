@@ -1,9 +1,11 @@
 <<date>>
 
+
 <<hiring manager>>
 <<company name>>
 
 Re: <<position title>>
+
 
 <<salutation>>,
 
@@ -11,6 +13,7 @@ Re: <<position title>>
 
 
 
-Best,
+<<complimentary closing>>,
+
 
 <<name>>
