@@ -89,6 +89,19 @@ def _require_db():
     return collection
 
 
+def _mongo_int_credit_field(doc: dict, key: str, default: int) -> int:
+    """
+    Read a non-negative int from Mongo for credit fields.
+    Missing or null uses default. **Zero is preserved** (do not use `x or default` — 0 is valid).
+    """
+    if key not in doc or doc[key] is None:
+        return default
+    try:
+        return max(0, int(doc[key]))
+    except (TypeError, ValueError):
+        return default
+
+
 def _user_doc_to_summary(doc: dict) -> AdminUserSummary:
     return AdminUserSummary(
         id=str(doc["_id"]),
@@ -100,6 +113,8 @@ def _user_doc_to_summary(doc: dict) -> AdminUserSummary:
         subscriptionStatus=doc.get("subscriptionStatus"),
         archived=doc.get("archived", False),
         super_user=doc.get("super_user", False),
+        generation_credits=_mongo_int_credit_field(doc, "generation_credits", 10),
+        max_credits=_mongo_int_credit_field(doc, "max_credits", 10),
     )
 
 
@@ -120,8 +135,8 @@ def _user_doc_to_detail(doc: dict) -> AdminUserDetail:
         lastLogin=doc.get("lastLogin"),
         llm_counts=doc.get("llm_counts"),
         last_llm_used=doc.get("last_llm_used"),
-        generation_credits=max(0, int(doc.get("generation_credits", 10) or 10)),
-        max_credits=max(0, int(doc.get("max_credits", 10) or 10)),
+        generation_credits=_mongo_int_credit_field(doc, "generation_credits", 10),
+        max_credits=_mongo_int_credit_field(doc, "max_credits", 10),
         SMSOpt=doc.get("SMSOpt"),
         SMSOptDate=doc.get("SMSOptDate"),
         subscriptionStatus=doc.get("subscriptionStatus"),
@@ -276,7 +291,16 @@ def list_users(
         regex = {"$regex": search, "$options": "i"}
         query["$or"] = [{"name": regex}, {"email": regex}, {"phone": regex}]
 
-    allowed_sort = {"name", "email", "phone", "isActive", "lastLogin", "subscriptionStatus", "dateCreated"}
+    allowed_sort = {
+        "name",
+        "email",
+        "phone",
+        "isActive",
+        "lastLogin",
+        "subscriptionStatus",
+        "dateCreated",
+        "generation_credits",
+    }
     sort_field = sort if sort in allowed_sort else "name"
     sort_dir = -1 if order.lower() == "desc" else 1
 

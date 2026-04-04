@@ -332,6 +332,11 @@ table.admin-table tbody td {
   vertical-align: middle;
 }
 
+table.admin-table tbody td.credits-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Status badges ---- */
 
 .badge {
