@@ -27,7 +27,11 @@ except ImportError:
 
 from app.core.config import settings
 from app.models.user import UserResponse
-from app.utils.html_normalizer import html_p_to_br, collapse_br_pairs, double_break_after_groups
+from app.utils.html_normalizer import (
+    html_p_to_br,
+    normalize_br_variants,
+    double_break_after_groups,
+)
 from app.utils.template_loader import (
     coalesce_letter_template_app_settings,
     letter_template_cache_stamp,
@@ -40,6 +44,7 @@ from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_file
 from app.utils.s3_utils import download_pdf_from_s3, S3_AVAILABLE
 from app.utils.redis_utils import get_redis_client
 from app.utils.generation_timing import GenerationTiming
+from app.utils.template_plain_text_spacing import finalize_plain_text_for_docx
 # from app.utils.docx_generator import insert_line_breaks_in_long_paragraphs
 from app.utils.llm_utils import (
     load_system_prompt,
@@ -266,6 +271,46 @@ def _ordered_unique_placeholders_from_template(template_content: str) -> list[st
             seen.add(t)
             out.append(t)
     return out
+
+
+def _build_template_line_layout_spec(template_content: str) -> str:
+    """Annotated line-by-line description of the template for the LLM."""
+    text = (template_content or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    if not lines:
+        return ""
+    parts: list[str] = []
+    parts.append(f"LINE-BY-LINE LAYOUT ({len(lines)} lines total, blank lines count as lines):")
+    line_no = 1
+    i = 0
+    n = len(lines)
+    while i < n:
+        if lines[i].strip() == "":
+            j = i
+            while j < n and lines[j].strip() == "":
+                j += 1
+            run_len = j - i
+            if run_len == 1:
+                parts.append(f"- Line {line_no}: [1 blank line]")
+            else:
+                parts.append(
+                    f"- Lines {line_no}\u2013{line_no + run_len - 1}: "
+                    f"[{run_len} blank lines]"
+                )
+            line_no += run_len
+            i = j
+        else:
+            seg = lines[i][:120]
+            if len(lines[i]) > 120:
+                seg += "\u2026"
+            parts.append(f"- Line {line_no}: {seg!r}")
+            line_no += 1
+            i += 1
+    parts.append(
+        "Each line above is one line in your output, joined by \\n. "
+        "Preserve every blank line exactly."
+    )
+    return "\n".join(parts)
 
 
 def _build_result_cache_key(payload: Dict[str, Any]) -> str:
@@ -983,6 +1028,7 @@ Apply this personality throughout the entire cover letter. This instruction take
 
     # Build template structure instruction - user-selected file vs profile→category→random
     template_instruction = ""
+    resolved_template_for_layout: Optional[str] = None
     _prefs_for_template = (
         user_ctx.get("preferences") if isinstance(user_ctx, dict) else None
     )
@@ -1013,12 +1059,12 @@ Apply this personality throughout the entire cover letter. This instruction take
         _app_for_template, settings.USE_TEMPLATE_IN_PROMPT
     )
     if _include_file_template:
-        template_content = resolve_cover_letter_template_for_generation(
+        resolved_template_for_layout = resolve_cover_letter_template_for_generation(
             profile_name=matched_profile_name or tone,
             app_settings=_app_for_template,
         )
-        if template_content:
-            ph = _ordered_unique_placeholders_from_template(template_content)
+        if resolved_template_for_layout:
+            ph = _ordered_unique_placeholders_from_template(resolved_template_for_layout)
             ph_line = (
                 ", ".join(f"<<{t}>>" for t in ph)
                 if ph
@@ -1027,26 +1073,31 @@ Apply this personality throughout the entire cover letter. This instruction take
             body_para_note = ""
             if any("body paragraph" in t.lower() for t in ph):
                 body_para_note = (
-                    " Each <<body paragraph>> line in the template becomes one body paragraph "
-                    "(use the template's blank lines between them)."
+                    " For <<body paragraphs>> only: write one or more paragraphs; separate paragraphs "
+                    "with a single blank line inside that slot. Do not add or remove blank lines "
+                    "before/after that block relative to the template."
                 )
+            line_layout_spec = _build_template_line_layout_spec(resolved_template_for_layout)
             template_instruction = f"""
 === TEMPLATE STRUCTURE - MATCH LINE BREAKS EXACTLY ===
-Your "content" output MUST follow this template line-for-line so paragraph and line breaks are consistent.
+Your "content" output MUST follow this template line-for-line so vertical layout matches the file.
 
-LAYOUT OVERRIDES (highest priority — conflicts with default cover-letter header rules):
+LAYOUT OVERRIDES (highest priority):
 - Do NOT add sender phone, email, street address, or city/state/zip lines unless the template below contains <<placeholders>> for those fields on their own lines.
 - Do NOT prepend a contact block or letterhead above the first line of the template.
 - Replace only placeholders that appear in the template; the JSON input may include address/phone for use inside body text if relevant, but not for extra header lines.
 
 RULES:
-- Each non-blank line in the template = one line in your content (use one newline (\\n) after it before the next line).
-- Each blank line in the template = exactly two newlines (\\n\\n) in your content — that is the paragraph separator.
-- Do not merge lines or skip blank lines. The number of lines and blank lines in your output must match the template.
+- Your "content" output must reproduce this template line-for-line.
+- Replace <<placeholders>> with real data; keep every blank line exactly as shown.
+- Do not collapse, add, or remove blank lines.
+- For <<body paragraphs>>: write one or more paragraphs separated by single blank lines.
+
+{line_layout_spec}
 
 TEMPLATE (copy its structure; replace placeholders with real data):
 ---
-{template_content}
+{resolved_template_for_layout}
 ---
 
 Placeholders present in this template (replace with resume/job data): {ph_line}.{body_para_note}
@@ -1555,6 +1606,10 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 logger.info("Removed 'content ' prefix from LLM response")
             if today_date_iso and today_date and today_date != today_date_iso:
                 letter_content = letter_content.replace(today_date_iso, today_date)
+            letter_content = finalize_plain_text_for_docx(
+                letter_content,
+                resolved_template_for_layout,
+            )
             _write_additional_instructions_debug(additional_instructions, letter_content)
             result_payload = {"content": letter_content}
             if timing:
@@ -1587,8 +1642,12 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         if markdown_content and today_date_iso and today_date != today_date_iso:
             markdown_content = markdown_content.replace(today_date_iso, today_date)
         raw_html = html_p_to_br(raw_html)
-        raw_html = collapse_br_pairs(raw_html)
-        raw_html = double_break_after_groups(raw_html)
+        raw_html = normalize_br_variants(raw_html)
+        if resolved_template_for_layout:
+            # File template defines exact breaks; double_break_after_groups rewrites by heuristics.
+            logger.info("Skipping double_break_after_groups: file template layout preserved")
+        else:
+            raw_html = double_break_after_groups(raw_html)
 
         styled_html = raw_html
         try:

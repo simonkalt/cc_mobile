@@ -54,7 +54,12 @@ async def lifespan(app: FastAPI):
 # Create the FastAPI app instance
 app = FastAPI(
     title=settings.APP_NAME,
-    description="API for cover letter generation and user management",
+    description=(
+        "API for cover letter generation and user management. "
+        "Server-side PDF routes under /api/files/* (generate-pdf, print-preview-pdf, "
+        "print-template, docx-to-pdf) return HTTP 410; PDF creation uses the Syncfusion "
+        "(.NET) service. See documentation/PDF_SERVER_SIDE_REMOVED.md."
+    ),
     version=settings.APP_VERSION,
     lifespan=lifespan,
 )

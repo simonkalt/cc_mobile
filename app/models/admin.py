@@ -45,6 +45,8 @@ class AdminUserSummary(BaseModel):
     subscriptionStatus: Optional[str] = None
     archived: Optional[bool] = False
     super_user: Optional[bool] = False
+    generation_credits: int = Field(default=0, ge=0)
+    max_credits: int = Field(default=10, ge=0)
 
 
 class AdminUserListResponse(BaseModel):
