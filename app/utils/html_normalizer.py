@@ -20,10 +20,24 @@ def html_p_to_br(html_content: str) -> str:
     return html_content
 
 
+def normalize_br_variants(html_content: str) -> str:
+    """
+    Normalize <br>, <br/>, <br /> to a single canonical <br /> without merging runs.
+    Use this in the cover-letter pipeline so paragraph gaps (<br /><br />) stay intact.
+    """
+    if not html_content or not html_content.strip():
+        return html_content
+    return re.sub(r"<br\s*/?\s*>|</?\s*br\s*>", "<br />", html_content, flags=re.IGNORECASE)
+
+
 def collapse_br_pairs(html_content: str) -> str:
     """
     Normalize all <br> variants to <br />, then collapse only pairs of <br /> into one.
     So 6 consecutive <br /> → 3, 4 → 2, 2 → 1, 1 stays 1. Does not collapse all runs into one.
+
+    Warning: using this after html_p_to_br() removes intentional paragraph breaks (</p><p>
+    becomes <br /><br />, then this collapses to a single <br />). Prefer normalize_br_variants
+    when double breaks must be preserved.
     """
     if not html_content or not html_content.strip():
         return html_content

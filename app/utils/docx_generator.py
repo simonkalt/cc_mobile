@@ -2,8 +2,8 @@
 Generate a .docx (Word) document from cover letter content (markdown or HTML).
 
 Preserves bold, italic, and lists in the output. Used so the server can return
-a fully adorned .docx to the client for editing; print preview then uses
-POST /api/files/docx-to-pdf with that (possibly edited) .docx.
+a fully adorned .docx to the client for editing; PDF export is handled by the
+Syncfusion (.NET) service (not POST /api/files/docx-to-pdf on this API).
 
 When USE_DOCX_COMPONENTS is True, the LLM may return three XML components
 (document_xml, numbering_xml, styles_xml) which we assemble into a .docx via
@@ -40,6 +40,7 @@ except ImportError:
 
 _VISUAL_BULLET_RE = re.compile(r"^\s*[•◦▪▸\-\*\+]\s+")
 _VISUAL_NUMBER_RE = re.compile(r"^\s*(?:\(?[1-9]\d?\)?[.)])\s+")
+
 
 
 def _apply_visual_hanging_indent_fallback(doc) -> None:
@@ -545,62 +546,34 @@ _SAFE_LINE_LENGTH = 12000
 
 def _plain_text_to_blocks(text: str) -> List[Dict]:
     """
-    \\n\\n = new paragraph (<w:p>); \\n = line break within paragraph.
-    Full parsing: [font:...], [size:...], [color:...] and **bold** / *italic* (linear-time, no hang).
+    One input line = one Word paragraph (<w:p>). Empty lines become empty paragraphs so
+    vertical gaps in templates (multiple blank lines) are preserved.
+
+    (Previously \\n\\n split paragraphs and \\n was a soft line break; that collapsed runs
+    of blank lines into a single paragraph boundary and did not match line-oriented
+    cover letter templates.)
+
+    Full parsing per line: [font:...], [size:...], [color:...] and **bold** / *italic*.
     Lines longer than _SAFE_LINE_LENGTH are stripped only to avoid edge cases.
     """
     if not text:
         return []
     normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    paragraphs = re.split(r"\n\s*\n", normalized.strip() if normalized else "")
-    blocks = []
-
-    # Accept common ordered-list prefixes from LLMs.
-    # Examples: "1. item", "1) item", "(1) item"
-    # Intentionally limited to 1-2 digits to avoid false positives on phone
-    # patterns like "(818) 419-5986".
-    list_number_re = re.compile(r"^\s*(?:\(?[1-9]\d?\)?[.)])\s+")
-    # Accept common bullet prefixes.
-    # Examples: "- item", "* item", "+ item", "• item", "◦ item", "▪ item", "▸ item"
-    list_bullet_re = re.compile(r"^\s*(?:[•◦▪▸\-\*\+])\s+")
-
-    for para in paragraphs:
-        lines = para.split("\n")
-        # If every non-empty line is a list item, force one DOCX paragraph per line.
-        non_empty = [ln for ln in lines if ln.strip()]
-        is_all_list_lines = bool(non_empty) and all(
-            list_number_re.match(ln) or list_bullet_re.match(ln) for ln in non_empty
-        )
-        # If a paragraph mixes normal text and list lines (e.g. heading + bullets),
-        # split per line so list lines can be promoted to Word-native lists later.
-        has_any_list_lines = any(
-            list_number_re.match(ln) or list_bullet_re.match(ln) for ln in non_empty
-        )
-
-        if is_all_list_lines or has_any_list_lines:
-            for line in lines:
-                if not line.strip():
-                    continue
-                if len(line) <= _SAFE_LINE_LENGTH:
-                    runs = _plain_line_to_runs(line)
-                else:
-                    clean = _strip_plain_text_formatting(line)
-                    runs = [{"text": clean, "bold": False, "italic": False}] if clean else []
-                if runs:
-                    blocks.append({"type": "p", "runs": runs})
+    lines = normalized.split("\n")
+    blocks: List[Dict] = []
+    for line in lines:
+        if not line.strip():
+            blocks.append({"type": "p", "runs": []})
             continue
-
-        runs = []
-        for i, line in enumerate(lines):
-            if len(line) <= _SAFE_LINE_LENGTH:
-                runs.extend(_plain_line_to_runs(line))
-            else:
-                clean = _strip_plain_text_formatting(line)
-                if clean:
-                    runs.append({"text": clean, "bold": False, "italic": False})
-            if i < len(lines) - 1:
-                runs.append({"line_break": True})
-        blocks.append({"type": "p", "runs": runs})
+        if len(line) <= _SAFE_LINE_LENGTH:
+            runs = _plain_line_to_runs(line)
+        else:
+            clean = _strip_plain_text_formatting(line)
+            runs = [{"text": clean, "bold": False, "italic": False}] if clean else []
+        if runs:
+            blocks.append({"type": "p", "runs": runs})
+        else:
+            blocks.append({"type": "p", "runs": []})
     return blocks
 
 
@@ -904,8 +877,6 @@ def build_docx_from_content(
         font_family = font_family or "Times New Roman"
         font_size_pt = font_size_pt if font_size_pt else 12
 
-    space_after = Pt(round(font_size_pt * line_height * 0.4))
-
     # List formatting: either OOXML numbering (numPr + numbering.xml) or fallback (indent + text bullet/number).
     _LIST_LEFT = Inches(0.25)
     _LIST_HANG = Inches(-0.25)
@@ -915,6 +886,7 @@ def build_docx_from_content(
     list_number = 0
     for block in blocks:
         p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(0)
         if block["type"] == "li":
             if use_numbering_part:
                 _set_paragraph_num_pr(p, 0, bullet_num_id)
@@ -930,7 +902,6 @@ def build_docx_from_content(
                 p.paragraph_format.first_line_indent = _LIST_HANG
         else:
             list_number = 0
-            p.paragraph_format.space_after = space_after
         last_ended_with_space = True  # avoid leading space before first run
         first_text_run = True  # prepend bullet/number only when not using numbering part
         for run_spec in block["runs"]:

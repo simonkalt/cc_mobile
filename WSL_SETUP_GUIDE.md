@@ -2,6 +2,8 @@
 
 Complete guide to set up your WSL environment for the cc_mobile FastAPI application.
 
+**Note:** Server-side PDF via WeasyPrint is no longer part of this service (`documentation/PDF_SERVER_SIDE_REMOVED.md`). Setup steps below that mention WeasyPrint are legacy unless you need them for another reason.
+
 ## Quick Setup (Automated)
 
 Run the setup script:

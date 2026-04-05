@@ -158,6 +158,11 @@
                   <span class="sort-arrow" :class="{ active: $store.users.sort === 'isActive' }"
                         x-text="$store.users.sort === 'isActive' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
                 </th>
+                <th @click="$store.users.toggleSort('generation_credits')">
+                  Credits
+                  <span class="sort-arrow" :class="{ active: $store.users.sort === 'generation_credits' }"
+                        x-text="$store.users.sort === 'generation_credits' ? ($store.users.order === 'asc' ? '&#9650;' : '&#9660;') : '&#9650;'"></span>
+                </th>
                 <th @click="$store.users.toggleSort('lastLogin')">
                   Last Login
                   <span class="sort-arrow" :class="{ active: $store.users.sort === 'lastLogin' }"
@@ -193,6 +198,7 @@
                       <span class="badge badge-inactive">Inactive</span>
                     </template>
                   </td>
+                  <td class="credits-cell" x-text="(u.generation_credits ?? 0) + ' / ' + (u.max_credits ?? 10)"></td>
                   <td x-text="formatDate(u.lastLogin)"></td>
                   <td>
                     <span class="badge" :class="subStatusClass(u.subscriptionStatus)"
@@ -201,7 +207,7 @@
                 </tr>
               </template>
               <template x-if="$store.users.items.length === 0 && !$store.users.loading">
-                <tr><td colspan="6" style="text-align:center; padding:40px; color:#999">No users found</td></tr>
+                <tr><td colspan="7" style="text-align:center; padding:40px; color:#999">No users found</td></tr>
               </template>
             </tbody>
           </table>

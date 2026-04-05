@@ -104,26 +104,14 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             detail=f"Invalid purpose. Must be one of: {', '.join(valid_purposes)}"
         )
     
-    # Find user by email or phone
+    # Find user by email or phone.
+    # NOTE: forgot_password intentionally surfaces 404 so the frontend can
+    # keep the user on the send-code step.  This trades anti-enumeration for UX
+    # and matches the email endpoint's behaviour.
     user = None
     if request.email:
-        try:
-            user = get_user_by_email(request.email)
-        except HTTPException:
-            # For forgot_password, don't reveal if user exists
-            if request.purpose == "forgot_password":
-                # Return success even if user doesn't exist (security best practice)
-                return SendVerificationCodeResponse(
-                    success=True,
-                    message="If an account exists with this email, a verification code has been sent.",
-                    expires_in_minutes=10
-                )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+        user = get_user_by_email(request.email)
     elif request.phone:
-        # Find user by phone number
         normalized_phone = normalize_phone_number(request.phone)
         user_doc = collection.find_one({"phone": normalized_phone})
         if not user_doc:
@@ -138,7 +126,6 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             detail="Either email or phone must be provided"
         )
     
-    # Get phone number
     phone_number = user.phone
     if not phone_number:
         raise HTTPException(
