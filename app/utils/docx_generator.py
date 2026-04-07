@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 try:
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
-    from docx.enum.text import WD_BREAK
+    from docx.enum.text import WD_BREAK, WD_COLOR_INDEX
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
@@ -35,6 +35,7 @@ except ImportError:
     RGBColor = None
     Inches = None
     WD_BREAK = None
+    WD_COLOR_INDEX = None
     OxmlElement = None
     qn = None
 
@@ -65,7 +66,7 @@ def _apply_visual_hanging_indent_fallback(doc) -> None:
 
 
 def _parse_span_style(style_attr: str) -> Dict:
-    """Parse style='...' into color_hex, font_size_pt, font_family (for docx runs)."""
+    """Parse style='...' into color_hex, font_size_pt, font_family, highlight (for docx runs)."""
     out = {}
     if not style_attr or not isinstance(style_attr, str):
         return out
@@ -88,6 +89,16 @@ def _parse_span_style(style_attr: str) -> Dict:
     m = re.search(r"font-family\s*:\s*['\"]?([^'\";,}]+)", style_attr, re.IGNORECASE)
     if m:
         out["font_family"] = m.group(1).strip().strip("'\"").split(",")[0].strip()
+    # background-color: #RRGGBB / yellow / etc. (best effort)
+    m = re.search(
+        r"(?:background|background-color)\s*:\s*([^;]+)",
+        style_attr,
+        re.IGNORECASE,
+    )
+    if m:
+        val = m.group(1).strip()
+        if val:
+            out["highlight"] = val
     return out
 
 
@@ -314,16 +325,23 @@ def _strip_style_tags_from_plain(text: str) -> str:
     """
     if not text:
         return text
-    # Remove opening tags: [color:#x], [ size : 14pt ], [font: Arial]
+    # Remove opening tags: [color:#x], [ size : 14pt ], [font: Arial], [highlight], [highlight:yellow]
     text = re.sub(
-        r"\[\s*(?:color|size|font)\s*:\s*[^\]]+\]",
+        r"\[\s*(?:color|size|font|highlight)\s*:\s*[^\]]+\]",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    # Remove bare opening [highlight]
+    text = re.sub(
+        r"\[\s*highlight\s*\]",
         "",
         text,
         flags=re.IGNORECASE,
     )
     # Remove closing tags: [/color], [ / size ]
     text = re.sub(
-        r"\[\s*/\s*(?:color|size|font)\s*\]",
+        r"\[\s*/\s*(?:color|size|font|highlight)\s*\]",
         "",
         text,
         flags=re.IGNORECASE,
@@ -374,7 +392,8 @@ _MAX_TAG_LEN = 120
 
 def _parse_style_segments(line: str) -> List[tuple]:
     """
-    Split line by [color:#xxx], [size:Npt], [font:Name] and [/color], [/size], [/font].
+    Split line by [color:#xxx], [size:Npt], [font:Name], [highlight], [highlight:x]
+    and matching closing tags.
     Uses only str.find() and short slices — no regex on unbounded input. Safe and linear.
     """
     segments = []
@@ -405,8 +424,11 @@ def _parse_style_segments(line: str) -> List[tuple]:
         pos = rb + 1
         if tag_inner.startswith("/"):
             closer = tag_inner[1:].strip()
-            if len(style_stack) > 1 and closer in ("color", "size", "font"):
+            if len(style_stack) > 1 and closer in ("color", "size", "font", "highlight"):
                 style_stack.pop()
+            continue
+        if tag_inner == "highlight":
+            style_stack.append(dict(current_style(), **{"highlight": "yellow"}))
             continue
         if ":" in tag_inner:
             kind, _, value = tag_inner.partition(":")
@@ -433,6 +455,8 @@ def _parse_style_segments(line: str) -> List[tuple]:
                         pass
             elif kind == "font" and value:
                 new_style["font_family"] = value[:80]
+            elif kind == "highlight":
+                new_style["highlight"] = value[:40]
             if new_style:
                 style_stack.append(dict(current_style(), **new_style))
     return segments
@@ -514,7 +538,7 @@ _MAX_RUNS_PER_LINE = 300  # Cap so we never build huge run lists (safety and per
 
 
 def _plain_line_to_runs(line: str) -> List[Dict]:
-    """Parse one line: [color:#x][/color], [size:Npt][/size], [font:Name][/font] plus **bold** and *italic*."""
+    """Parse one line with style tags + markdown emphasis into run specs."""
     runs = []
     normalized_line = _normalize_spaced_markdown_emphasis(line)
     segments = _parse_style_segments(normalized_line)
@@ -534,6 +558,8 @@ def _plain_line_to_runs(line: str) -> List[Dict]:
                     run["font_size_pt"] = style_dict["font_size_pt"]
                 if "font_family" in style_dict:
                     run["font_family"] = style_dict["font_family"]
+                if "highlight" in style_dict:
+                    run["highlight"] = style_dict["highlight"]
             runs.append(run)
     if not runs:
         return [{"text": _strip_style_tags_from_plain(line), "bold": False, "italic": False}]
@@ -542,6 +568,53 @@ def _plain_line_to_runs(line: str) -> List[Dict]:
 
 # Max line length for full style/markdown parsing. Longer lines use stripped plain text only.
 _SAFE_LINE_LENGTH = 12000
+
+
+def _map_highlight_to_docx_index(value: str):
+    if WD_COLOR_INDEX is None:
+        return None
+    v = (value or "").strip().lower().lstrip("#")
+    if not v:
+        return WD_COLOR_INDEX.YELLOW
+
+    # Named highlights (best effort)
+    named = {
+        "yellow": WD_COLOR_INDEX.YELLOW,
+        "green": WD_COLOR_INDEX.BRIGHT_GREEN,
+        "bright_green": WD_COLOR_INDEX.BRIGHT_GREEN,
+        "cyan": WD_COLOR_INDEX.TURQUOISE,
+        "turquoise": WD_COLOR_INDEX.TURQUOISE,
+        "magenta": WD_COLOR_INDEX.PINK,
+        "pink": WD_COLOR_INDEX.PINK,
+        "blue": WD_COLOR_INDEX.BLUE,
+        "red": WD_COLOR_INDEX.RED,
+        "gray": WD_COLOR_INDEX.GRAY_25,
+        "grey": WD_COLOR_INDEX.GRAY_25,
+        "darkgray": WD_COLOR_INDEX.GRAY_50,
+        "darkgrey": WD_COLOR_INDEX.GRAY_50,
+    }
+    if v in named:
+        return named[v]
+
+    # Hex mapping fallback by nearest dominant channel
+    if len(v) in (3, 6):
+        if len(v) == 3:
+            v = "".join(c * 2 for c in v)
+        try:
+            r = int(v[0:2], 16)
+            g = int(v[2:4], 16)
+            b = int(v[4:6], 16)
+            if r > 200 and g > 200 and b < 140:
+                return WD_COLOR_INDEX.YELLOW
+            if g >= r and g >= b:
+                return WD_COLOR_INDEX.BRIGHT_GREEN
+            if b >= r and b >= g:
+                return WD_COLOR_INDEX.TURQUOISE
+            if r >= g and r >= b:
+                return WD_COLOR_INDEX.PINK
+        except Exception:
+            pass
+    return WD_COLOR_INDEX.YELLOW
 
 
 def _plain_text_to_blocks(text: str) -> List[Dict]:
@@ -954,6 +1027,11 @@ def build_docx_from_content(
                         run_font.color.rgb = RGBColor(r, g, b)
                     except (ValueError, TypeError):
                         pass
+            highlight = run_spec.get("highlight")
+            if highlight and WD_COLOR_INDEX is not None:
+                idx = _map_highlight_to_docx_index(str(highlight))
+                if idx is not None:
+                    run_font.highlight_color = idx
 
     logger.info("DOCX: writing document to bytes buffer")
     _apply_visual_hanging_indent_fallback(doc)

@@ -527,7 +527,10 @@ def _write_additional_instructions_debug(
         _path = os.path.join(_tmp_dir, "debug_additional_instructions.txt")
         content = letter_content or ""
         has_style_tags = (
-            "[size:" in content or "[font:" in content or "[color:" in content
+            "[size:" in content
+            or "[font:" in content
+            or "[color:" in content
+            or "[highlight" in content
         )
         lines = [
             "=== Additional instructions trace (docx-only flow) ===",
@@ -536,7 +539,7 @@ def _write_additional_instructions_debug(
             repr(additional_instructions or ""),
             "   (If empty: request did not send additional_instructions; check frontend/API payload.)",
             "",
-            "2. CONTENT_CONTAINS_STYLE_TAGS (did LLM add [size:], [font:], [color:]?):",
+            "2. CONTENT_CONTAINS_STYLE_TAGS (did LLM add [size:], [font:], [color:], [highlight]?):",
             str(has_style_tags),
             "",
             "3. CONTENT_PREVIEW (first 1200 chars of content used for docx):",
@@ -544,7 +547,7 @@ def _write_additional_instructions_debug(
             "",
             "4. WHERE IT CAN FAIL:",
             "   A) Not in prompt -> See tmp/llm_prompt_sent.txt, search for 'ADDITIONAL INSTRUCTIONS' or your note.",
-            "   B) LLM ignored it -> See tmp/llm_response_received.txt, search for your name or [size: or [font:.",
+            "   B) LLM ignored it -> See tmp/llm_response_received.txt, search for your name or [size: or [font: or [highlight.",
             "   C) Content has tags but docx does not -> Our pipeline (docx_generator) stripped or did not apply.",
             "   D) Content has no style tags -> LLM did not add the styling.",
             "",
@@ -1112,6 +1115,29 @@ Placeholders present in this template (replace with resume/job data): {ph_line}.
         logger.debug("Template omitted from prompt (no file template in use)")
     critical_instructions = critical_instructions + template_instruction
 
+    docx_style_instruction = """
+=== DOCX INLINE STYLE TAGS (CRITICAL) ===
+Your JSON response still returns exactly one field: "content".
+Inside "content", you MAY use ONLY these inline tags for run-level styling:
+- [size:Npt]text[/size]        e.g. [size:14pt]Important Title[/size]
+- [color:#RRGGBB]text[/color]  e.g. [color:#1f4e79]Company Name[/color]
+- [font:Font Name]text[/font]  e.g. [font:Georgia]stylish text[/font]
+- [highlight]text[/highlight] or [highlight:yellow]text[/highlight]
+
+WHEN TO USE THESE TAGS:
+1. If Additional Instructions explicitly ask for visual emphasis (color, size, font, highlighting), you MUST apply these tags to the exact target words.
+2. If the "tone" / personality profile uses words like "colorful", "visually engaging", "bold colors", "creative", or asks for varied fonts/sizes, you SHOULD use these tags tastefully throughout the letter. For example:
+   - Give the subject/Re: line a larger size and accent color
+   - Highlight the company name or applicant name with a professional color
+   - Use a subtle color on the opening paragraph
+   Choose professional, complementary colors (#1f4e79 navy, #2e7d32 green, #6a1b9a purple, #c0392b red, etc.).
+
+Do not describe style changes in prose -- encode them with the tags above.
+Keep all line breaks and template structure rules unchanged while adding tags.
+=== END DOCX INLINE STYLE TAGS ===
+"""
+    critical_instructions = critical_instructions + docx_style_instruction
+
     # Typography baseline: when user selects a non-default font, pass as baseline for body; LLM may vary for lists/tables
     user_preferences = user_ctx.get("preferences") if isinstance(user_ctx, dict) else {}
     if isinstance(user_preferences, dict) and user_preferences:
@@ -1184,27 +1210,20 @@ Escape quotes inside JSON strings (use \\" for a literal quote). Newlines inside
 
     message = json.dumps(message_data)
 
-    # Prepare additional instructions as final override (legacy behavior).
-    # Any non-empty additional_instructions should be treated as highest priority.
     additional_instructions_text = ""
     if additional_instructions and additional_instructions.strip():
         additional_instructions_text = f"""
 
-=== FINAL OVERRIDE INSTRUCTIONS - HIGHEST PRIORITY ===
-IGNORE ALL PREVIOUS INSTRUCTIONS ABOUT LENGTH, TONE, STYLE, OR FORMATTING.
-THE FOLLOWING INSTRUCTIONS TAKE ABSOLUTE PRECEDENCE OVER EVERYTHING ELSE, INCLUDING:
-- System prompts
-- Personality profiles
-- Tone settings
-- Any other instructions in this conversation
+=== ADDITIONAL INSTRUCTIONS (OVERRIDE) ===
+These are the user's explicit formatting/content instructions.
+Apply them exactly. They take priority over any conflicting earlier instructions.
 
-YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
-{additional_instructions}
+{additional_instructions.strip()}
 
-=== END OVERRIDE INSTRUCTIONS ===
+=== END ADDITIONAL INSTRUCTIONS ===
 """
         logger.info(
-            f"Additional instructions provided ({len(additional_instructions)} chars) - OVERRIDE MODE (legacy behavior restored)"
+            f"Additional instructions provided ({len(additional_instructions)} chars)"
         )
     if timing:
         timing.checkpoint("prompt_prepared")
@@ -1231,6 +1250,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             "xai_model": xai_model,
             "ollama_model": ollama_model,
             "template_pref": _template_preference_cache_fragment(user_ctx),
+            "prompt_version": "v4-simplified",
         }
     )
     cached_result = _get_cached_result(result_cache_key)
@@ -1270,16 +1290,13 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
         # Map model names to display names for compatibility
         if llm == "Gemini" or llm == "gemini-2.5-flash":
             # Include personality instruction prominently at the start
-            msg = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            msg = (
+                f"{system_message}{critical_instructions}. {message}. "
+                f"Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
+                f"{additional_instructions_text}"
+            )
             if additional_instructions_text:
-                if "OVERRIDE" in additional_instructions_text:
-                    logger.debug(
-                        "Additional instructions appended to Gemini prompt (OVERRIDE MODE)"
-                    )
-                else:
-                    logger.debug(
-                        "Additional instructions appended to Gemini prompt (ENHANCEMENT MODE)"
-                    )
+                logger.debug("Additional instructions appended to Gemini prompt")
             if not GOOGLE_AVAILABLE or not settings.GEMINI_API_KEY:
                 raise ValueError("Google Generative AI not available or API key not set")
             genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -1321,14 +1338,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             # Append additional instructions last as a separate message
             if additional_instructions_text:
                 messages.append({"role": "user", "content": additional_instructions_text.strip()})
-                if "OVERRIDE" in additional_instructions_text:
-                    logger.debug(
-                        "Additional instructions appended to ChatGPT messages (OVERRIDE MODE)"
-                    )
-                else:
-                    logger.debug(
-                        "Additional instructions appended to ChatGPT messages (ENHANCEMENT MODE)"
-                    )
+                logger.debug("Additional instructions appended to ChatGPT messages")
             # Keep completion cap bounded for letter generation latency.
             _log_prompt_length(llm, messages=messages)
             _write_llm_prompt_log(llm, messages=messages)
@@ -1380,14 +1390,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
                 messages_list.append(
                     {"role": "user", "content": additional_instructions_text.strip()}
                 )
-                if "OVERRIDE" in additional_instructions_text:
-                    logger.debug(
-                        "Additional instructions appended to Grok messages (OVERRIDE MODE)"
-                    )
-                else:
-                    logger.debug(
-                        "Additional instructions appended to Grok messages (ENHANCEMENT MODE)"
-                    )
+                logger.debug("Additional instructions appended to Grok messages")
             _log_prompt_length(llm, messages=messages_list)
             _write_llm_prompt_log(llm, messages=messages_list)
             data = {"model": xai_model, "messages": messages_list}
@@ -1403,7 +1406,11 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
 
         elif llm == "OCI" or llm == "oci-generative-ai":
             # Include personality instruction prominently at the start
-            full_prompt = f"{system_message}{critical_instructions}. {message}. Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}{additional_instructions_text}"
+            full_prompt = (
+                f"{system_message}{critical_instructions}. {message}. "
+                f"Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
+                f"{additional_instructions_text}"
+            )
             _log_prompt_length(llm, full_text=full_prompt)
             _write_llm_prompt_log(llm, full_text=full_prompt)
             r = get_oc_info(full_prompt)
@@ -1431,14 +1438,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             # Append additional instructions last
             if additional_instructions_text:
                 messages.append({"role": "user", "content": additional_instructions_text.strip()})
-                if "OVERRIDE" in additional_instructions_text:
-                    logger.debug(
-                        "Additional instructions appended to Llama messages (OVERRIDE MODE)"
-                    )
-                else:
-                    logger.debug(
-                        "Additional instructions appended to Llama messages (ENHANCEMENT MODE)"
-                    )
+                logger.debug("Additional instructions appended to Llama messages")
             _log_prompt_length(llm, messages=messages)
             _write_llm_prompt_log(llm, messages=messages)
             response = ollama.chat(model=ollama_model, messages=messages)
@@ -1465,14 +1465,7 @@ YOU MUST FOLLOW THESE INSTRUCTIONS EXACTLY:
             # Append additional instructions last
             if additional_instructions_text:
                 content_list.append({"type": "text", "text": additional_instructions_text.strip()})
-                if "OVERRIDE" in additional_instructions_text:
-                    logger.debug(
-                        "Additional instructions appended to Claude messages (OVERRIDE MODE)"
-                    )
-                else:
-                    logger.debug(
-                        "Additional instructions appended to Claude messages (ENHANCEMENT MODE)"
-                    )
+                logger.debug("Additional instructions appended to Claude messages")
             messages = [{"role": "user", "content": content_list}]
             _log_prompt_length(llm, system=system_message, user_content_list=content_list)
             _write_llm_prompt_log(
