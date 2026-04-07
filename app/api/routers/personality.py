@@ -96,7 +96,16 @@ def get_personality_profiles(
                     }
                 )
 
-        return {"profiles": profiles}
+        last_personality_profile_used = (
+            app_settings.get("last_personality_profile_used")
+            if isinstance(app_settings, dict)
+            else None
+        )
+
+        return {
+            "profiles": profiles,
+            "last_personality_profile_used": last_personality_profile_used,
+        }
     except HTTPException:
         raise
     except Exception as e:

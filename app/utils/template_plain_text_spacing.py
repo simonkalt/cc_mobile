@@ -69,14 +69,12 @@ def finalize_plain_text_for_docx(content: str, template: Optional[str]) -> str:
     """
     Last pass on plain-text cover letter before DOCX build.
 
-    When a template is present the LLM is trusted to produce the correct spacing;
-    only list compaction runs.  Without a template, excessive blank-line runs
-    (3+ newlines) are collapsed as a safety net.
+    Always collapse 3+ consecutive newlines to exactly two (one blank line).
+    LLMs routinely over-emit blank lines regardless of template guidance.
     """
     text = _normalize_newlines(content or "")
     if not text.strip():
         return text
-    if not (template and template.strip()):
-        text = _collapse_triple_newlines_in_plain_text(text)
+    text = _collapse_triple_newlines_in_plain_text(text)
     lines = compact_blank_lines_between_consecutive_list_lines(text.split("\n"))
     return "\n".join(lines)

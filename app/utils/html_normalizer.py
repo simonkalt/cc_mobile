@@ -8,6 +8,23 @@ HTML normalization for cover letter content.
 import re
 
 
+def _has_styled_paragraphs(html_content: str) -> bool:
+    """
+    Detect paragraph tags that carry styling/class semantics.
+    When present, avoid converting <p> tags to <br /> because that drops
+    paragraph-level formatting.
+    """
+    if not html_content:
+        return False
+    return bool(
+        re.search(
+            r"<p\b[^>]*\b(?:style|class|data-[\w\-]+)\s*=",
+            html_content,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def html_p_to_br(html_content: str) -> str:
     """
     Only replace </p> and <p...> with <br />. No other changes.
@@ -15,6 +32,9 @@ def html_p_to_br(html_content: str) -> str:
     """
     if not html_content or not html_content.strip():
         return html_content
+    # Preserve editor-applied paragraph formatting (font family/size/class tokens).
+    if _has_styled_paragraphs(html_content):
+        return normalize_br_variants(html_content)
     html_content = re.sub(r"</p>\s*", "<br />", html_content, flags=re.IGNORECASE)
     html_content = re.sub(r"<p(\s[^>]*)?>\s*", "<br />", html_content, flags=re.IGNORECASE)
     return html_content
@@ -170,9 +190,11 @@ def normalize_cover_letter_html(html_content: str) -> str:
     """
     if not html_content or not html_content.strip():
         return html_content
-    # </p> and <p...> → <br /> so </p><p> becomes <br /><br /> (preserves prompt's double breaks)
-    html_content = re.sub(r"</p>\s*", "<br />", html_content, flags=re.IGNORECASE)
-    html_content = re.sub(r"<p(\s[^>]*)?>\s*", "<br />", html_content, flags=re.IGNORECASE)
+    # Keep styled paragraph tags intact to avoid dropping paragraph-level formatting.
+    if not _has_styled_paragraphs(html_content):
+        # </p> and <p...> → <br /> so </p><p> becomes <br /><br /> (preserves prompt's double breaks)
+        html_content = re.sub(r"</p>\s*", "<br />", html_content, flags=re.IGNORECASE)
+        html_content = re.sub(r"<p(\s[^>]*)?>\s*", "<br />", html_content, flags=re.IGNORECASE)
     # Normalize <br> variants to <br /> (do not collapse — keep double <br /><br /> from prompt)
     html_content = re.sub(r"<br\s*/?\s*>|</?\s*br\s*>", "<br />", html_content, flags=re.IGNORECASE)
     # Ensure break after "Dear [Name]," when body runs on (only if no break already)
