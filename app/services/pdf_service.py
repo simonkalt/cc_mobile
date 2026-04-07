@@ -258,13 +258,22 @@ def _normalize_html_for_pdf(html_content: str) -> str:
     """
     if not html_content:
         return html_content
-    # Merge adjacent paragraphs so we don't get 0.75em margin between every line in PDF
-    html_content = re.sub(
-        r"</p>\s*<p(\s[^>]*)?>",
-        "<br />",
-        html_content,
-        flags=re.IGNORECASE,
+    has_styled_paragraphs = bool(
+        re.search(
+            r"<p\b[^>]*\b(?:style|class|data-[\w\-]+)\s*=",
+            html_content,
+            flags=re.IGNORECASE,
+        )
     )
+    # Merge adjacent paragraphs for spacing only when paragraph tags are plain.
+    # If styled/classed paragraph tags exist, keep boundaries intact so font/formatting survives.
+    if not has_styled_paragraphs:
+        html_content = re.sub(
+            r"</p>\s*<p(\s[^>]*)?>",
+            "<br />",
+            html_content,
+            flags=re.IGNORECASE,
+        )
     html_content = _collapse_br_for_pdf(html_content)
     # Ensure there is always a line break before "Sincerely," so the closing never runs into the body
     html_content = re.sub(
