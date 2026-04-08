@@ -113,7 +113,7 @@
               __PLAY_STORE_ATTRS__
             >
               <img
-                src="/website/images/footer-google-play.avif"
+                src="/website/images/footer-google-play.png"
                 alt="Get it on Google Play"
               />
             </a>
@@ -123,7 +123,7 @@
               __IOS_APP_STORE_ATTRS__
             >
               <img
-                src="/website/images/footer-app-store.avif"
+                src="/website/images/footer-app-store.png"
                 alt="Download on the App Store"
               />
             </a>
@@ -157,7 +157,7 @@
       let currentIndex = 0;
       const images = [];
 
-      // Load images
+      // Load images (PNG-first with JPG fallback for compatibility/caching edge cases)
       for (let i = 1; i <= imageCount; i++) {
         images.push(`/website/images/${i}.png`);
       }
@@ -189,6 +189,18 @@
           img.src = imageSrc;
           img.alt = `Screenshot ${index + 1}`;
           img.className = "carousel-image";
+          img.loading = "lazy";
+          img.dataset.fallbackTried = "false";
+          img.onerror = () => {
+            // Fallback to JPG if PNG fails to load on a client cache or stale server asset set.
+            if (
+              img.dataset.fallbackTried === "false" &&
+              imageSrc.toLowerCase().endsWith(".png")
+            ) {
+              img.dataset.fallbackTried = "true";
+              img.src = imageSrc.replace(/\.png$/i, ".jpg");
+            }
+          };
 
           // Determine position relative to center
           const distanceFromCenter = index - currentIndex;
@@ -226,26 +238,15 @@
       }
 
       function updateTrackPosition() {
-        const viewportWidth = carouselTrack.parentElement.offsetWidth;
-        const centerWrapperWidth = 250;
-        const sideWrapperWidth = 140;
-        const gap = 10;
+        const viewport = carouselTrack.parentElement;
+        const wrappers = carouselTrack.querySelectorAll(".carousel-image-wrapper");
+        const currentWrapper = wrappers[currentIndex];
+        if (!viewport || !currentWrapper) return;
 
-        // Calculate position to center the current image
-        // All images before currentIndex are side images
-        // Each takes sideWrapperWidth, with gap between them
-        // The center image is wider (centerWrapperWidth)
-        let positionBeforeCenter = 0;
-        for (let i = 0; i < currentIndex; i++) {
-          positionBeforeCenter += sideWrapperWidth + gap;
-        }
-
-        // Center of current image = positionBeforeCenter + centerWrapperWidth/2
-        // We want this to be at viewportWidth/2
-        // So: trackPosition + positionBeforeCenter + centerWrapperWidth/2 = viewportWidth/2
-        const trackPosition =
-          viewportWidth / 2 - positionBeforeCenter - centerWrapperWidth / 2;
-
+        const viewportWidth = viewport.offsetWidth;
+        const wrapperCenter =
+          currentWrapper.offsetLeft + currentWrapper.offsetWidth / 2;
+        const trackPosition = viewportWidth / 2 - wrapperCenter;
         carouselTrack.style.transform = `translateX(${trackPosition}px)`;
       }
 
@@ -339,6 +340,11 @@
 
       // Initialize carousel
       renderCarousel();
+
+      // Re-center on mobile orientation/viewport changes.
+      window.addEventListener("resize", () => {
+        updateTrackPosition();
+      });
     </script>
   </body>
 </html>
