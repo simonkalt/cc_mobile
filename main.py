@@ -1126,9 +1126,17 @@ def _inject_store_urls_into_index_html(html: str) -> str:
 
 
 # Serve webpage at root (/) so root URL shows website/index.html
+# Requests arriving on support.saimonsoft.com get the support page instead.
 @app.get("/")
-def read_root():
+def read_root(request: Request):
     project_root = os.path.dirname(os.path.abspath(__file__))
+
+    host = (request.headers.get("host") or "").split(":")[0].lower()
+    if host == "support.saimonsoft.com":
+        support_path = os.path.join(project_root, "website", "support.html")
+        if os.path.exists(support_path):
+            return FileResponse(support_path, media_type="text/html")
+
     index_path = os.path.join(project_root, "website", "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
