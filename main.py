@@ -1115,7 +1115,7 @@ def _inject_store_urls_into_index_html(html: str) -> str:
         ios_attrs = f'href="{safe_ios}" target="_blank" rel="noopener noreferrer"'
     else:
         ios_attrs = (
-            'href="#" onclick="alert(\'Coming soon.\'); return false;" role="button" '
+            "href=\"#\" onclick=\"alert('iOS support is days away. Stay tuned!'); return false;\" role=\"button\" "
             'aria-disabled="true"'
         )
 
@@ -1156,6 +1156,15 @@ def delete_account_page():
     if os.path.exists(path):
         return FileResponse(path, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Delete account page not found"})
+
+
+@app.get("/support.html", include_in_schema=False)
+def support_page():
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "support.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Support page not found"})
 
 
 @app.get("/subscribed")
