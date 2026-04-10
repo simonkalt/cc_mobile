@@ -372,13 +372,27 @@ async def get_plans(
     """
     try:
         plans_data = get_subscription_plans(force_refresh=force_refresh)
-        all_plans = plans_data.get('plans', [])
+        # Work on a shallow copy — never mutate the cached plans_data dict.
+        all_plans = list(plans_data.get('plans', []))
 
         is_super = current_user is not None and getattr(current_user, "super_user", False)
+        logger.info(
+            "Plans tier filter: current_user=%s, super_user=%s, is_super=%s, total_plans=%d",
+            getattr(current_user, "email", None) if current_user else None,
+            getattr(current_user, "super_user", None) if current_user else None,
+            is_super,
+            len(all_plans),
+        )
         if not is_super:
-            all_plans = [p for p in all_plans if p.get("tier", 0) < 100]
+            all_plans = [p for p in all_plans if abs(p.get("tier", 0)) < 100]
 
-        plans_data["plans"] = all_plans
+        # Send tiers >= 100 as negative so the client can use standard
+        # upgrade logic (higher tier = upgrade) without special-casing.
+        # Build new dicts to avoid mutating the cached originals.
+        all_plans = [
+            {**p, "tier": -abs(p["tier"])} if abs(p.get("tier", 0)) >= 100 else p
+            for p in all_plans
+        ]
 
         if len(all_plans) == 0:
             logger.warning(
@@ -387,7 +401,7 @@ async def get_plans(
         else:
             logger.info(f"Returning {len(all_plans)} subscription plan(s) to client")
 
-        return SubscriptionPlansResponse(**plans_data)
+        return SubscriptionPlansResponse(plans=all_plans)
     except Exception as e:
         logger.error(f"Error fetching subscription plans: {e}", exc_info=True)
         raise HTTPException(
