@@ -226,7 +226,15 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                             limit=100,
                         )
                         subs_data = subs.data if hasattr(subs, "data") else []
-                        if subs_data:
+                        # Exclude incomplete/incomplete_expired — these represent
+                        # payment attempts that were never finished and should not
+                        # be treated as real subscriptions.
+                        _USELESS_STATUSES = {"incomplete", "incomplete_expired"}
+                        usable_subs = [
+                            s for s in subs_data
+                            if str(getattr(s, "status", "")) not in _USELESS_STATUSES
+                        ]
+                        if usable_subs:
                             def _rank(sub_obj: object) -> tuple:
                                 status_value = str(getattr(sub_obj, "status", "") or "")
                                 precedence = _SUBSCRIPTION_STATUS_PRECEDENCE.get(status_value, 99)
@@ -234,7 +242,7 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                                 created = int(getattr(sub_obj, "created", 0) or 0)
                                 return (precedence, -cpe, -created)
 
-                            best_sub = sorted(subs_data, key=_rank)[0]
+                            best_sub = sorted(usable_subs, key=_rank)[0]
                             if getattr(best_sub, "id", None) and best_sub.id != subscription_id:
                                 logger.info(
                                     "Switching to most relevant Stripe subscription for user %s: db_sub=%s -> chosen_sub=%s (status=%s)",
@@ -247,6 +255,42 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                                     best_sub.id, expand=["items.data.price.product"],
                                 )
                                 subscription_id = best_sub.id
+                        elif subs_data:
+                            # All subscriptions are incomplete/incomplete_expired — user
+                            # has no usable subscription.  Reset to free.
+                            logger.info(
+                                "All %d subscription(s) for user %s are incomplete; resetting to free",
+                                len(subs_data), user_id,
+                            )
+                            reset_doc = {
+                                "subscriptionId": None,
+                                "subscriptionStatus": "free",
+                                "subscriptionPlan": "free",
+                                "priceId": None,
+                                "subscriptionProductId": None,
+                                "subscriptionCurrentPeriodEnd": None,
+                                "cancelAtPeriodEnd": False,
+                                "canceledAt": None,
+                                "dateUpdated": datetime.utcnow(),
+                            }
+                            collection.update_one({"_id": user_id_obj}, {"$set": reset_doc})
+                            subscription_status = "free"
+                            subscription_plan = "free"
+                            subscription_id = None
+                            price_id = None
+                            product_id = None
+                            current_period_end = None
+                            cancel_at_period_end = False
+                            canceled_at = None
+                            # Skip the rest of Stripe sync — we've already reset
+                            return SubscriptionResponse(
+                                subscriptionId=None,
+                                subscriptionStatus="free",
+                                subscriptionPlan="free",
+                                stripeCustomerId=stripe_customer_id,
+                                generation_credits=user.get("generation_credits", 10),
+                                max_credits=user.get("max_credits", 10),
+                            )
                     except Exception as choose_exc:
                         logger.warning(
                             "Could not choose most relevant subscription for user %s: %s",
@@ -255,6 +299,35 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                         )
 
                 stripe_status = getattr(stripe_sub, "status", None)
+
+                # If the single subscription from the DB is incomplete, reset to free.
+                if stripe_status in ("incomplete", "incomplete_expired"):
+                    logger.info(
+                        "Subscription %s for user %s has status '%s'; resetting to free",
+                        subscription_id, user_id, stripe_status,
+                    )
+                    reset_doc = {
+                        "subscriptionId": None,
+                        "subscriptionStatus": "free",
+                        "subscriptionPlan": "free",
+                        "priceId": None,
+                        "subscriptionProductId": None,
+                        "subscriptionCurrentPeriodEnd": None,
+                        "cancelAtPeriodEnd": False,
+                        "canceledAt": None,
+                        "dateUpdated": datetime.utcnow(),
+                    }
+                    collection.update_one({"_id": user_id_obj}, {"$set": reset_doc})
+                    stripe_customer_id = user.get("stripeCustomerId")
+                    return SubscriptionResponse(
+                        subscriptionId=None,
+                        subscriptionStatus="free",
+                        subscriptionPlan="free",
+                        stripeCustomerId=stripe_customer_id,
+                        generation_credits=user.get("generation_credits", 10),
+                        max_credits=user.get("max_credits", 10),
+                    )
+
                 logger.info(
                     "Stripe subscription snapshot user_id=%s sub_id=%s status=%s "
                     "cancel_at_period_end=%s canceled_at=%s ended_at=%s current_period_end=%s",
@@ -781,8 +854,20 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
 
         # If the customer already has a payment method on file, Stripe may
         # auto-charge the invoice so there is no pending payment_intent.
-        # Detect this and treat it as an immediate success.
-        if not invoice_pi and getattr(sub, "status", None) == "active":
+        # Only treat as immediate success when a payment method actually exists;
+        # otherwise Stripe may have skipped payment (e.g. amount below $0.50
+        # minimum) and we must not grant the subscription for free.
+        has_payment_method = False
+        if not invoice_pi:
+            try:
+                pm_list = stripe_to_use.PaymentMethod.list(
+                    customer=stripe_customer_id, type="card", limit=1,
+                )
+                has_payment_method = bool(pm_list.data)
+            except Exception as pm_err:
+                logger.warning("Could not check payment methods for %s: %s", stripe_customer_id, pm_err)
+
+        if not invoice_pi and getattr(sub, "status", None) == "active" and has_payment_method:
             logger.info(
                 "Subscription %s went active immediately (existing payment method on file) for user %s",
                 sub.id, user_id,
@@ -823,9 +908,20 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
             }
 
         if not invoice_pi:
+            # No payment intent and no saved payment method — Stripe likely
+            # skipped payment collection (e.g. amount below $0.50 minimum).
+            # Cancel the subscription so the user isn't granted free access.
+            logger.warning(
+                "Subscription %s has no payment_intent and no payment method on file for user %s; cancelling",
+                sub.id, user_id,
+            )
+            try:
+                stripe_to_use.Subscription.cancel(sub.id)
+            except Exception as cancel_err:
+                logger.error("Failed to cancel unpaid subscription %s: %s", sub.id, cancel_err)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Subscription created but latest invoice payment intent is missing",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Price is below the minimum charge amount ($0.50). Please use a higher price.",
             )
 
         # Keep DB in sync with pre-confirmation state (typically incomplete)
@@ -1750,8 +1846,10 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                         amount = price.unit_amount / 100 if price.unit_amount else 0
                         currency = price.currency.upper() if price.currency else "USD"
 
-                        # Build plan ID from product and interval
-                        plan_id = f"{product.id}_{interval}_{interval_count}".lower().replace(
+                        # Build plan ID from product, price, and interval (price.id
+                        # ensures uniqueness when a product has multiple active prices
+                        # with the same interval).
+                        plan_id = f"{product.id}_{price.id}_{interval}_{interval_count}".lower().replace(
                             "_", "-"
                         )
 
@@ -2001,6 +2099,27 @@ def get_raw_stripe_products(force_refresh: bool = False) -> dict:
                     for feat in product.marketing_features
                     if _stripe_feature_name(feat)
                 ]
+
+            # Embed only active prices so the client knows which are available
+            try:
+                active_prices = stripe_module.Price.list(product=product.id, active=True, limit=100)
+                product_dict["prices"] = [
+                    {
+                        "id": p.id,
+                        "active": p.active,
+                        "currency": p.currency,
+                        "unit_amount": p.unit_amount,
+                        "type": p.type,
+                        "recurring": {
+                            "interval": p.recurring.interval,
+                            "interval_count": p.recurring.interval_count,
+                        } if p.recurring else None,
+                    }
+                    for p in active_prices.data
+                ]
+            except Exception as price_err:
+                logger.warning("Could not fetch prices for product %s: %s", product.id, price_err)
+                product_dict["prices"] = []
 
             products_data.append(product_dict)
 
