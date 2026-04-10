@@ -58,8 +58,16 @@ def _metadata_to_plain_dict(metadata_obj: object) -> dict:
         return {}
     if isinstance(metadata_obj, dict):
         return dict(metadata_obj)
+    # StripeObject.to_dict() is the most reliable method
+    to_dict = getattr(metadata_obj, "to_dict", None)
+    if callable(to_dict):
+        try:
+            raw = to_dict()
+            if isinstance(raw, dict):
+                return raw
+        except Exception:
+            pass
     try:
-        # StripeObject supports .to_dict_recursive()
         to_dict_recursive = getattr(metadata_obj, "to_dict_recursive", None)
         if callable(to_dict_recursive):
             raw = to_dict_recursive()
@@ -68,7 +76,6 @@ def _metadata_to_plain_dict(metadata_obj: object) -> dict:
     except Exception:
         pass
     try:
-        # Last resort for mapping-like objects
         return dict(metadata_obj)  # type: ignore[arg-type]
     except Exception:
         return {}
