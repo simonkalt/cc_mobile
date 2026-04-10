@@ -228,20 +228,26 @@ async def get_optional_current_user(
 ) -> Optional[UserResponse]:
     """Return the authenticated user if a valid token is present, otherwise None."""
     if credentials is None:
+        logger.debug("get_optional_current_user: no credentials provided")
         return None
     try:
         payload = _verify_token(credentials.credentials)
-    except HTTPException:
+    except HTTPException as e:
+        logger.warning("get_optional_current_user: token verification failed: %s", e.detail)
         return None
     user_id: Optional[str] = payload.get("sub")
     if not user_id:
+        logger.warning("get_optional_current_user: token has no 'sub' claim")
         return None
     try:
         user = get_user_by_id(user_id)
-    except Exception:
+    except Exception as e:
+        logger.warning("get_optional_current_user: get_user_by_id failed: %s", e)
         return None
     if not user.isActive:
+        logger.warning("get_optional_current_user: user %s is inactive", user_id)
         return None
+    logger.info("get_optional_current_user: resolved user %s (super_user=%s)", user.email, user.super_user)
     return user
 
 
