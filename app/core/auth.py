@@ -27,6 +27,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 def _secure_string_compare(a: Optional[str], b: Optional[str]) -> bool:
@@ -219,6 +220,28 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
+    return user
+
+
+async def get_optional_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
+) -> Optional[UserResponse]:
+    """Return the authenticated user if a valid token is present, otherwise None."""
+    if credentials is None:
+        return None
+    try:
+        payload = _verify_token(credentials.credentials)
+    except HTTPException:
+        return None
+    user_id: Optional[str] = payload.get("sub")
+    if not user_id:
+        return None
+    try:
+        user = get_user_by_id(user_id)
+    except Exception:
+        return None
+    if not user.isActive:
+        return None
     return user
 
 
