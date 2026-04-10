@@ -113,6 +113,7 @@ class StripeProductResponse(BaseModel):
     unit_label: Optional[str] = None
     updated: int
     url: Optional[str] = None
+    prices: Optional[list[dict]] = None
 
 
 class StripeProductsResponse(BaseModel):
