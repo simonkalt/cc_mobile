@@ -778,6 +778,50 @@ def create_payment_intent(user_id: str, price_id: str) -> dict:
                 raise
         latest_invoice = getattr(sub, "latest_invoice", None)
         invoice_pi = getattr(latest_invoice, "payment_intent", None) if latest_invoice else None
+
+        # If the customer already has a payment method on file, Stripe may
+        # auto-charge the invoice so there is no pending payment_intent.
+        # Detect this and treat it as an immediate success.
+        if not invoice_pi and getattr(sub, "status", None) == "active":
+            logger.info(
+                "Subscription %s went active immediately (existing payment method on file) for user %s",
+                sub.id, user_id,
+            )
+            product_id = None
+            try:
+                items_data = sub.items.data if hasattr(sub.items, "data") else []
+                if items_data:
+                    price_obj = items_data[0].price
+                    if hasattr(price_obj, "product") and price_obj.product:
+                        product_id = price_obj.product.id if hasattr(price_obj.product, "id") else str(price_obj.product)
+            except Exception:
+                product_id = None
+            current_period_end = (
+                datetime.fromtimestamp(sub.current_period_end)
+                if getattr(sub, "current_period_end", None)
+                else None
+            )
+            update_user_subscription(
+                user_id=user_id,
+                subscription_id=sub.id,
+                subscription_status="active",
+                subscription_plan=price_id,
+                price_id=price_id,
+                subscription_product_id=product_id,
+                stripe_customer_id=stripe_customer_id,
+                current_period_end=current_period_end,
+                cancel_at_period_end=bool(getattr(sub, "cancel_at_period_end", False)),
+                canceled_at=None,
+            )
+            return {
+                "client_secret": None,
+                "customer_id": stripe_customer_id,
+                "customer_ephemeral_key_secret": None,
+                "subscription_id": sub.id,
+                "payment_intent_id": None,
+                "already_active": True,
+            }
+
         if not invoice_pi:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1792,6 +1836,11 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                         elif interval == "year":
                             popular = True  # Default annual to popular
 
+                        try:
+                            tier = int(meta.get("tier", 0)) if meta else 0
+                        except (TypeError, ValueError):
+                            tier = 0
+
                         plan_dict = {
                             "id": plan_id,
                             "name": plan_name,
@@ -1804,6 +1853,7 @@ def _fetch_stripe_products_and_prices(campaign_filter: Optional[str] = None) -> 
                             "productId": product.id,
                             "features": features,
                             "popular": popular,
+                            "tier": tier,
                         }
 
                         plans.append(plan_dict)
