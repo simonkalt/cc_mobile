@@ -5,7 +5,7 @@ Subscription management API routes
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request, status, Depends
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_optional_current_user
 from app.core.config import settings
 from app.models.user import UserResponse
 
@@ -360,36 +360,36 @@ def debug_stripe():
 @router.get(
     "/subscriptions/plans",
     response_model=SubscriptionPlansResponse,
-    dependencies=[],  # Explicitly mark as public - no authentication required
+    dependencies=[],
 )
-def get_plans(force_refresh: bool = False):
+async def get_plans(
+    force_refresh: bool = False,
+    current_user: UserResponse | None = Depends(get_optional_current_user),
+):
     """
     Get available subscription plans with Stripe Price IDs.
-    Dynamically fetches products and prices from Stripe.
-    This endpoint is public (no auth required).
-
-    Args:
-        force_refresh: If True, bypass cache and fetch fresh data from Stripe (default: False)
-
-    Returns:
-        SubscriptionPlansResponse with available plans
+    Plans with tier >= 100 are only visible to super_user accounts.
     """
     try:
         plans_data = get_subscription_plans(force_refresh=force_refresh)
-        plans_count = len(plans_data.get('plans', []))
-        
-        if plans_count == 0:
+        all_plans = plans_data.get('plans', [])
+
+        is_super = current_user is not None and getattr(current_user, "super_user", False)
+        if not is_super:
+            all_plans = [p for p in all_plans if p.get("tier", 0) < 100]
+
+        plans_data["plans"] = all_plans
+
+        if len(all_plans) == 0:
             logger.warning(
-                "⚠️ Plans endpoint returning 0 plans. This will show 'No subscription plans available' "
-                "in the frontend. Check logs above for Stripe connection errors."
+                "Plans endpoint returning 0 plans. Check logs above for Stripe connection errors."
             )
         else:
-            logger.info(f"✅ Returning {plans_count} subscription plan(s) to client")
+            logger.info(f"Returning {len(all_plans)} subscription plan(s) to client")
 
-        response_obj = SubscriptionPlansResponse(**plans_data)
-        return response_obj
+        return SubscriptionPlansResponse(**plans_data)
     except Exception as e:
-        logger.error(f"❌ Error fetching subscription plans: {e}", exc_info=True)
+        logger.error(f"Error fetching subscription plans: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch subscription plans: {str(e)}",
@@ -399,24 +399,32 @@ def get_plans(force_refresh: bool = False):
 @router.get(
     "/subscriptions/products",
     response_model=StripeProductsResponse,
-    dependencies=[],  # Explicitly mark as public - no authentication required
+    dependencies=[],
 )
-def get_raw_products(force_refresh: bool = False):
+async def get_raw_products(
+    force_refresh: bool = False,
+    current_user: UserResponse | None = Depends(get_optional_current_user),
+):
     """
     Get raw Stripe products with full structure including marketing_features.
-    Returns products exactly as Stripe returns them, with marketing_features as objects.
-    This endpoint is public (no auth required).
-
-    Args:
-        force_refresh: If True, bypass cache and fetch fresh data from Stripe (default: False)
-
-    Returns:
-        StripeProductsResponse with raw Stripe product data
+    Products with metadata tier >= 100 are only visible to super_user accounts.
     """
     try:
         products_data = get_raw_stripe_products(force_refresh=force_refresh)
-        products_count = len(products_data.get("data", []))
-        logger.info(f"Returning {products_count} raw Stripe product(s) to client")
+        all_products = products_data.get("data", [])
+
+        is_super = current_user is not None and getattr(current_user, "super_user", False)
+        if not is_super:
+            def _product_tier(p: dict) -> int:
+                meta = p.get("metadata") or {}
+                try:
+                    return int(meta.get("tier", 0))
+                except (TypeError, ValueError):
+                    return 0
+            all_products = [p for p in all_products if _product_tier(p) < 100]
+
+        products_data["data"] = all_products
+        logger.info(f"Returning {len(all_products)} raw Stripe product(s) to client")
 
         return StripeProductsResponse(**products_data)
     except Exception as e:
