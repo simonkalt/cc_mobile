@@ -30,11 +30,12 @@ class CreatePaymentIntentRequest(BaseModel):
 
 class CreatePaymentIntentResponse(BaseModel):
     """Response containing PaymentIntent details for PaymentSheet"""
-    client_secret: str
+    client_secret: Optional[str] = None
     customer_id: Optional[str] = None
     customer_ephemeral_key_secret: Optional[str] = None
     subscription_id: Optional[str] = None
     payment_intent_id: Optional[str] = None
+    already_active: Optional[bool] = False
 
 
 class SubscribeRequest(BaseModel):
@@ -77,6 +78,7 @@ class SubscriptionPlan(BaseModel):
     productId: Optional[str] = None  # Stripe Product ID
     features: list[str]
     popular: Optional[bool] = False  # Mark recommended plan
+    tier: Optional[int] = 0  # Access tier: 0 = public, 100+ = super_user only
 
 
 class SubscriptionPlansResponse(BaseModel):
