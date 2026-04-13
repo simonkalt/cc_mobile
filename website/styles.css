@@ -124,6 +124,7 @@ h1 {
   overflow: hidden;
   padding: 0;
   min-height: 400px;
+  touch-action: pan-y;
 }
 
 .carousel-track {
