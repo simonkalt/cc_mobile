@@ -29,6 +29,9 @@ from app.utils.user_helpers import (
     normalize_personality_profiles,
     USERS_COLLECTION,
 )
+from app.utils.registration_notice import (
+    assert_data_use_sharing_notice_accepted,
+)
 from app.utils.letter_template_selection import (
     apply_letter_template_app_settings_aliases,
     coerce_letter_template_auto_pick_for_update,
@@ -144,7 +147,13 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection unavailable"
         )
-    
+
+    if not user_data.data_use_sharing_notice_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must accept the Data Use & Sharing Notice to create an account.",
+        )
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
@@ -260,6 +269,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "lastLogin": None,
         "passwordChangedAt": None,
         "avatarUrl": None,
+        "dataUseSharingNoticeAcceptedAt": datetime.utcnow(),
         "phone": user_data.phone,
         "address": user_data.address or {
             "street": None,
@@ -435,6 +445,8 @@ def create_user_from_registration_data(
             detail="registration_data must include name, email, and hashed password",
         )
 
+    assert_data_use_sharing_notice_accepted(registration_data)
+
     existing_user = collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
     if existing_user:
         raise HTTPException(
@@ -475,6 +487,7 @@ def create_user_from_registration_data(
         "lastLogin": None,
         "passwordChangedAt": None,
         "avatarUrl": None,
+        "dataUseSharingNoticeAcceptedAt": datetime.utcnow(),
         "phone": registration_data.get("phone"),
         "address": registration_data.get("address")
         or {"street": None, "city": None, "state": None, "zip": None, "country": None},

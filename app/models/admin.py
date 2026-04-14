@@ -44,6 +44,8 @@ class AdminUserSummary(BaseModel):
     lastLogin: Optional[datetime] = None
     subscriptionStatus: Optional[str] = None
     archived: Optional[bool] = False
+    archived_at: Optional[datetime] = None
+    account_deletion_requested_at: Optional[datetime] = None
     super_user: Optional[bool] = False
     generation_credits: int = Field(default=0, ge=0)
     max_credits: int = Field(default=10, ge=0)
@@ -82,6 +84,8 @@ class AdminUserDetail(BaseModel):
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
     super_user: Optional[bool] = False
     archived: Optional[bool] = False
+    archived_at: Optional[datetime] = None
+    account_deletion_requested_at: Optional[datetime] = None
     stripeCustomerId: Optional[str] = None
 
 

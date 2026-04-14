@@ -117,7 +117,7 @@
                  @keyup.enter="$store.users.applySearch()"
                  @input.debounce.400ms="$store.users.applySearch()" />
           <select @change="$store.users.applyFilter()" x-model="$store.users.statusFilter">
-            <option value="">All Active</option>
+            <option value="">All users</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="archived">Archived</option>
