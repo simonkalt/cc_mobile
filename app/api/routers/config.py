@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
+from app.utils.registration_notice import load_registration_data_use_notice
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ def get_client_settings():
             "requireNumber": True,
             "requireSpecial": True,
         },
+        "privacyPolicyUrl": settings.PUBLIC_PRIVACY_POLICY_URL,
+        "termsOfServiceUrl": settings.PUBLIC_TERMS_OF_SERVICE_URL,
+        "registrationDataUseNotice": load_registration_data_use_notice(),
     }
 
 

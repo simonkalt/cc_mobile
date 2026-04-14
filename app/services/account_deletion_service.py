@@ -46,20 +46,32 @@ def _sync_user_document_for_pending_deletion(
     When a pending request already exists (idempotent retry), we still run this so
     flags stay correct if a previous deploy skipped them or a write was inconsistent.
     """
+    existing_user = users_col.find_one(
+        {"_id": oid},
+        {
+            "auth_tokens_invalidated_before": 1,
+            "account_deletion_requested_at": 1,
+            "archived_at": 1,
+            "archived": 1,
+        },
+    )
     set_doc: Dict[str, Any] = {
         "account_deletion_pending": True,
         "archived": True,
         "isActive": False,
         "dateUpdated": now,
     }
+    # First self-service deletion request only (idempotent retries must not move this timestamp).
+    if not existing_user or not existing_user.get("account_deletion_requested_at"):
+        set_doc["account_deletion_requested_at"] = now
+    # When user becomes archived for this flow, or backfill if archived without a timestamp.
+    if not existing_user or not existing_user.get("archived") or not existing_user.get("archived_at"):
+        set_doc["archived_at"] = now
+
     if auth_invalidated_before is not None:
         set_doc["auth_tokens_invalidated_before"] = auth_invalidated_before
     else:
-        existing = users_col.find_one(
-            {"_id": oid},
-            {"auth_tokens_invalidated_before": 1},
-        )
-        if existing and existing.get("auth_tokens_invalidated_before") is None:
+        if existing_user and existing_user.get("auth_tokens_invalidated_before") is None:
             set_doc["auth_tokens_invalidated_before"] = int(time.time())
 
     result = users_col.update_one({"_id": oid}, {"$set": set_doc})
