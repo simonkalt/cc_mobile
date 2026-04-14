@@ -111,6 +111,7 @@ class UserResponse(BaseModel):
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
     super_user: Optional[bool] = False
     archived: Optional[bool] = False
+    account_deletion_pending: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -133,4 +134,10 @@ class RefreshTokenRequest(BaseModel):
 class RefreshTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class AccountDeletionRequestResponse(BaseModel):
+    message: str
+    deletion_request_id: str
+    scheduled_completion_by: str
 

@@ -4,12 +4,19 @@ User API routes
 import logging
 from datetime import datetime
 import time
-from fastapi import APIRouter, status, Depends, HTTPException
+from typing import Any, Dict
+
+from fastapi import APIRouter, status, Depends, HTTPException, Request, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from bson import ObjectId
 
-from app.core.auth import get_current_user, _verify_token
+from app.core.auth import (
+    get_current_user,
+    get_current_user_allow_pending_account_deletion,
+    _verify_token,
+    assert_token_not_invalidated,
+)
 from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
 from app.utils.user_helpers import USERS_COLLECTION
@@ -22,7 +29,9 @@ from app.models.user import (
     UserLoginResponse,
     RefreshTokenRequest,
     RefreshTokenResponse,
+    AccountDeletionRequestResponse,
 )
+from app.services.account_deletion_service import create_account_deletion_request
 from app.services.user_service import (
     register_user,
     get_user_by_id,
@@ -94,6 +103,7 @@ async def refresh_token_endpoint(request: RefreshTokenRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
+    assert_token_not_invalidated(user_id, payload)
     now = int(time.time())
     access_ttl_seconds = 24 * 60 * 60
     access_payload = {
@@ -135,6 +145,38 @@ async def get_user_by_email_endpoint(email: str):
 async def get_current_user_endpoint(current_user: UserResponse = Depends(get_current_user)):
     """Get current authenticated user"""
     return get_user_by_id(current_user.id)
+
+
+@router.post(
+    "/me/account-deletion-request",
+    response_model=AccountDeletionRequestResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def account_deletion_request_endpoint(
+    request: Request,
+    _body: Dict[str, Any] = Body(default_factory=dict),
+    current_user: UserResponse = Depends(get_current_user_allow_pending_account_deletion),
+):
+    """
+    Self-service deferred account deletion (identified from JWT only).
+    See documents/ACCOUNT_DELETION_API.md.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    client_ip = None
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    if not client_ip and request.client:
+        client_ip = request.client.host
+    user_agent = request.headers.get("user-agent")
+    return create_account_deletion_request(
+        current_user.id,
+        current_user.email,
+        current_user.name,
+        source="mobile_app",
+        client_ip=client_ip,
+        user_agent=user_agent,
+        is_super_user=bool(current_user.super_user),
+    )
 
 
 @router.put("/me/sms-opt", response_model=UserResponse)
