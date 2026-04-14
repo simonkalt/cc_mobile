@@ -20,6 +20,7 @@ from app.models.user import (
     UserLoginRequest,
     UserLoginResponse,
 )
+from app.constants.http_details import HTTP_DETAIL_PENDING_ACCOUNT_DELETION
 from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password, verify_password, validate_strong_password
@@ -820,13 +821,13 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
             detail="Invalid email or password"
         )
     
-    # Check if user is active
-    if not user.get("isActive", True):
+    # Inactive unless they only have a pending self-service deletion (isActive may be false then).
+    if not user.get("account_deletion_pending") and not user.get("isActive", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive"
         )
-    
+
     # Verify password
     hashed_password_str = user.get("hashedPassword", "")
     if not verify_password(login_data.password, hashed_password_str):
@@ -839,7 +840,13 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
-    
+
+    if user.get("account_deletion_pending"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=HTTP_DETAIL_PENDING_ACCOUNT_DELETION,
+        )
+
     # Reset failed login attempts and update last login
     collection.update_one(
         {"_id": user["_id"]},
