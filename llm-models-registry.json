@@ -1,0 +1,10 @@
+{
+  "models": [
+    { "name": "gpt-5.2", "default": false },
+    { "name": "gpt-4.1", "default": false },
+    { "name": "claude-sonnet-4-6", "default": false },
+    { "name": "claude-haiku-4-5", "default": true },
+    { "name": "gemini-2.5-flash", "default": false },
+    { "name": "grok-4-fast-reasoning", "default": false }
+  ]
+}

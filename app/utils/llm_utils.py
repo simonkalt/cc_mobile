@@ -126,14 +126,31 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
             )
         return_response = response.choices[0].message.content
         
-    elif model == "claude-sonnet-4-20250514":
+    elif model in ("claude-sonnet-4-6", "claude-sonnet-4-20250514"):
         if not ANTHROPIC_AVAILABLE or not settings.ANTHROPIC_API_KEY:
             logger.error("Anthropic not available or API key not set")
             return None
             
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model=model,
+            model="claude-sonnet-4-6",
+            system="You are a helpful assistant.",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20000,
+            temperature=1,
+        )
+        return_response = (
+            response.content[0].text.replace("```json", "").replace("```", "")
+        )
+        
+    elif model in ("claude-haiku-4-5", "claude-haiku-4-5-20251001"):
+        if not ANTHROPIC_AVAILABLE or not settings.ANTHROPIC_API_KEY:
+            logger.error("Anthropic not available or API key not set")
+            return None
+            
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-haiku-4-5",
             system="You are a helpful assistant.",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=20000,
@@ -200,8 +217,17 @@ def normalize_llm_name(llm: str) -> str:
         return "gpt-4.1"
     elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
         return "grok-4-fast-reasoning"
-    elif "claude" in llm_lower or llm == "claude-sonnet-4-20250514":
-        return "claude-sonnet-4-20250514"
+    elif "haiku" in llm_lower or llm == "claude-haiku-4-5" or llm == "Claude Haiku":
+        return "claude-haiku-4-5"
+    elif (
+        "sonnet" in llm_lower
+        or llm == "claude-sonnet-4-6"
+        or llm == "claude-sonnet-4-20250514"
+        or llm == "Claude"
+    ):
+        return "claude-sonnet-4-6"
+    elif "claude" in llm_lower:
+        return "claude-sonnet-4-6"
     elif "llama" in llm_lower or llm == "llama3.2":
         return "llama3.2"
     elif "oci" in llm_lower or llm == "oci-generative-ai":

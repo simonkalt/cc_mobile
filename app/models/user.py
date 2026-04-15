@@ -1,7 +1,7 @@
 """
 User-related Pydantic models
 """
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -59,12 +59,19 @@ class UserPreferences(BaseModel):
 
 # Request Models
 class UserRegisterRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     email: EmailStr
     password: str
     phone: Optional[str] = None
     address: Optional[dict] = None
     preferences: Optional[dict] = None
+    data_use_sharing_notice_accepted: bool = Field(
+        ...,
+        alias="dataUseSharingNoticeAccepted",
+        description="Must be true: user accepted the Data Use & Sharing Notice before registration.",
+    )
 
 
 class UserUpdateRequest(BaseModel):
@@ -111,6 +118,9 @@ class UserResponse(BaseModel):
     subscriptionCurrentPeriodEnd: Optional[datetime] = None
     super_user: Optional[bool] = False
     archived: Optional[bool] = False
+    archived_at: Optional[datetime] = None
+    account_deletion_pending: Optional[bool] = False
+    account_deletion_requested_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -133,4 +143,10 @@ class RefreshTokenRequest(BaseModel):
 class RefreshTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class AccountDeletionRequestResponse(BaseModel):
+    message: str
+    deletion_request_id: str
+    scheduled_completion_by: str
 

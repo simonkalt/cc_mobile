@@ -35,6 +35,7 @@ from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password
 from app.utils.user_helpers import USERS_COLLECTION
 from app.core.config import settings
+from app.utils.registration_notice import assert_data_use_sharing_notice_accepted
 from app.utils.password import validate_strong_password
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,9 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
         if settings.ENFORCE_STRONG_PASSWORDS:
             raw_password = str(request.registration_data.get("password") or "")
             _enforce_strong_password_or_raise(raw_password)
-        
+
+        assert_data_use_sharing_notice_accepted(request.registration_data)
+
         # Check if user already exists
         try:
             existing_user = get_user_by_email(request.email)
@@ -198,10 +201,25 @@ async def verify_code_endpoint(request: VerifyCodeRequest):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection"
         )
-    
+
+    # New-user registration stores the code in Redis only (no Mongo user yet).
+    if request.purpose == "finish_registration":
+        session_data = verify_code_from_redis(request.email, request.code, "finish_registration")
+        if session_data:
+            return VerifyCodeResponse(
+                success=True,
+                message="Code verified successfully",
+                verified=True,
+            )
+        return VerifyCodeResponse(
+            success=False,
+            message="Invalid or expired code",
+            verified=False,
+        )
+
     # Find user by email
     user = get_user_by_email(request.email)
-    
+
     # Verify code
     is_valid = verify_code(user.id, request.code, request.purpose)
     

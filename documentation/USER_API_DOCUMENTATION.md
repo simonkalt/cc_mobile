@@ -131,7 +131,8 @@ Retrieve user information by MongoDB ObjectId.
   "email": "john@example.com",
   "llm_counts": {
     "gpt-4.1": 15,
-    "claude-sonnet-4-20250514": 8
+    "claude-sonnet-4-6": 8,
+    "claude-haiku-4-5": 3
   },
   "last_llm_used": "gpt-4.1",
   ...
@@ -161,7 +162,8 @@ Retrieve user information by email address.
   "email": "john@example.com",
   "llm_counts": {
     "gpt-4.1": 15,
-    "claude-sonnet-4-20250514": 8
+    "claude-sonnet-4-6": 8,
+    "claude-haiku-4-5": 3
   },
   "last_llm_used": "gpt-4.1",
   ...
@@ -428,7 +430,8 @@ Response includes:
   "id": "...",
   "llm_counts": {
     "gpt-4.1": 15,
-    "claude-sonnet-4-20250514": 8
+    "claude-sonnet-4-6": 8,
+    "claude-haiku-4-5": 3
   },
   "last_llm_used": "gpt-4.1"
 }

@@ -19,16 +19,24 @@ from app.models.sms import (
 )
 from app.services.verification_service import (
     send_and_store_verification_code,
+    send_and_store_verification_code_email,
     verify_code,
-    clear_verification_code,
+    verify_code_from_redis,
+    complete_registration_from_redis,
 )
-from app.services.user_service import get_user_by_email, get_user_by_id
+from app.services.user_service import (
+    get_user_by_email,
+    get_user_by_id,
+    create_user_from_registration_data,
+)
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password, validate_strong_password
 from app.utils.user_helpers import USERS_COLLECTION
 from app.utils.sms_utils import normalize_phone_number
+from app.utils.redis_utils import delete_registration_data, delete_verification_session
 from app.services.telnyx_webhook_service import store_telnyx_message
 from app.core.config import settings
+from app.utils.registration_notice import assert_data_use_sharing_notice_accepted
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +111,57 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid purpose. Must be one of: {', '.join(valid_purposes)}"
         )
-    
+
+    # New-user registration: same Redis contract as POST /api/email/send-code with delivery_method sms.
+    if request.purpose == "finish_registration":
+        if not request.registration_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="registration_data is required for finish_registration purpose",
+            )
+        reg = request.registration_data
+        email = (request.email or reg.get("email") or "").strip()
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="email is required for finish_registration (top-level or inside registration_data)",
+            )
+        assert_data_use_sharing_notice_accepted(reg)
+        if settings.ENFORCE_STRONG_PASSWORDS:
+            raw_password = str(reg.get("password") or "")
+            _enforce_strong_password_or_raise(raw_password)
+        try:
+            existing_user = get_user_by_email(email)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User with this email already exists",
+            )
+        except HTTPException as e:
+            if e.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+        try:
+            send_and_store_verification_code_email(
+                user_id=None,
+                email=email,
+                purpose=request.purpose,
+                registration_data=reg,
+                delivery_method="sms",
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("SMS finish_registration send-code failed: %s", e, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to send verification code: {str(e)}",
+            )
+        logger.info("Verification code sent via SMS for finish_registration to %s", email)
+        return SendVerificationCodeResponse(
+            success=True,
+            message="Verification code sent successfully",
+            expires_in_minutes=10,
+        )
+
     # Find user by email or phone.
     # NOTE: forgot_password intentionally surfaces 404 so the frontend can
     # keep the user on the send-code step.  This trades anti-enumeration for UX
@@ -178,7 +236,26 @@ async def verify_code_endpoint(request: VerifyCodeRequest):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection"
         )
-    
+
+    if request.purpose == "finish_registration":
+        if not request.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="email is required for finish_registration verification",
+            )
+        session_data = verify_code_from_redis(request.email, request.code, request.purpose)
+        if session_data:
+            return VerifyCodeResponse(
+                success=True,
+                message="Code verified successfully",
+                verified=True,
+            )
+        return VerifyCodeResponse(
+            success=False,
+            message="Invalid or expired code",
+            verified=False,
+        )
+
     # Find user
     user = None
     if request.email:
@@ -324,49 +401,57 @@ async def change_password_endpoint(request: ChangePasswordRequest):
 @router.post("/complete-registration", response_model=RegistrationCompleteResponse)
 async def complete_registration_endpoint(request: CompleteRegistrationRequest):
     """
-    Complete registration by verifying code sent during registration
+    Create the user from Redis registration payload (same contract as POST /api/email/complete-registration).
+    Use this after SMS (or email) finish_registration send-code, regardless of which HTTP path sent the code.
     """
     if not is_connected():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection unavailable"
         )
-    
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to access users collection"
         )
-    
-    # Get user
-    user = get_user_by_email(request.email)
-    
-    # Verify code
-    if not verify_code(user.id, request.code, "finish_registration"):
+
+    try:
+        existing_user = get_user_by_email(request.email)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists",
         )
-    
-    # Mark email as verified and clear verification code
-    from datetime import datetime
-    
-    collection.update_one(
-        {"_id": ObjectId(user.id)},
-        {
-            "$set": {
-                "isEmailVerified": True,
-                "dateUpdated": datetime.utcnow()
-            },
-            "$unset": {"verification_code": ""}
-        }
-    )
-    
-    logger.info(f"Registration completed for user {user.id}")
-    
-    return RegistrationCompleteResponse(
-        success=True,
-        message="Registration completed successfully"
-    )
+    except HTTPException as e:
+        if e.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+
+    try:
+        registration_data = complete_registration_from_redis(request.email, request.code)
+        session_data = verify_code_from_redis(request.email, request.code, "finish_registration")
+        if not session_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired verification code",
+            )
+        user = create_user_from_registration_data(
+            registration_data=registration_data,
+            is_email_verified=True,
+        )
+        delete_registration_data(request.email, request.code)
+        delete_verification_session(request.email, request.code, "finish_registration")
+        logger.info("Registration completed via SMS router for user %s", user.id)
+        return RegistrationCompleteResponse(
+            success=True,
+            message="Registration completed successfully",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error completing registration (SMS route): %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete registration: {str(e)}",
+        )
 

@@ -27,6 +27,24 @@ class Settings:
     PLAY_STORE_URL: Optional[str] = os.getenv("PLAY_STORE_URL")
     IOS_APP_STORE_URL: Optional[str] = os.getenv("IOS_APP_STORE_URL")
 
+    # Public legal pages (HTML on marketing site). Used by client-settings for registration links, etc.
+    PUBLIC_PRIVACY_POLICY_URL: str = (
+        (os.getenv("PUBLIC_PRIVACY_POLICY_URL") or "").strip()
+        or "https://www.saimonsoft.com/website/docs/privacy-policy.html"
+    )
+    PUBLIC_TERMS_OF_SERVICE_URL: str = (
+        (os.getenv("PUBLIC_TERMS_OF_SERVICE_URL") or "").strip()
+        or "https://www.saimonsoft.com/website/docs/terms-of-service.html"
+    )
+
+    # Registration: Data Use & Sharing Notice copy (editable JSON in repo root by default)
+    REGISTRATION_DATA_USE_NOTICE_PATH: Path = Path(
+        os.getenv(
+            "REGISTRATION_DATA_USE_NOTICE_PATH",
+            str(_ROOT / "registration_data_use_notice.json"),
+        )
+    )
+
     # Third-party / server-to-server integration (set in .secrets, not committed)
     SERVICE_AUTH_KEY: Optional[str] = os.getenv("SERVICE_AUTH_KEY")
     INTEGRATION_AUTH_ENDPOINTS_FILE: str = os.getenv(
@@ -74,6 +92,8 @@ class Settings:
     
     # LLM Configuration
     LLM_CONFIG_PATH: Path = Path(__file__).parent.parent.parent / "llms-config.json"
+    # Canonical model list + default for new users (see llm-models-registry.json; override via LLM_MODELS_REGISTRY_PATH)
+    LLM_MODELS_REGISTRY_PATH: Path = Path(__file__).parent.parent.parent / "llm-models-registry.json"
     
     # Google Places API
     GOOGLE_PLACES_API_KEY: Optional[str] = os.getenv("GOOGLE_PLACES_API_KEY")

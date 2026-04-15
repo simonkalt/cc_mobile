@@ -20,6 +20,7 @@ from app.models.user import (
     UserLoginRequest,
     UserLoginResponse,
 )
+from app.constants.http_details import HTTP_DETAIL_PENDING_ACCOUNT_DELETION
 from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
 from app.utils.password import hash_password, verify_password, validate_strong_password
@@ -27,6 +28,9 @@ from app.utils.user_helpers import (
     user_doc_to_response,
     normalize_personality_profiles,
     USERS_COLLECTION,
+)
+from app.utils.registration_notice import (
+    assert_data_use_sharing_notice_accepted,
 )
 from app.utils.letter_template_selection import (
     apply_letter_template_app_settings_aliases,
@@ -36,6 +40,7 @@ from app.utils.letter_template_selection import (
     log_letter_template_prefs_save_update_doc,
     normalize_letter_template_selection_for_storage,
 )
+from app.utils.llm_models_registry import get_default_model_name_from_registry
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +148,13 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection unavailable"
         )
-    
+
+    if not user_data.data_use_sharing_notice_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must accept the Data Use & Sharing Notice to create an account.",
+        )
+
     collection = get_collection(USERS_COLLECTION)
     if collection is None:
         raise HTTPException(
@@ -191,6 +202,10 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     # Set the personality profiles (either provided or default)
     preferences["appSettings"]["personalityProfiles"] = personality_profiles
     
+    default_model_for_user = (
+        get_default_model_name_from_registry() or "claude-haiku-4-5"
+    )
+
     # Merge provided preferences with defaults to ensure all required fields exist
     default_preferences = {
         "newsletterOptIn": False,
@@ -213,7 +228,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
                 "useDefaultFonts": False
             },
             "personalityProfiles": personality_profiles,
-            "selectedModel": None,
+            "selectedModel": default_model_for_user,
             "lastResumeUsed": None,
             "last_personality_profile_used": None,
             "letterTemplateAutoPick": True,
@@ -259,6 +274,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "lastLogin": None,
         "passwordChangedAt": None,
         "avatarUrl": None,
+        "dataUseSharingNoticeAcceptedAt": datetime.utcnow(),
         "phone": user_data.phone,
         "address": user_data.address or {
             "street": None,
@@ -434,6 +450,8 @@ def create_user_from_registration_data(
             detail="registration_data must include name, email, and hashed password",
         )
 
+    assert_data_use_sharing_notice_accepted(registration_data)
+
     existing_user = collection.find_one({"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}})
     if existing_user:
         raise HTTPException(
@@ -474,6 +492,7 @@ def create_user_from_registration_data(
         "lastLogin": None,
         "passwordChangedAt": None,
         "avatarUrl": None,
+        "dataUseSharingNoticeAcceptedAt": datetime.utcnow(),
         "phone": registration_data.get("phone"),
         "address": registration_data.get("address")
         or {"street": None, "city": None, "state": None, "zip": None, "country": None},
@@ -820,13 +839,13 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
             detail="Invalid email or password"
         )
     
-    # Check if user is active
-    if not user.get("isActive", True):
+    # Inactive unless they only have a pending self-service deletion (isActive may be false then).
+    if not user.get("account_deletion_pending") and not user.get("isActive", True):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive"
         )
-    
+
     # Verify password
     hashed_password_str = user.get("hashedPassword", "")
     if not verify_password(login_data.password, hashed_password_str):
@@ -839,7 +858,13 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
-    
+
+    if user.get("account_deletion_pending"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=HTTP_DETAIL_PENDING_ACCOUNT_DELETION,
+        )
+
     # Reset failed login attempts and update last login
     collection.update_one(
         {"_id": user["_id"]},
@@ -890,16 +915,25 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     )
 
 
-def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
+def increment_llm_usage_count(
+    user_id: str,
+    llm_name: str,
+    *,
+    last_personality_profile_id: Optional[str] = None,
+    last_personality_tone_display: Optional[str] = None,
+) -> bool:
     """
     Increment the usage count for a specific LLM in the user's record.
     If the LLM doesn't exist in llm_counts, add it and set count to 1.
     Also updates the last_llm_used field to track the most recently used LLM.
-    
+    Optionally persists last personality (tone) selection under preferences.
+
     Args:
         user_id: User ID
         llm_name: Name of the LLM
-        
+        last_personality_profile_id: If set, stored at preferences.appSettings.last_personality_profile_used
+        last_personality_tone_display: If set (with profile id), stored at preferences.formDefaults.tone
+
     Returns:
         True if successful, False otherwise
     """
@@ -932,16 +966,30 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
                 {"$set": {"llm_counts": {}}}
             )
         
+        set_fields: Dict[str, Any] = {
+            "last_llm_used": llm_name,
+            "dateUpdated": datetime.utcnow(),
+        }
+        pid = (last_personality_profile_id or "").strip()
+        if pid:
+            set_fields["preferences.appSettings.last_personality_profile_used"] = pid
+            tone_disp = (last_personality_tone_display or "").strip()
+            if tone_disp:
+                set_fields["preferences.formDefaults.tone"] = tone_disp
+            logger.info(
+                "Persisting last personality for user %s: profile_id=%s formDefaults.tone=%s",
+                user_id,
+                pid,
+                tone_disp or "(id only)",
+            )
+
         # Use MongoDB's $inc operator to increment the count
         result = collection.update_one(
             {"_id": user_id_obj},
             {
                 "$inc": {f"llm_counts.{llm_name}": 1},
-                "$set": {
-                    "last_llm_used": llm_name,
-                    "dateUpdated": datetime.utcnow()
-                }
-            }
+                "$set": set_fields,
+            },
         )
         
         if result.matched_count > 0:

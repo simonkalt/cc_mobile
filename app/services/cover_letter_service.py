@@ -354,8 +354,32 @@ def _is_error_result(payload: Dict[str, Any]) -> bool:
     return False
 
 
+def _merge_last_personality_into_user_ctx(
+    user_ctx: Dict[str, Any],
+    *,
+    profile_id: str,
+    tone_display: str,
+) -> None:
+    """Keep in-memory user_ctx aligned with DB after persisting last personality (tone)."""
+    prefs = user_ctx.setdefault("preferences", {})
+    if not isinstance(prefs, dict):
+        return
+    app = prefs.setdefault("appSettings", {})
+    if isinstance(app, dict):
+        app["last_personality_profile_used"] = profile_id
+    fd = prefs.setdefault("formDefaults", {})
+    if isinstance(fd, dict) and tone_display:
+        fd["tone"] = tone_display
+
+
 def _record_generation_usage(
-    *, user_id: Optional[str], user_email: Optional[str], user_ctx: Optional[Dict[str, Any]], llm: str
+    *,
+    user_id: Optional[str],
+    user_email: Optional[str],
+    user_ctx: Optional[Dict[str, Any]],
+    llm: str,
+    matched_profile_id: str = "",
+    matched_profile_display_name: str = "",
 ) -> None:
     usage_user_id = user_id or (user_ctx.get("id") if isinstance(user_ctx, dict) else None)
     if not usage_user_id and user_email:
@@ -369,13 +393,42 @@ def _record_generation_usage(
         return
 
     normalized_llm = normalize_llm_name(llm)
+    pid = (matched_profile_id or "").strip()
+    disp = (matched_profile_display_name or "").strip()
+    ok = False
     try:
-        increment_llm_usage_count(usage_user_id, normalized_llm)
-        logger.info(
-            f"Incremented LLM usage count for {normalized_llm} (user_id: {usage_user_id})"
+        ok = increment_llm_usage_count(
+            usage_user_id,
+            normalized_llm,
+            last_personality_profile_id=pid or None,
+            last_personality_tone_display=disp or None,
         )
+        if ok:
+            logger.info(
+                "Incremented LLM usage count for %s (user_id: %s)",
+                normalized_llm,
+                usage_user_id,
+            )
+        else:
+            logger.warning(
+                "increment_llm_usage_count returned false for %s (user_id: %s)",
+                normalized_llm,
+                usage_user_id,
+            )
     except Exception as e:
         logger.warning(f"Failed to increment LLM usage count: {e}")
+
+    if ok and pid and isinstance(user_ctx, dict):
+        _merge_last_personality_into_user_ctx(
+            user_ctx,
+            profile_id=pid,
+            tone_display=disp,
+        )
+        _set_cached_user_profile(
+            user_id=user_id,
+            user_email=user_email,
+            payload=user_ctx,
+        )
 
     try:
         decrement_generation_credits(usage_user_id)
@@ -626,7 +679,8 @@ system_message = load_system_prompt()
 
 # Model names - defaults, can be overridden by config
 gpt_model = "gpt-5.2"
-claude_model = "claude-sonnet-4-20250514"
+claude_model = "claude-sonnet-4-6"
+claude_haiku_model = "claude-haiku-4-5"
 ollama_model = "llama3.2"
 xai_model = "grok-4-fast-reasoning"
 
@@ -867,6 +921,9 @@ def get_job_info(
             detail="user_id or user_email is required to access personality profiles",
         )
 
+    matched_profile_name = ""
+    matched_profile_id = ""
+
     try:
         if not user_ctx:
             user_ctx = _get_cached_user_profile(user_id=user_id, user_email=user_email)
@@ -958,7 +1015,6 @@ def get_job_info(
         # Try to find matching profile by name (case-insensitive) or ID
         # Normalize profiles to ensure structure is {"id", "name", "description"} only
         profile_found = False
-        matched_profile_name = ""
         for profile in custom_profiles:
             if isinstance(profile, dict):
                 # Normalize structure: extract only id, name, description
@@ -970,6 +1026,7 @@ def get_job_info(
                 if tone.lower() == profile_name or tone == profile_id:
                     selected_profile = profile_desc
                     matched_profile_name = profile.get("name", tone)
+                    matched_profile_id = profile_id if profile_id else ""
                     logger.info(
                         f"Using custom personality profile: '{profile.get('name')}' (ID: {profile_id})"
                     )
@@ -1247,6 +1304,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             "use_docx_components": bool(getattr(settings, "USE_DOCX_COMPONENTS", False)),
             "gpt_model": gpt_model,
             "claude_model": claude_model,
+            "claude_haiku_model": claude_haiku_model,
             "xai_model": xai_model,
             "ollama_model": ollama_model,
             "template_pref": _template_preference_cache_fragment(user_ctx),
@@ -1256,7 +1314,14 @@ Apply them exactly. They take priority over any conflicting earlier instructions
     cached_result = _get_cached_result(result_cache_key)
     if cached_result:
         logger.info("Generation result cache hit; skipping upstream LLM call")
-        _record_generation_usage(user_id=user_id, user_email=user_email, user_ctx=user_ctx, llm=llm)
+        _record_generation_usage(
+            user_id=user_id,
+            user_email=user_email,
+            user_ctx=user_ctx,
+            llm=llm,
+            matched_profile_id=matched_profile_id,
+            matched_profile_display_name=matched_profile_name or tone,
+        )
         if timing:
             timing.checkpoint("result_cache_hit")
         return cached_result
@@ -1444,9 +1509,23 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             response = ollama.chat(model=ollama_model, messages=messages)
             r = response["message"]["content"]
 
-        elif llm == "Claude" or llm == claude_model or llm == "claude-sonnet-4-20250514":
+        elif (
+            llm == "Claude"
+            or llm == claude_model
+            or llm == "claude-sonnet-4-20250514"
+            or llm == "Claude Haiku"
+            or llm == claude_haiku_model
+            or llm == "claude-haiku-4-5-20251001"
+        ):
             if not ANTHROPIC_AVAILABLE or not settings.ANTHROPIC_API_KEY:
                 raise ValueError("Anthropic not available or API key not set")
+            resolved_anthropic_model = (
+                claude_haiku_model
+                if llm == "Claude Haiku"
+                or llm == claude_haiku_model
+                or llm == "claude-haiku-4-5-20251001"
+                else claude_model
+            )
             client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
             content_list = [
                 {
@@ -1472,7 +1551,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 llm, system=system_message, user_content_list=content_list
             )
             response = client.messages.create(
-                model=claude_model,
+                model=resolved_anthropic_model,
                 system=system_message,
                 messages=messages,
                 max_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
@@ -1486,7 +1565,14 @@ Apply them exactly. They take priority over any conflicting earlier instructions
 
         _write_llm_response_log(llm, r)
 
-        _record_generation_usage(user_id=user_id, user_email=user_email, user_ctx=user_ctx, llm=llm)
+        _record_generation_usage(
+            user_id=user_id,
+            user_email=user_email,
+            user_ctx=user_ctx,
+            llm=llm,
+            matched_profile_id=matched_profile_id,
+            matched_profile_display_name=matched_profile_name or tone,
+        )
         if timing:
             timing.checkpoint("usage_updates_done")
 
