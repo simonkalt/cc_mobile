@@ -13,9 +13,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from bson import ObjectId
 from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.constants.http_details import HTTP_DETAIL_PENDING_ACCOUNT_DELETION
 from app.core.config import settings
 from app.models.user import UserResponse
 from app.services.user_service import get_user_by_id
@@ -200,6 +202,69 @@ def _verify_token(token: str) -> Dict[str, Any]:
         ) from exc
 
 
+def assert_token_not_invalidated(user_id: str, payload: Dict[str, Any]) -> None:
+    """
+    Reject JWTs issued before auth_tokens_invalidated_before on the user document
+    (set when the user requests account deletion).
+    """
+    if not user_id:
+        return
+    try:
+        oid = ObjectId(user_id)
+    except Exception:
+        return
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        return
+    doc = collection.find_one({"_id": oid}, {"auth_tokens_invalidated_before": 1})
+    if not doc:
+        return
+    boundary = doc.get("auth_tokens_invalidated_before")
+    if boundary is None:
+        return
+    try:
+        boundary_i = int(boundary)
+    except (TypeError, ValueError):
+        return
+    iat = payload.get("iat")
+    if not isinstance(iat, (int, float)):
+        return
+    if int(iat) < boundary_i:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+async def get_current_user_allow_pending_account_deletion(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> UserResponse:
+    """
+    Like get_current_user, but allows users with account_deletion_pending so they can
+    call POST /me/account-deletion-request again (idempotent retries).
+    """
+    payload = _verify_token(credentials.credentials)
+    user_id: Optional[str] = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing user ID",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = get_user_by_id(user_id)
+    if user.account_deletion_pending:
+        return user
+    if not user.isActive:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+    return user
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> UserResponse:
@@ -215,6 +280,11 @@ async def get_current_user(
         )
 
     user = get_user_by_id(user_id)
+    if user.account_deletion_pending:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=HTTP_DETAIL_PENDING_ACCOUNT_DELETION,
+        )
     if not user.isActive:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -246,6 +316,9 @@ async def get_optional_current_user(
         return None
     if not user.isActive:
         logger.warning("get_optional_current_user: user %s is inactive", user_id)
+        return None
+    if user.account_deletion_pending:
+        logger.debug("get_optional_current_user: user %s has pending account deletion", user_id)
         return None
     logger.info("get_optional_current_user: resolved user %s (super_user=%s)", user.email, user.super_user)
     return user

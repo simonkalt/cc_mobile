@@ -71,7 +71,25 @@ def load_llm_config() -> Dict:
                 raise ValueError(f"LLM entry at index {i} must have 'value' field")
             if "label" not in llm:
                 raise ValueError(f"LLM entry at index {i} must have 'label' field")
-        
+
+        # User-facing default model: llm-models-registry.json is source of truth
+        try:
+            from app.utils.llm_models_registry import get_default_model_name_from_registry
+
+            reg_default = get_default_model_name_from_registry()
+            if reg_default and any(
+                isinstance(llm, dict) and llm.get("value") == reg_default
+                for llm in config["llms"]
+            ):
+                config["defaultModel"] = reg_default
+            elif reg_default:
+                logger.warning(
+                    "Registry default model %r not found in llms-config llms; keeping defaultModel from file",
+                    reg_default,
+                )
+        except Exception as e:
+            logger.warning("Could not apply llm-models-registry defaultModel: %s", e)
+
         # Validate defaultModel exists in llms (if specified)
         if "defaultModel" in config and config["defaultModel"]:
             default_value = config["defaultModel"]
@@ -79,7 +97,7 @@ def load_llm_config() -> Dict:
                 raise ValueError(
                     f"defaultModel '{default_value}' not found in llms array"
                 )
-        
+
         # Validate internalModel exists in llms (if specified)
         if "internalModel" in config and config["internalModel"]:
             internal_value = config["internalModel"]
@@ -87,7 +105,7 @@ def load_llm_config() -> Dict:
                 raise ValueError(
                     f"internalModel '{internal_value}' not found in llms array"
                 )
-        
+
         _llm_config_cache = config
         logger.info(f"Successfully loaded LLM configuration from {LLM_CONFIG_PATH}")
         return config

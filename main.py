@@ -473,7 +473,8 @@ if LLM_CONFIG_AVAILABLE:
     except Exception as e:
         logger.warning(f"Failed to load GPT model from config, using default: {e}")
 
-claude_model = "claude-sonnet-4-20250514"
+claude_model = "claude-sonnet-4-6"
+claude_haiku_model = "claude-haiku-4-5"
 ollama_model = "llama3.2"
 OLLAMA_API = "http://localhost:11434/api/chat"
 xai_model = "grok-4-fast-reasoning"
@@ -481,7 +482,8 @@ xai_model = "grok-4-fast-reasoning"
 # we need to move this to the server side and make it dynamic
 LLM_ENVIRONMENT_MAPPING = [
     ("ChatGPT", "gpt-4.1", openai_api_key),
-    ("Claude", "claude-sonnet-4-20250514", anthropic_api_key),
+    ("Claude", "claude-sonnet-4-6", anthropic_api_key),
+    ("Claude Haiku", "claude-haiku-4-5", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
     ("Grok", "grok-4-fast-reasoning", xai_api_key),
     # ("OCI (Llama)", "oci-generative-ai", oci_compartment_id),
@@ -617,10 +619,20 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
                 max_tokens=16000,  # Older GPT models use max_tokens
             )
         return_response = response.choices[0].message.content
-    elif model == "claude-sonnet-4-20250514":
+    elif model in ("claude-sonnet-4-6", "claude-sonnet-4-20250514"):
         client = anthropic.Anthropic(api_key=anthropic_api_key)
         response = client.messages.create(
-            model=model,
+            model="claude-sonnet-4-6",
+            system="You are a helpful assistant.",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=20000,
+            temperature=1,
+        )
+        return_response = response.content[0].text.replace("```json", "").replace("```", "")
+    elif model in ("claude-haiku-4-5", "claude-haiku-4-5-20251001"):
+        client = anthropic.Anthropic(api_key=anthropic_api_key)
+        response = client.messages.create(
+            model="claude-haiku-4-5",
             system="You are a helpful assistant.",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=20000,
@@ -1039,8 +1051,17 @@ def normalize_llm_name(llm: str) -> str:
         return "gpt-4.1"
     elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
         return "grok-4-fast-reasoning"
-    elif "claude" in llm_lower or llm == "claude-sonnet-4-20250514":
-        return "claude-sonnet-4-20250514"
+    elif "haiku" in llm_lower or llm == "claude-haiku-4-5" or llm == "Claude Haiku":
+        return "claude-haiku-4-5"
+    elif (
+        "sonnet" in llm_lower
+        or llm == "claude-sonnet-4-6"
+        or llm == "claude-sonnet-4-20250514"
+        or llm == "Claude"
+    ):
+        return "claude-sonnet-4-6"
+    elif "claude" in llm_lower:
+        return "claude-sonnet-4-6"
     elif "llama" in llm_lower or llm == "llama3.2":
         return "llama3.2"
     elif "oci" in llm_lower or llm == "oci-generative-ai":

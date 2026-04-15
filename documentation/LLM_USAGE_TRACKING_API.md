@@ -21,7 +21,8 @@ The LLM tracking fields are stored at the root level of the user document:
   "email": "john@example.com",
   "llm_counts": {
     "gpt-4.1": 15,
-    "claude-sonnet-4-20250514": 8,
+    "claude-sonnet-4-6": 8,
+    "claude-haiku-4-5": 3,
     "gemini-2.5-flash": 3,
     "grok-4-fast-reasoning": 2
   },
@@ -36,7 +37,7 @@ The LLM tracking fields are stored at the root level of the user document:
 - **Type**: `object` (dictionary/map)
 - **Description**: Tracks usage count for each LLM model
 - **Structure**: Key-value pairs where:
-  - **Key**: Normalized LLM name (e.g., `"gpt-4.1"`, `"claude-sonnet-4-20250514"`)
+  - **Key**: Normalized LLM name (e.g., `"gpt-4.1"`, `"claude-sonnet-4-6"`, `"claude-haiku-4-5"`)
   - **Value**: Integer count of how many times that LLM has been used
 - **Initialization**: Empty object `{}` for new users
 - **Auto-increment**: Automatically incremented when an LLM is successfully called
@@ -44,7 +45,7 @@ The LLM tracking fields are stored at the root level of the user document:
 ### `last_llm_used` (string)
 - **Type**: `string` or `null`
 - **Description**: The name of the most recently used LLM
-- **Format**: Normalized LLM name (e.g., `"gpt-4.1"`, `"claude-sonnet-4-20250514"`)
+- **Format**: Normalized LLM name (e.g., `"gpt-4.1"`, `"claude-sonnet-4-6"`, `"claude-haiku-4-5"`)
 - **Initialization**: `null` for new users
 - **Auto-update**: Automatically updated to the current LLM whenever an LLM is successfully called
 
@@ -77,14 +78,14 @@ When a chat request is made, the LLM usage is automatically tracked if `user_id`
 ```json
 {
   "prompt": "Hello, how are you?",
-  "active_model": "claude-sonnet-4-20250514",
+  "active_model": "claude-sonnet-4-6",
   "user_id": "693326c07fcdaab8e81cdd2f"
 }
 ```
 
 **Automatic Updates:**
-- `llm_counts.claude-sonnet-4-20250514` is incremented by 1
-- `last_llm_used` is set to `"claude-sonnet-4-20250514"`
+- `llm_counts.claude-sonnet-4-6` is incremented by 1
+- `last_llm_used` is set to `"claude-sonnet-4-6"`
 
 ## API Endpoints
 
@@ -107,7 +108,8 @@ GET /api/users/693326c07fcdaab8e81cdd2f
   "email": "john@example.com",
   "llm_counts": {
     "gpt-4.1": 15,
-    "claude-sonnet-4-20250514": 8,
+    "claude-sonnet-4-6": 8,
+    "claude-haiku-4-5": 3,
     "gemini-2.5-flash": 3
   },
   "last_llm_used": "gpt-4.1",
@@ -156,7 +158,8 @@ Content-Type: application/json
   "email": "john@example.com",
   "llm_counts": {
     "gpt-4.1": 15,
-    "claude-sonnet-4-20250514": 8
+    "claude-sonnet-4-6": 8,
+    "claude-haiku-4-5": 3
   },
   "last_llm_used": "gemini-2.5-flash",
   "preferences": { ... }
@@ -171,7 +174,8 @@ LLM names are normalized before being stored. The normalization function convert
 
 **Examples:**
 - `"ChatGPT"` → `"gpt-4.1"`
-- `"Claude"` → `"claude-sonnet-4-20250514"`
+- `"Claude"` → `"claude-sonnet-4-6"`
+- `"Claude Haiku"` → `"claude-haiku-4-5"`
 - `"Gemini"` → `"gemini-2.5-flash"`
 - `"Grok"` → `"grok-4-fast-reasoning"`
 

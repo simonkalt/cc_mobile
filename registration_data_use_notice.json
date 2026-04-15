@@ -1,0 +1,7 @@
+{
+  "noticeTypographicStyle": "italic",
+  "noticeText": "By creating an account, you acknowledge and consent to the following:  • Your phone number is shared with Tenlyx to deliver SMS messages you opt in to receive.  • Your email address is processed via Zoho Mail for account and support communications.  • When you use AI-powered features, your input is sent to third-party AI services including Anthropic (Claude), OpenAI (ChatGPT), Google (Gemini), and X Corp. (Grok) to generate responses. These providers do not use your data for advertising.  • Your account data is stored securely using Amazon Web Services (AWS), MongoDB Atlas, and Redis.  We do not sell your personal data. You may withdraw consent and request deletion of your data at any time by visiting Settings > Delete My Account or emailing support@saimonsoft.com.  For full details, see our Privacy Policy.",
+  "checkboxLabel": "I have read and agree to the Data Use & Sharing Notice above, including the sharing of my data with third-party AI services and service providers.",
+  "checkboxLeadingSymbol": "☐",
+  "checkboxLabelWithSymbol": "☐  I have read and agree to the Data Use & Sharing Notice above, including the sharing of my data with third-party AI services and service providers."
+}

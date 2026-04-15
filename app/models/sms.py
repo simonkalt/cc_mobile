@@ -2,7 +2,7 @@
 SMS verification related Pydantic models
 """
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 class SendVerificationCodeRequest(BaseModel):
@@ -10,6 +10,8 @@ class SendVerificationCodeRequest(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     purpose: str  # "forgot_password", "change_password", "finish_registration"
+    # New-user registration (same contract as POST /api/email/send-code finish_registration)
+    registration_data: Optional[Dict[str, Any]] = None
 
 
 class VerifyCodeRequest(BaseModel):

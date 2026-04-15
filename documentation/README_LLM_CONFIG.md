@@ -22,9 +22,14 @@ Create `llms-config.json` in your backend directory:
       "description": "Previous generation GPT model"
     },
     {
-      "value": "claude-sonnet-4-20250514",
-      "label": "Claude Sonnet 4",
-      "description": "Anthropic's Claude Sonnet 4 model"
+      "value": "claude-sonnet-4-6",
+      "label": "Claude Sonnet 4.6",
+      "description": "Anthropic's Claude Sonnet 4.6 model"
+    },
+    {
+      "value": "claude-haiku-4-5",
+      "label": "Claude Haiku 4.5",
+      "description": "Anthropic's Claude Haiku 4.5 model (faster, lower cost)"
     },
     {
       "value": "gemini-2.5-flash",
@@ -37,7 +42,7 @@ Create `llms-config.json` in your backend directory:
       "description": "xAI's Grok 4 Fast Reasoning model"
     }
   ],
-  "defaultModel": "gpt-5.2",
+  "defaultModel": "claude-haiku-4-5",
   "internalModel": "gpt-5.2"
 }
 ```
@@ -157,7 +162,7 @@ Expected response:
       "description": "Latest GPT model with enhanced capabilities"
     }
   ],
-  "defaultModel": "gpt-5.2",
+  "defaultModel": "claude-haiku-4-5",
   "internalModel": "gpt-5.2"
 }
 ```
@@ -176,6 +181,7 @@ Expected response:
 
 - **`defaultModel`** (string): The default model to use when no model is selected
   - Must match a `value` in the `llms` array
+  - At runtime the server replaces this with the entry marked `default: true` in `llm-models-registry.json` when that model exists in `llms`
 - **`internalModel`** (string): The model to use for internal API calls
   - Must match a `value` in the `llms` array
 

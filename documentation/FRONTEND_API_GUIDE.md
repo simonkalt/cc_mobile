@@ -78,7 +78,8 @@ http://localhost:8000/api/users/693326c07fcdaab8e81cdd2f
   "lastLogin": null,
   "llm_counts": {
     "gpt-4.1": 15,
-    "claude-sonnet-4-20250514": 8,
+    "claude-sonnet-4-6": 8,
+    "claude-haiku-4-5": 3,
     "gemini-2.5-flash": 3
   },
   "last_llm_used": "gpt-4.1"

@@ -112,6 +112,8 @@ def _user_doc_to_summary(doc: dict) -> AdminUserSummary:
         lastLogin=doc.get("lastLogin"),
         subscriptionStatus=doc.get("subscriptionStatus"),
         archived=doc.get("archived", False),
+        archived_at=doc.get("archived_at"),
+        account_deletion_requested_at=doc.get("account_deletion_requested_at"),
         super_user=doc.get("super_user", False),
         generation_credits=_mongo_int_credit_field(doc, "generation_credits", 10),
         max_credits=_mongo_int_credit_field(doc, "max_credits", 10),
@@ -144,6 +146,8 @@ def _user_doc_to_detail(doc: dict) -> AdminUserDetail:
         subscriptionCurrentPeriodEnd=doc.get("subscriptionCurrentPeriodEnd"),
         super_user=doc.get("super_user", False),
         archived=doc.get("archived", False),
+        archived_at=doc.get("archived_at"),
+        account_deletion_requested_at=doc.get("account_deletion_requested_at"),
         stripeCustomerId=doc.get("stripeCustomerId"),
     )
 
@@ -272,8 +276,10 @@ def list_users(
 
     query: dict = {}
 
-    if status_filter:
-        lf = status_filter.lower()
+    # status: active | inactive | archived | all (or omit / empty) — only those keys narrow the set.
+    raw = (status_filter or "").strip()
+    if raw:
+        lf = raw.lower()
         if lf == "archived":
             query["archived"] = True
         elif lf == "inactive":
@@ -282,10 +288,13 @@ def list_users(
         elif lf == "active":
             query["isActive"] = True
             query["archived"] = {"$ne": True}
+        elif lf == "all":
+            pass
         else:
-            query["archived"] = {"$ne": True}
-    else:
-        query["archived"] = {"$ne": True}
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Invalid status filter. Use active, inactive, archived, or all.",
+            )
 
     if search:
         regex = {"$regex": search, "$options": "i"}
@@ -369,9 +378,17 @@ def archive_user(
 ):
     collection = _require_db()
 
+    now = datetime.utcnow()
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
-        {"$set": {"archived": True, "isActive": False, "dateUpdated": datetime.utcnow()}},
+        {
+            "$set": {
+                "archived": True,
+                "isActive": False,
+                "archived_at": now,
+                "dateUpdated": now,
+            }
+        },
     )
     if result.matched_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
@@ -388,9 +405,13 @@ def unarchive_user(
 ):
     collection = _require_db()
 
+    now = datetime.utcnow()
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
-        {"$set": {"archived": False, "isActive": True, "dateUpdated": datetime.utcnow()}},
+        {
+            "$set": {"archived": False, "isActive": True, "dateUpdated": now},
+            "$unset": {"archived_at": ""},
+        },
     )
     if result.matched_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
