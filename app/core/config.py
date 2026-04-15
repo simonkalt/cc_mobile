@@ -92,6 +92,8 @@ class Settings:
     
     # LLM Configuration
     LLM_CONFIG_PATH: Path = Path(__file__).parent.parent.parent / "llms-config.json"
+    # Canonical model list + default for new users (see llm-models-registry.json; override via LLM_MODELS_REGISTRY_PATH)
+    LLM_MODELS_REGISTRY_PATH: Path = Path(__file__).parent.parent.parent / "llm-models-registry.json"
     
     # Google Places API
     GOOGLE_PLACES_API_KEY: Optional[str] = os.getenv("GOOGLE_PLACES_API_KEY")

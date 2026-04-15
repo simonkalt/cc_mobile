@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 from app.db.mongodb import get_collection, is_connected
+from app.utils.llm_models_registry import get_default_model_name_from_registry
 from app.utils.letter_template_selection import (
     apply_letter_template_app_settings_aliases,
     coerce_letter_template_auto_pick_for_update,
@@ -233,7 +234,11 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
     
     # Hash password
     hashed_password = hash_password(user_data.password)
-    
+
+    _default_selected_model = (
+        get_default_model_name_from_registry() or "claude-haiku-4-5"
+    )
+
     # Build user document
     user_doc = {
         "name": user_data.name,
@@ -279,7 +284,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
                     "useDefaultFonts": False
                 },
                 "personalityProfiles": [],
-                "selectedModel": None,
+                "selectedModel": _default_selected_model,
                 "lastResumeUsed": None,
                 "last_personality_profile_used": None,
                 "letterTemplateAutoPick": True,
@@ -626,11 +631,18 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
 
 
 
-def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
+def increment_llm_usage_count(
+    user_id: str,
+    llm_name: str,
+    *,
+    last_personality_profile_id: Optional[str] = None,
+    last_personality_tone_display: Optional[str] = None,
+) -> bool:
     """
     Increment the usage count for a specific LLM in the user's record.
     If the LLM doesn't exist in llm_counts, add it and set count to 1.
     Also updates the last_llm_used field to track the most recently used LLM.
+    Optionally persists last personality (tone) under preferences.
     Returns True if successful, False otherwise.
     """
     if not is_connected():
@@ -662,6 +674,17 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
                 {"$set": {"llm_counts": {}}}
             )
         
+        set_fields: Dict[str, Any] = {
+            "last_llm_used": llm_name,
+            "dateUpdated": datetime.utcnow(),
+        }
+        pid = (last_personality_profile_id or "").strip()
+        if pid:
+            set_fields["preferences.appSettings.last_personality_profile_used"] = pid
+            tone_disp = (last_personality_tone_display or "").strip()
+            if tone_disp:
+                set_fields["preferences.formDefaults.tone"] = tone_disp
+
         # Use MongoDB's $inc operator to increment the count
         # If the field doesn't exist, MongoDB will create it with value 1
         # Also update last_llm_used field to track the most recently used LLM
@@ -669,11 +692,8 @@ def increment_llm_usage_count(user_id: str, llm_name: str) -> bool:
             {"_id": user_id_obj},
             {
                 "$inc": {f"llm_counts.{llm_name}": 1},
-                "$set": {
-                    "last_llm_used": llm_name,
-                    "dateUpdated": datetime.utcnow()
-                }
-            }
+                "$set": set_fields,
+            },
         )
         
         if result.matched_count > 0:
