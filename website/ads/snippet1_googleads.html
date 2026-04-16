@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cover Letter Generator Ad</title>
+    <!-- Google Ads HTML5 upload: asset URLs use https://www.saimonsoft.com/website/ads/ — keep in sync with snippet1.html -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            overflow: hidden; 
+            background: #000; 
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        
+        .ad-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 512px;
+            max-height: 512px;
+            margin: 0 auto;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transition: opacity 1.2s ease-in-out;
+            object-fit: contain;
+            background: #000;
+            z-index: 4;
+        }
+
+        .slide.active {
+            opacity: 1;
+        }
+
+        /* “Blank” beat after last image: full black, “Your voice.” stays above (z-index). */
+        .blank-text-hold {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: #000;
+            z-index: 3;
+            pointer-events: none;
+        }
+
+        .blank-text-hold.visible {
+            display: block;
+        }
+
+        .overlay-text {
+            position: absolute;
+            bottom: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 28px;
+            font-weight: 700;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+            text-align: center;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.8s ease;
+            display: inline-block;
+            width: auto;
+            max-width: 90%;
+            letter-spacing: 1px;
+            background: hsla(0, 0%, 8%, 0.82);
+            padding: 0.5em 1em;
+            border-radius: 12px;
+        }
+
+        .overlay-text.show {
+            opacity: 1;
+        }
+
+        .logo-slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 14px;
+            padding: 12px;
+            box-sizing: border-box;
+            color: white;
+            z-index: 20;
+        }
+
+        /* Keep logo from flex-shrinking to 0 inside the fixed-height ad box */
+        .logo-slide > img {
+            flex-shrink: 0;
+            display: block;
+            max-width: 260px;
+            max-height: 260px;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+        }
+
+        .logo-text {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: 2px;
+        }
+
+        .store-badges {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 2px;
+        }
+
+        .store-badge {
+            padding: 0;
+            border: none;
+            background: none;
+            cursor: pointer;
+            line-height: 0;
+            text-decoration: none;
+        }
+
+        .store-badge:focus-visible {
+            outline: 2px solid #fff;
+            outline-offset: 3px;
+        }
+
+        .store-badge img {
+            display: block;
+            height: 40px;
+            width: auto;
+        }
+
+        .audio-toggle {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 25;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #fff;
+            background: hsla(0, 0%, 0%, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .audio-toggle:focus-visible {
+            outline: 2px solid #fff;
+            outline-offset: 2px;
+        }
+
+        .audio-toggle .icon-on {
+            display: none;
+        }
+
+        .audio-toggle.is-on .icon-off {
+            display: none;
+        }
+
+        .audio-toggle.is-on .icon-on {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="ad-container">
+        <button type="button" id="audioToggle" class="audio-toggle" aria-label="Sound off" aria-pressed="false" title="Sound">
+            <span class="icon-off" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M11 5L6 9H3v6h3l5 4V5z"/>
+                    <line x1="23" y1="9" x2="17" y2="15"/>
+                    <line x1="17" y1="9" x2="23" y2="15"/>
+                </svg>
+            </span>
+            <span class="icon-on" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M11 5L6 9H3v6h3l5 4V5z"/>
+                    <path d="M15.54 8.46a5 5 0 010 7.07"/>
+                    <path d="M19.07 4.93a9 9 0 010 14.14"/>
+                </svg>
+            </span>
+        </button>
+        <!-- Image 1 -->
+        <img src="https://www.saimonsoft.com/website/ads/images/3.png" 
+             id="slide1" class="slide" alt="Resume Selection">
+        <div id="text1" class="overlay-text">On-the-Go Cover Letter</div>
+
+        <!-- Image 2 -->
+        <img src="https://www.saimonsoft.com/website/ads/images/6.png" 
+             id="slide2" class="slide" alt="Job Details">
+
+        <!-- Image 3 -->
+        <img src="https://www.saimonsoft.com/website/ads/images/9.png" 
+             id="slide3" class="slide" alt="Brainstorming">
+        <div id="text3" class="overlay-text">AI Generated</div>
+
+        <!-- Image 4 -->
+        <img src="https://www.saimonsoft.com/website/ads/images/100.png" 
+             id="slide4" class="slide" alt="Generated Cover Letter">
+        <div id="text4" class="overlay-text">Your voice.</div>
+
+        <div id="blankTextHold" class="blank-text-hold" aria-hidden="true"></div>
+
+        <!-- Final Logo Slide -->
+        <div id="logoSlide" class="logo-slide">
+            <img src="https://www.saimonsoft.com/website/ads/images/logo.png" alt="Logo">
+            <div class="logo-text">Cover Letter Generator</div>
+            <div class="store-badges">
+                <button type="button" class="store-badge store-badge-apple" aria-label="Download on the App Store" onclick="alert('Coming Soon!');">
+                    <img src="https://www.saimonsoft.com/website/ads/images/footer-app-store.png" alt="Download on the App Store">
+                </button>
+                <a
+                    class="store-badge store-badge-google"
+                    href="https://play.google.com/store/apps/details?id=com.saimonsoft.customcoverlettermobile.app&amp;hl=en_US"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Get it on Google Play"
+                >
+                    <img src="https://www.saimonsoft.com/website/ads/images/footer-google-play.avif" alt="Get it on Google Play">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <audio id="bgMusic" preload="auto">
+        <source src="https://www.saimonsoft.com/website/ads/music/Niceage_loop.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        const slides = [
+            document.getElementById('slide1'),
+            document.getElementById('slide2'),
+            document.getElementById('slide3'),
+            document.getElementById('slide4')
+        ];
+
+        const texts = {
+            0: document.getElementById('text1'),
+            2: document.getElementById('text3'),
+            3: document.getElementById('text4')
+        };
+
+        const logoSlide = document.getElementById('logoSlide');
+        const blankTextHold = document.getElementById('blankTextHold');
+        const audioToggle = document.getElementById('audioToggle');
+        const music = document.getElementById('bgMusic');
+        music.volume = 1;
+        music.muted = true;
+
+        function tryPlayMusic() {
+            return music.play();
+        }
+
+        function syncAudioToggleUi() {
+            const on = !music.muted;
+            audioToggle.classList.toggle('is-on', on);
+            audioToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+            audioToggle.setAttribute('aria-label', on ? 'Sound on' : 'Sound off');
+        }
+
+        audioToggle.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (music.muted) {
+                music.muted = false;
+                tryPlayMusic().catch(function () {});
+            } else {
+                music.muted = true;
+            }
+            syncAudioToggleUi();
+        });
+
+        /** Muted autoplay keeps the track in sync; unmute is a user gesture via #audioToggle. */
+        function startMusicWhenReady() {
+            function attemptPlay() {
+                tryPlayMusic().catch(function () {});
+            }
+            try {
+                music.load();
+            } catch (e) {}
+            if (music.readyState >= 2) {
+                attemptPlay();
+            } else {
+                music.addEventListener('canplay', attemptPlay, { once: true });
+            }
+        }
+
+        const durationPerSlide = 2200; // ms each image slide; same duration for text-on-black beat after last image
+        /** Slower opacity fade only when leaving the last photo (not the text-only beat or logo). */
+        const lastImageFadeMs = 2800;
+
+        function showSlide(index) {
+            slides.forEach((slide, i) => {
+                slide.classList.toggle('active', i === index);
+            });
+            if (index === slides.length - 1) {
+                slides[slides.length - 1].style.transition = '';
+            }
+
+            // Handle overlay texts
+            Object.keys(texts).forEach(key => {
+                const textEl = texts[key];
+                if (parseInt(key) === index) {
+                    setTimeout(() => textEl.classList.add('show'), 400);
+                } else {
+                    textEl.classList.remove('show');
+                }
+            });
+        }
+
+        function fadeToLogo() {
+            blankTextHold.classList.remove('visible');
+            const last = slides[slides.length - 1];
+            const lastText = texts[3];
+            if (lastText) lastText.classList.remove('show');
+            last.style.transition = 'opacity 0.8s ease';
+            last.style.opacity = '0';
+
+            setTimeout(() => {
+                document.querySelectorAll('.slide').forEach(s => {
+                    s.style.display = 'none';
+                });
+                logoSlide.style.display = 'flex';
+            }, 800);
+        }
+
+        /** Last image uses normal timing; slow-fade photo off, then full text-only beat on black. */
+        function holdTextOnBlackAfterLastImage() {
+            const last = slides[slides.length - 1];
+            blankTextHold.classList.add('visible');
+            last.style.transition = `opacity ${lastImageFadeMs}ms ease-in-out`;
+            last.classList.remove('active');
+            setTimeout(fadeToLogo, lastImageFadeMs + durationPerSlide);
+        }
+
+        function startSequence() {
+            startMusicWhenReady();
+
+            function advance(slideIndex) {
+                showSlide(slideIndex);
+                if (slideIndex < slides.length - 1) {
+                    setTimeout(() => advance(slideIndex + 1), durationPerSlide);
+                } else {
+                    setTimeout(holdTextOnBlackAfterLastImage, durationPerSlide);
+                }
+            }
+
+            advance(0);
+        }
+
+        // Start the animation when the page loads
+        window.onload = startSequence;
+    </script>
+</body>
+</html>
