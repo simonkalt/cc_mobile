@@ -277,6 +277,11 @@ try:
     if website_path and os.path.exists(website_path):
         app.mount("/website", StaticFiles(directory=website_path, html=True), name="website")
         print(f"✓ Successfully mounted website static files from: {website_path}")
+        # Shorter URLs for HTML5 ad snippets (e.g. Apple Search Ads): same files as /website/ads/
+        ads_path = os.path.join(website_path, "ads")
+        if os.path.isdir(ads_path):
+            app.mount("/ads", StaticFiles(directory=ads_path, html=True), name="ads")
+            print(f"✓ Mounted ad snippets at /ads from: {ads_path}")
     else:
         print(f"✗ Website directory not found. Checked: {cwd}/website, {file_dir}/website")
 
