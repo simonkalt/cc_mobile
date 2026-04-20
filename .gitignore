@@ -25,7 +25,6 @@ build/
 dist/
 *.egg-info/
 
-.oci/config
 *.pem
 
 .cursor/mcp.json

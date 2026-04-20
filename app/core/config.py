@@ -83,13 +83,6 @@ class Settings:
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     AWS_S3_BUCKET: Optional[str] = os.getenv("AWS_S3_BUCKET")
     
-    # OCI Configuration
-    OCI_CONFIG_FILE: Optional[str] = os.getenv("OCI_CONFIG_FILE")
-    OCI_REGION: Optional[str] = os.getenv("OCI_REGION")
-    OCI_COMPARTMENT_ID: Optional[str] = os.getenv("OCI_COMPARTMENT_ID")
-    OCI_CONFIG_PROFILE: Optional[str] = os.getenv("OCI_CONFIG_PROFILE")
-    OCI_MODEL_ID: Optional[str] = os.getenv("OCI_MODEL_ID")
-    
     # LLM Configuration
     LLM_CONFIG_PATH: Path = Path(__file__).parent.parent.parent / "llms-config.json"
     # Canonical model list + default for new users (see llm-models-registry.json; override via LLM_MODELS_REGISTRY_PATH)
