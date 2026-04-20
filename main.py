@@ -51,7 +51,6 @@ with warnings.catch_warnings():
 
 from huggingface_hub import login
 import requests
-import oci
 import logging
 import sys
 
@@ -172,29 +171,6 @@ async def lifespan(app: FastAPI):
     # Connect to MongoDB Atlas
     if MONGODB_AVAILABLE:
         connect_to_mongodb()
-
-    # Log OCI configuration variables
-    # logger.info(f"oci_config_file: {oci_config_file}")
-    # logger.info(f"oci_region: {oci_region}")
-    # logger.info(f"oci_compartment_id: {oci_compartment_id}")
-    # logger.info(f"oci_config_profile: {oci_config_profile}")
-    # logger.info(f"oci_model_id: {oci_model_id}")
-
-    # Send OCI configuration via ntfy
-    #     config_summary = f"""OCI Configuration:
-    # - Config file: {oci_config_file}
-    # - Region: {oci_region}
-    # - Compartment ID: {oci_compartment_id}
-    # - Config profile: {oci_config_profile}
-    # - Model ID: {oci_model_id}
-    # - Config exists: {os.path.exists(oci_config_file)}
-    # - Compartment ID set: {bool(oci_compartment_id)}"""
-    # send_ntfy_notification(config_summary, "OCI Config")
-
-    if not os.path.exists("oci_api_key.pem"):
-        #     send_ntfy_notification("File exists!","oci_api_key.pem")
-        # else:
-        send_ntfy_notification("oci_api_key.pem File does NOT exist.", "oci_api_key.pem")
 
     yield
     # Shutdown
@@ -394,16 +370,6 @@ anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 xai_api_key = os.getenv("XAI_API_KEY")
 
-oci_compartment_id = os.getenv("OCI_COMPARTMENT_ID")
-oci_config_file = os.getenv("OCI_CONFIG_FILE", "/etc/secrets/config")  # ← Render path!
-# oci_config_file = os.getenv('OCI_CONFIG_FILE', os.path.expanduser('config'))
-oci_config_profile = os.getenv("OCI_CONFIG_PROFILE", "CoverLetter")
-oci_region = os.getenv("OCI_REGION", "us-phoenix-1")
-oci_model_id = os.getenv(
-    "OCI_MODEL_ID",
-    "ocid1.generativeaimodel.oc1.phx.amaaaaaask7dceya5zq6k7j3k4m5n6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0",
-)
-
 # S3 configuration
 # Parse S3_BUCKET_URI to extract bucket name
 # Format: s3://bucket-name/path/ or s3://bucket-name/
@@ -491,7 +457,6 @@ LLM_ENVIRONMENT_MAPPING = [
     ("Claude Haiku", "claude-haiku-4-5", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
     ("Grok", "grok-4-fast-reasoning", xai_api_key),
-    # ("OCI (Llama)", "oci-generative-ai", oci_compartment_id),
 ]
 
 
@@ -499,23 +464,7 @@ def get_available_llms():
     """Get available LLMs based on configured API keys/credentials"""
     available = []
     for display_name, model_name, api_key in LLM_ENVIRONMENT_MAPPING:
-        # For OCI, api_key is actually oci_compartment_id
-        # OCI also needs a config file, so check both
-        if model_name == "oci-generative-ai":
-            # For OCI, check if compartment_id is set
-            # Config file check is done at runtime in post_to_llm with error handling
-            has_compartment = bool(api_key)
-            has_config = os.path.exists(oci_config_file)
-            logger.info(
-                f"OCI check - compartment_id: {has_compartment}, config_file: {oci_config_file}, exists: {has_config}"
-            )
-            if has_compartment:
-                # Show OCI option if compartment_id is set, even if config file doesn't exist yet
-                # The error will be handled gracefully in post_to_llm
-                available.append({"label": display_name, "value": model_name})
-            else:
-                logger.info(f"Skipping {display_name} - compartment_id not set")
-        elif api_key:
+        if api_key:
             available.append({"label": display_name, "value": model_name})
         else:
             logger.info(f"Skipping {display_name} - no credentials configured")
@@ -672,59 +621,8 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
         response.raise_for_status()
         result = response.json()
         return_response = result["choices"][0]["message"]["content"]
-    elif model == "oci-generative-ai":
-        try:
-            # Initialize OCI config from file
-            config = oci.config.from_file(oci_config_file, oci_config_profile)
-
-            # Create Generative AI client — FIXED: pass config!
-            service_endpoint = f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
-            generative_ai_client = oci.generative_ai_inference.GenerativeAiInferenceClient(
-                config=config,  # ← THIS WAS MISSING
-                service_endpoint=service_endpoint,
-            )
-
-            # Prepare the serving mode
-            serving_mode = oci.generative_ai_inference.models.OnDemandServingMode(
-                model_id=oci_model_id
-            )
-
-            # Prepare the inference request
-            full_prompt = f"You are a helpful assistant.\n\nUser: {prompt}\nAssistant:"
-
-            # Use Cohere request for Cohere models (or Llama if using Llama)
-            inference_request = oci.generative_ai_inference.models.LlamaLlmInferenceRequest(
-                prompt=full_prompt, max_tokens=2048, temperature=0.7
-            )
-            # Create generate text details
-            generate_text_details = oci.generative_ai_inference.models.GenerateTextDetails(
-                serving_mode=serving_mode,
-                compartment_id=oci_compartment_id,
-                inference_request=inference_request,
-            )
-
-            # Make the request
-            response = generative_ai_client.generate_text(generate_text_details)
-            return_response = response.data.inference_response.generated_texts[0].text
-
-        except Exception as e:
-            error_msg = f"Error calling OCI Generative AI: {str(e)}. Ensure OCI config file exists at {oci_config_file} and OCI_COMPARTMENT_ID is set."
-            logger.error(error_msg)
-            send_ntfy_notification(error_msg, "OCI Error")
-            return_response = error_msg
 
     return return_response
-
-
-def get_text(contents):
-    """Helper function to extract text from OCI content list"""
-    text = ""
-    for content in contents:
-        if hasattr(content, "text"):
-            text += content.text
-        elif isinstance(content, str):
-            text += content
-    return text
 
 
 def read_pdf_from_bytes(pdf_bytes: bytes) -> str:
@@ -957,91 +855,6 @@ def read_pdf_file(file_path: str) -> str:
         return f"[Error reading PDF file: {str(e)}]"
 
 
-def get_oc_info(prompt: str):
-    """Helper function to get response from OCI Generative AI using GenericChatRequest"""
-    try:
-        # Initialize OCI config from file
-        config = oci.config.from_file(oci_config_file, oci_config_profile)
-
-        # Create Generative AI client
-        service_endpoint = f"https://inference.generativeai.{oci_region}.oci.oraclecloud.com"
-        generative_ai_inference_client = oci.generative_ai_inference.GenerativeAiInferenceClient(
-            config=config,
-            service_endpoint=service_endpoint,
-            retry_strategy=oci.retry.NoneRetryStrategy(),
-            timeout=(10, 240),
-        )
-
-        # Create text content
-        oci_content = oci.generative_ai_inference.models.TextContent()
-        oci_content.text = prompt
-
-        # Create message
-        message = oci.generative_ai_inference.models.Message()
-        message.role = "USER"
-        message.content = [oci_content]
-
-        # Create chat request
-        chat_request = oci.generative_ai_inference.models.GenericChatRequest()
-        chat_request.api_format = (
-            oci.generative_ai_inference.models.BaseChatRequest.API_FORMAT_GENERIC
-        )
-        chat_request.messages = [message]
-        chat_request.max_tokens = 1024
-        chat_request.temperature = 0
-        chat_request.top_p = 1
-        chat_request.top_k = 0
-
-        # Create chat detail
-        oci_chat_detail = oci.generative_ai_inference.models.ChatDetails()
-        oci_chat_detail.serving_mode = oci.generative_ai_inference.models.OnDemandServingMode(
-            model_id=oci_model_id
-        )
-        oci_chat_detail.chat_request = chat_request
-        oci_chat_detail.compartment_id = oci_compartment_id
-
-        # Make the chat request
-        chat_response = generative_ai_inference_client.chat(oci_chat_detail)
-
-        if not chat_response:
-            return json.dumps(
-                {
-                    "markdown": "Error: No response from OCI",
-                    "html": "<p>Error: No response from OCI</p>",
-                }
-            )
-
-        # Access the 'data' attribute
-        data_obj = chat_response.data
-
-        text = ""
-        choices = []
-        message_obj = None
-        contents = []
-
-        # Drill down using attributes
-        chat_response_obj = getattr(data_obj, "chat_response", None)
-        if chat_response_obj and hasattr(chat_response_obj, "choices"):
-            choices = chat_response_obj.choices
-            for choice in choices:
-                message_obj = getattr(choice, "message", None)
-                if message_obj:
-                    contents = getattr(message_obj, "content", [])
-                    text = get_text(contents)
-
-                    # Fix of <pre> formatting for OCI only...
-                    data = json.loads(text)
-                    data["markdown"] = data["markdown"].replace("\\n", "\n")
-                    text = json.dumps(data)
-
-        return text
-
-    except Exception as e:
-        error_msg = f"Error calling OCI Generative AI: {str(e)}"
-        logger.error(error_msg)
-        return json.dumps({"markdown": f"Error: {error_msg}", "html": f"<p>Error: {error_msg}</p>"})
-
-
 def normalize_llm_name(llm: str) -> str:
     """
     Normalize LLM name to a canonical form for tracking.
@@ -1069,8 +882,6 @@ def normalize_llm_name(llm: str) -> str:
         return "claude-sonnet-4-6"
     elif "llama" in llm_lower or llm == "llama3.2":
         return "llama3.2"
-    elif "oci" in llm_lower or llm == "oci-generative-ai":
-        return "oci-generative-ai"
     else:
         # Return as-is if no mapping found
         return llm

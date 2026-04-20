@@ -49,7 +49,6 @@ from app.utils.template_plain_text_spacing import finalize_plain_text_for_docx
 from app.utils.llm_utils import (
     load_system_prompt,
     normalize_llm_name,
-    get_oc_info,
 )
 from app.services.user_service import (
     get_user_by_id,
@@ -482,7 +481,7 @@ def _write_llm_prompt_log(
             "",
         ]
         if full_text is not None:
-            lines.append("--- FULL MESSAGE SENT (e.g. Gemini/OCI) ---")
+            lines.append("--- FULL MESSAGE SENT (e.g. Gemini) ---")
             lines.append("")
             lines.append(full_text)
         elif messages is not None:
@@ -1468,18 +1467,6 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             response.raise_for_status()
             result = response.json()
             r = result["choices"][0]["message"]["content"]
-
-        elif llm == "OCI" or llm == "oci-generative-ai":
-            # Include personality instruction prominently at the start
-            full_prompt = (
-                f"{system_message}{critical_instructions}. {message}. "
-                f"Hiring Manager: {hiring_manager}. Company Name: {company_name}. Ad Source: {ad_source}"
-                f"{additional_instructions_text}"
-            )
-            _log_prompt_length(llm, full_text=full_prompt)
-            _write_llm_prompt_log(llm, full_text=full_prompt)
-            r = get_oc_info(full_prompt)
-            logger.info(f"OCI response received ({len(r)} characters)")
 
         elif llm == "Llama" or llm == ollama_model or llm == "llama3.2":
             if not OLLAMA_AVAILABLE:
