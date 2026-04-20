@@ -32,7 +32,6 @@ dependencies = [
     "google-generativeai",
     "huggingface-hub",
     "requests>=2.31.0",
-    "oci",
     "pydantic",
     "fastapi",
     "scikit-learn>=1.2.0",
