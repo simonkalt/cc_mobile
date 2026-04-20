@@ -13,7 +13,6 @@ pip install numpy pandas==2.1.4 scipy
 # This is the critical step that bypasses xai's restrictive, broken dependency check.
 echo "Step 3: Installing conflicting packages using --no-deps..."
 pip install xai --no-deps  # <-- Forces xai to use pandas from Step 2
-pip install oci --no-deps
 pip install uvicorn --no-deps
 
 # 3.5. Install xai's missing dependencies that were skipped by --no-deps
@@ -23,8 +22,5 @@ pip install cycler kiwisolver "matplotlib>=3.6.0,<4.0.0"
 # 4. Install the remaining non-conflicting packages from the minimalist list
 echo "Step 4: Installing remaining packages from requirements.txt..."
 pip install -r requirements.txt
-
-# Example build command in Render settings:
-chmod 600 oci_api_key.pem
 
 echo "Build process complete!"
