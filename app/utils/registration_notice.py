@@ -16,16 +16,21 @@ logger = logging.getLogger(__name__)
 _FALLBACK_NOTICE: Dict[str, Any] = {
     "noticeTypographicStyle": "italic",
     "noticeText": (
-        "DATA USE & SHARING NOTICE  By creating an account, you acknowledge and consent to the following:  "
-        "• Your phone number is shared with Tenlyx to deliver SMS messages you opt in to receive.  "
-        "• Your email address is processed via Zoho Mail for account and support communications.  "
-        "• When you use AI-powered features, your input is sent to third-party AI services including "
-        "Anthropic (Claude), OpenAI (ChatGPT), Google (Gemini), and X Corp. (Grok) to generate responses. "
-        "These providers do not use your data for advertising.  "
-        "• Your account data is stored securely using Amazon Web Services (AWS), MongoDB Atlas, and Redis.  "
-        "We do not sell your personal data. You may withdraw consent and request deletion of your data at "
-        "any time by visiting Settings > Delete My Account or emailing support@saimonsoft.com.  "
-        "For full details, see our Privacy Policy."
+        "<p>By creating an account, you acknowledge and consent to the following:</p>"
+        "<ul style='list-style:disc outside;margin:0.65em 0 0.85em 0;padding-left:1.5em;'>"
+        "<li style='margin-bottom:0.45em;'>Your phone number is shared with Tenlyx to deliver SMS messages "
+        "you opt in to receive.</li>"
+        "<li style='margin-bottom:0.45em;'>Your email address is processed via Zoho Mail for account and "
+        "support communications.</li>"
+        "<li style='margin-bottom:0.45em;'>When you use AI-powered features, your input is sent to "
+        "third-party AI services including Anthropic (Claude), OpenAI (ChatGPT), Google (Gemini), and "
+        "X Corp. (Grok) to generate responses. These providers do not use your data for advertising.</li>"
+        "<li style='margin-bottom:0.45em;'>Your account data is stored securely using Amazon Web Services "
+        "(AWS), MongoDB Atlas, and Redis.</li></ul>"
+        "<p style='margin-top:0.65em;'>We do not sell your personal data. You may withdraw consent and "
+        "request deletion of your data at any time by visiting Settings &gt; Delete My Account or emailing "
+        "<a href='mailto:support@saimonsoft.com'>support@saimonsoft.com</a>.</p>"
+        "<p style='margin-top:0.45em;'>For full details, see our Privacy Policy.</p>"
     ),
     "checkboxLabel": (
         "I have read and agree to the Data Use & Sharing Notice above, including the sharing of my data "
