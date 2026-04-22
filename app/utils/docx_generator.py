@@ -380,9 +380,17 @@ def _normalize_spaced_markdown_emphasis(text: str) -> str:
         return ""
     s = text
     # Convert "* * text * *" -> "**text**"
-    s = re.sub(r"(?<!\*)\*\s+\*(.+?)\*\s+\*(?!\*)", r"**\1**", s)
+    s = re.sub(r"(?<!\*)\*\s+\*\s*(.+?)\s*\*\s+\*(?!\*)", r"**\1**", s)
+    # Convert "* text * *" -> "**text**" (common malformed bold closer)
+    s = re.sub(r"(?<!\*)\*\s*(.+?)\s*\*\s+\*(?!\*)", r"**\1**", s)
+    # Convert "* * text *" -> "**text**" (common malformed bold opener)
+    s = re.sub(r"(?<!\*)\*\s+\*\s*(.+?)\s*\*(?!\*)", r"**\1**", s)
     # Convert "_ _ text _ _" -> "__text__"
-    s = re.sub(r"(?<!_)_\s+_(.+?)_\s+_(?!_)", r"__\1__", s)
+    s = re.sub(r"(?<!_)_\s+_\s*(.+?)\s*_\s+_(?!_)", r"__\1__", s)
+    # Convert "_ text _ _" -> "__text__"
+    s = re.sub(r"(?<!_)_\s*(.+?)\s*_\s+_(?!_)", r"__\1__", s)
+    # Convert "_ _ text _" -> "__text__"
+    s = re.sub(r"(?<!_)_\s+_\s*(.+?)\s*_(?!_)", r"__\1__", s)
     return s
 
 
