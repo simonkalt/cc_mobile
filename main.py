@@ -16,6 +16,8 @@ import base64
 import re
 import warnings
 from dotenv import load_dotenv
+from __init__ import __version__
+print(f"Cover Letter API v{__version__}")
 
 # Load .env / .secrets early so os.getenv (e.g. GOOGLE_ANALYTICS_TAG) works for root routes
 _main_root = os.path.dirname(os.path.abspath(__file__))
@@ -24,12 +26,10 @@ load_dotenv(os.path.join(_main_root, ".secrets"), override=True)
 from openai import OpenAI
 import anthropic
 
-# Suppress deprecation warnings
-# - google.generativeai deprecation (still works, will migrate to google.genai later)
+# Suppress noisy warnings
 # - Python version warning from google.api_core (informational, not critical)
 # - importlib.metadata compatibility warnings for Python 3.9
 with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=FutureWarning, message=".*google.generativeai.*")
     warnings.filterwarnings("ignore", category=FutureWarning, message=".*Python version.*")
     warnings.filterwarnings("ignore", message=".*importlib.metadata.*packages_distributions.*")
     warnings.filterwarnings("ignore", message=".*module 'importlib.metadata' has no attribute.*")
@@ -47,7 +47,7 @@ with warnings.catch_warnings():
     except (ImportError, AttributeError):
         pass
 
-    import google.generativeai as genai
+    from google import genai
 
 from huggingface_hub import login
 import requests
@@ -594,10 +594,11 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1"):
         )
         return_response = response.content[0].text.replace("```json", "").replace("```", "")
     elif model == "gemini-2.5-flash":
-        genai.configure(api_key=gemini_api_key)
-        client = genai.GenerativeModel(model)
-        # client = genai.Client(api_key=gemini_api_key)
-        response = client.generate_content(contents=prompt)
+        client = genai.Client(api_key=gemini_api_key)
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+        )
         return_response = response.text
     elif model == "grok-4-fast-reasoning":
         # Fallback to direct HTTP requests (no SDK needed)

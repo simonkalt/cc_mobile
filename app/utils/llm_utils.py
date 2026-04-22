@@ -25,7 +25,7 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 try:
-    import google.generativeai as genai
+    from google import genai
     GOOGLE_AVAILABLE = True
 except ImportError:
     GOOGLE_AVAILABLE = False
@@ -158,10 +158,12 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
         if not GOOGLE_AVAILABLE or not settings.GOOGLE_API_KEY:
             logger.error("Google Generative AI not available or API key not set")
             return None
-            
-        genai.configure(api_key=settings.GOOGLE_API_KEY)
-        client = genai.GenerativeModel(model)
-        response = client.generate_content(contents=prompt)
+
+        client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+        )
         return_response = response.text
         
     elif model == "grok-4-fast-reasoning":

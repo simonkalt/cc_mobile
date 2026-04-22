@@ -653,7 +653,7 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 try:
-    import google.generativeai as genai
+    from google import genai
 
     GOOGLE_AVAILABLE = True
 except ImportError:
@@ -1363,8 +1363,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 logger.debug("Additional instructions appended to Gemini prompt")
             if not GOOGLE_AVAILABLE or not settings.GEMINI_API_KEY:
                 raise ValueError("Google Generative AI not available or API key not set")
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
             # Configure generation to ensure complete JSON response
             generation_config = {
@@ -1376,7 +1375,11 @@ Apply them exactly. They take priority over any conflicting earlier instructions
 
             _log_prompt_length(llm, full_text=msg)
             _write_llm_prompt_log(llm, full_text=msg)
-            response = model.generate_content(contents=msg, generation_config=generation_config)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=msg,
+                config=generation_config,
+            )
             r = response.text
             logger.info(f"Gemini response length: {len(r)} characters")
 
