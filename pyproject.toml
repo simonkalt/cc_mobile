@@ -29,7 +29,7 @@ dependencies = [
     "python-dotenv",
     "openai",
     "anthropic",
-    "google-generativeai",
+    "google-genai",
     "huggingface-hub",
     "requests>=2.31.0",
     "pydantic",
