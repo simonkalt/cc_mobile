@@ -11,6 +11,21 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / ".env")
 load_dotenv(_ROOT / ".secrets", override=True)
 
+def _default_docx_service_base_url(debug_enabled: bool) -> str:
+    deploy_env = (
+        os.getenv("DEPLOYMENT_ENV")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("APP_ENV")
+        or os.getenv("EXPO_PUBLIC_BUILD_TYPE")
+        or ("development" if debug_enabled else "production")
+    ).strip().lower()
+
+    if deploy_env in {"production", "prod", "live"}:
+        return "https://api.saimonsoft.com"
+    if deploy_env in {"uat", "staging", "stage", "preview"}:
+        return "https://syncfusion-uat.onrender.com"
+    return "http://192.168.0.8:5000"
+
 
 class Settings:
     """Application settings loaded from environment variables"""
@@ -35,6 +50,10 @@ class Settings:
     PUBLIC_TERMS_OF_SERVICE_URL: str = (
         (os.getenv("PUBLIC_TERMS_OF_SERVICE_URL") or "").strip()
         or "https://www.saimonsoft.com/website/docs/terms-of-service.html"
+    )
+    DOCX_SERVICE_BASE_URL: str = (
+        (os.getenv("DOCX_SERVICE_BASE_URL") or "").strip()
+        or _default_docx_service_base_url(DEBUG)
     )
 
     # Registration: Data Use & Sharing Notice copy (editable JSON in repo root by default)
