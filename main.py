@@ -271,6 +271,8 @@ except Exception as e:
 
 
 # Configure CORS for React app
+# Same-origin loads (e.g. UI at /app on this host calling /api/...) do not rely on CORS.
+# Add origins to CORS_ORIGINS when the web UI is served from another host or port.
 # Get allowed origins from environment variable or use defaults
 cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
 # Add default localhost origins for development
@@ -1036,6 +1038,91 @@ def admin_portal():
     if os.path.exists(path):
         return FileResponse(path, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Admin portal not found"})
+
+
+def _cc_mobile_web_paths():
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.join(project_root, "website", "cc_mobile_web")
+    index_path = os.path.join(root, "index.html")
+    return root, index_path
+
+
+# If these are missing but we return index.html anyway, the browser tries to execute HTML as JS/CSS → blank page.
+_CC_MOBILE_WEB_ASSET_SUFFIXES = (
+    ".js",
+    ".css",
+    ".map",
+    ".json",
+    ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".otf",
+)
+
+
+def _cc_mobile_web_requested_asset_filename(resource_path: str) -> str:
+    if not resource_path:
+        return ""
+    return resource_path.rsplit("/", 1)[-1].lower()
+
+
+def _cc_mobile_web_path_looks_like_static_asset(resource_path: str) -> bool:
+    name = _cc_mobile_web_requested_asset_filename(resource_path)
+    return bool(name) and any(name.endswith(s) for s in _CC_MOBILE_WEB_ASSET_SUFFIXES)
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/app/", include_in_schema=False)
+def cc_mobile_web_app_root():
+    """Serve Expo web SPA (cc_mobile_ui) exported to website/cc_mobile_web/."""
+    _root, index_path = _cc_mobile_web_paths()
+    if os.path.isfile(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    return JSONResponse(
+        status_code=404,
+        content={
+            "detail": "Mobile web app not deployed. Export cc_mobile_ui with "
+            "`npx expo export --platform web`, copy dist/* into website/cc_mobile_web/."
+        },
+    )
+
+
+@app.get("/app/{resource_path:path}", include_in_schema=False)
+def cc_mobile_web_app_path(resource_path: str):
+    """Static files under /app; unknown paths fall back to index.html for client-side routes."""
+    root, index_path = _cc_mobile_web_paths()
+    if not os.path.isfile(index_path):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Mobile web app not deployed."},
+        )
+    root_abs = os.path.abspath(root)
+    joined = os.path.abspath(os.path.normpath(os.path.join(root, resource_path)))
+    if joined != root_abs and not joined.startswith(root_abs + os.sep):
+        return FileResponse(index_path, media_type="text/html")
+    if os.path.isfile(joined):
+        return FileResponse(joined)
+    if _cc_mobile_web_path_looks_like_static_asset(resource_path):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": (
+                    "Web bundle asset missing on server. Copy the full Expo export "
+                    "(entire cc_mobile_ui/dist/, including the _expo directory) into "
+                    "website/cc_mobile_web/ and restart."
+                ),
+                "missing": resource_path,
+            },
+        )
+    return FileResponse(index_path, media_type="text/html")
 
 
 @app.get("/api/health")

@@ -28,3 +28,7 @@ dist/
 *.pem
 
 .cursor/mcp.json
+
+# Expo web bundle (copy from cc_mobile_ui dist/); README stays tracked
+website/cc_mobile_web/*
+!website/cc_mobile_web/README.txt
