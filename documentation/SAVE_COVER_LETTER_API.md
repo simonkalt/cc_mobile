@@ -289,7 +289,7 @@ const jobInfoResponse = await fetch("http://localhost:8000/api/job-info", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    llm: "gpt-4.1",
+    llm: "gpt-5.5",
     company_name: "Tech Corp",
     // ... other fields
     user_id: user_id,

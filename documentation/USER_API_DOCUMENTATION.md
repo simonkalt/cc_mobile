@@ -130,11 +130,11 @@ Retrieve user information by MongoDB ObjectId.
   "name": "John Doe",
   "email": "john@example.com",
   "llm_counts": {
-    "gpt-4.1": 15,
-    "claude-sonnet-4-6": 8,
+    "gpt-5.2": 10,
+    "gpt-5.5": 15,
     "claude-haiku-4-5": 3
   },
-  "last_llm_used": "gpt-4.1",
+  "last_llm_used": "gpt-5.5",
   ...
 }
 ```
@@ -161,11 +161,11 @@ Retrieve user information by email address.
   "name": "John Doe",
   "email": "john@example.com",
   "llm_counts": {
-    "gpt-4.1": 15,
-    "claude-sonnet-4-6": 8,
+    "gpt-5.2": 10,
+    "gpt-5.5": 15,
     "claude-haiku-4-5": 3
   },
-  "last_llm_used": "gpt-4.1",
+  "last_llm_used": "gpt-5.5",
   ...
 }
 ```
@@ -205,7 +205,7 @@ Update user information. Only provided fields will be updated.
     "theme": "light"
   },
   "avatarUrl": "https://example.com/avatar.jpg",
-  "last_llm_used": "gpt-4.1"
+  "last_llm_used": "gpt-5.5"
 }
 ```
 
@@ -395,13 +395,13 @@ When an LLM is successfully called through the API (e.g., `POST /api/job-info` o
 - Increments the usage count for that LLM in `llm_counts`
 - Updates `last_llm_used` to the name of the LLM that was just used
 
-**Example**: After a successful call to `gpt-4.1`:
+**Example**: After a successful call to `gpt-5.5`:
 ```json
 {
   "llm_counts": {
-    "gpt-4.1": 16  // Incremented from 15
+    "gpt-5.5": 16  // Incremented from 15
   },
-  "last_llm_used": "gpt-4.1"  // Updated
+  "last_llm_used": "gpt-5.5"  // Updated
 }
 ```
 
@@ -429,11 +429,11 @@ Response includes:
 {
   "id": "...",
   "llm_counts": {
-    "gpt-4.1": 15,
-    "claude-sonnet-4-6": 8,
+    "gpt-5.2": 10,
+    "gpt-5.5": 15,
     "claude-haiku-4-5": 3
   },
-  "last_llm_used": "gpt-4.1"
+  "last_llm_used": "gpt-5.5"
 }
 ```
 

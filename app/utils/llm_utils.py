@@ -80,7 +80,7 @@ def load_system_prompt() -> str:
         return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
 
 
-def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
+def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
     """
     Send a prompt to an LLM and return the response
     
@@ -93,14 +93,14 @@ def post_to_llm(prompt: str, model: str = "gpt-4.1") -> Optional[str]:
     """
     return_response = None
     
-    if model == "gpt-4.1" or model == "gpt-5.2" or model.startswith("gpt-"):
+    if model == "gpt-4.1" or model == "gpt-5.2" or model == "gpt-5.5" or model.startswith("gpt-"):
         if not OPENAI_AVAILABLE or not settings.OPENAI_API_KEY:
             logger.error("OpenAI not available or API key not set")
             return None
             
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        # Use high max_completion_tokens for GPT-5.2
-        if model == "gpt-5.2":
+        # Use high max_completion_tokens for GPT-5.2 / GPT-5.5
+        if model in ("gpt-5.2", "gpt-5.5"):
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -205,8 +205,14 @@ def normalize_llm_name(llm: str) -> str:
     # Map display names and aliases to canonical model names
     if "gemini" in llm_lower or llm == "gemini-2.5-flash":
         return "gemini-2.5-flash"
-    elif "gpt" in llm_lower or llm == "gpt-4.1" or llm == "ChatGPT":
+    elif llm == "gpt-5.2" or llm_lower == "gpt-5.2":
+        return "gpt-5.2"
+    elif llm == "gpt-5.5" or llm_lower == "gpt-5.5":
+        return "gpt-5.5"
+    elif llm == "gpt-4.1" or llm_lower == "gpt-4.1":
         return "gpt-4.1"
+    elif "gpt" in llm_lower or llm == "ChatGPT":
+        return "gpt-5.5"
     elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
         return "grok-4-fast-reasoning"
     elif "haiku" in llm_lower or llm == "claude-haiku-4-5" or llm == "Claude Haiku":

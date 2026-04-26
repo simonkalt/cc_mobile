@@ -1383,10 +1383,11 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             r = response.text
             logger.info(f"Gemini response length: {len(r)} characters")
 
-        elif llm == "ChatGPT" or llm == gpt_model or llm == "gpt-4.1":
+        elif llm == "ChatGPT" or llm == gpt_model or llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2"):
             if not OPENAI_AVAILABLE or not settings.OPENAI_API_KEY:
                 raise ValueError("OpenAI not available or API key not set")
             client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            openai_model = llm if llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2") else gpt_model
             messages = [
                 {"role": "system", "content": system_message},
                 {
@@ -1409,15 +1410,15 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             # Keep completion cap bounded for letter generation latency.
             _log_prompt_length(llm, messages=messages)
             _write_llm_prompt_log(llm, messages=messages)
-            if gpt_model == "gpt-5.2":
+            if openai_model in ("gpt-5.2", "gpt-5.5"):
                 response = client.chat.completions.create(
-                    model=gpt_model,
+                    model=openai_model,
                     messages=messages,
-                    max_completion_tokens=settings.LLM_MAX_OUTPUT_TOKENS,  # GPT-5.2 uses max_completion_tokens
+                    max_completion_tokens=settings.LLM_MAX_OUTPUT_TOKENS,  # GPT-5.x uses max_completion_tokens
                 )
             else:
                 response = client.chat.completions.create(
-                    model=gpt_model,
+                    model=openai_model,
                     messages=messages,
                     max_tokens=16000,  # Older GPT models use max_tokens
                 )
