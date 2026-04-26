@@ -17,14 +17,9 @@ Create `llms-config.json` in your backend directory:
       "description": "Latest GPT model with enhanced capabilities"
     },
     {
-      "value": "gpt-4.1",
-      "label": "GPT-4.1",
-      "description": "Previous generation GPT model"
-    },
-    {
-      "value": "claude-sonnet-4-6",
-      "label": "Claude Sonnet 4.6",
-      "description": "Anthropic's Claude Sonnet 4.6 model"
+      "value": "gpt-5.5",
+      "label": "GPT-5.5",
+      "description": "GPT-5.5 model"
     },
     {
       "value": "claude-haiku-4-5",

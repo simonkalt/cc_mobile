@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 
 class ChatRequest(BaseModel):
     prompt: str
-    active_model: str = "gpt-4.1"  # Default model
+    active_model: str = "claude-haiku-4-5"  # Default model (matches llms-config / registry)
 
     class Config:
         # Allow extra fields to be ignored

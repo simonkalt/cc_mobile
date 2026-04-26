@@ -318,6 +318,7 @@ try:
         cover_letter,
         files,
         cover_letters,
+        docx_proxy,
         pdf,
         sms,
         email,
@@ -333,6 +334,7 @@ try:
     app.include_router(cover_letter.router)
     app.include_router(files.router)
     app.include_router(cover_letters.router)
+    app.include_router(docx_proxy.router)
     app.include_router(pdf.router)
     app.include_router(sms.router)
     app.include_router(email.router)
@@ -454,7 +456,7 @@ xai_model = "grok-4-fast-reasoning"
 
 # we need to move this to the server side and make it dynamic
 LLM_ENVIRONMENT_MAPPING = [
-    ("ChatGPT", "gpt-4.1", openai_api_key),
+    ("ChatGPT", "gpt-5.5", openai_api_key),
     ("Claude", "claude-sonnet-4-6", anthropic_api_key),
     ("Claude Haiku", "claude-haiku-4-5", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
@@ -478,7 +480,7 @@ def get_available_llms():
 # This ensures the 'prompt' is a string
 class ChatRequest(BaseModel):
     prompt: str
-    active_model: str = "gpt-4.1"  # Default model
+    active_model: str = "claude-haiku-4-5"  # Default model (matches llms-config / registry)
 
     class Config:
         # Allow extra fields to be ignored
@@ -551,12 +553,12 @@ class JobURLAnalysisRequest(BaseModel):
     user_email: Optional[str] = None
 
 
-def post_to_llm(prompt: str, model: str = "gpt-4.1"):
+def post_to_llm(prompt: str, model: str = "gpt-5.5"):
     return_response = None
-    if model == "gpt-4.1" or model == "gpt-5.2" or model.startswith("gpt-"):
+    if model == "gpt-4.1" or model == "gpt-5.2" or model == "gpt-5.5" or model.startswith("gpt-"):
         client = OpenAI(api_key=openai_api_key)
-        # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
-        if model == "gpt-5.2":
+        # Use high max_completion_tokens for GPT-5.2 / GPT-5.5 (supports 128,000 max completion tokens)
+        if model in ("gpt-5.2", "gpt-5.5"):
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -868,8 +870,14 @@ def normalize_llm_name(llm: str) -> str:
     # Map display names and aliases to canonical model names
     if "gemini" in llm_lower or llm == "gemini-2.5-flash":
         return "gemini-2.5-flash"
-    elif "gpt" in llm_lower or llm == "gpt-4.1" or llm == "ChatGPT":
+    elif llm == "gpt-5.2" or llm_lower == "gpt-5.2":
+        return "gpt-5.2"
+    elif llm == "gpt-5.5" or llm_lower == "gpt-5.5":
+        return "gpt-5.5"
+    elif llm == "gpt-4.1" or llm_lower == "gpt-4.1":
         return "gpt-4.1"
+    elif "gpt" in llm_lower or llm == "ChatGPT":
+        return "gpt-5.5"
     elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
         return "grok-4-fast-reasoning"
     elif "haiku" in llm_lower or llm == "claude-haiku-4-5" or llm == "Claude Haiku":

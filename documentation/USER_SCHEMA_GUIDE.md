@@ -174,7 +174,7 @@ const updateSelectedModel = async (userId, modelName) => {
     body: JSON.stringify({
       preferences: {
         appSettings: {
-          selectedModel: modelName  // e.g., "gemini-2.5-flash", "gpt-4.1", etc.
+          selectedModel: modelName  // e.g., "gemini-2.5-flash", "gpt-5.5", etc.
         }
       }
     })
@@ -198,7 +198,7 @@ const updateUserSettings = async (userId) => {
             fontSize: 10.5,
             fontFamily: "Times New Roman"
           },
-          selectedModel: "gpt-4.1",
+          selectedModel: "gpt-5.5",
           personalityProfiles: [
             {
               id: "1",
@@ -241,7 +241,7 @@ Array of custom personality profiles:
 ### Selected Model
 
 The LLM model selected by the user:
-- Examples: `"gemini-2.5-flash"`, `"gpt-4.1"`, `"claude-sonnet-4-6"`, `"claude-haiku-4-5"`, etc.
+- Examples: `"gemini-2.5-flash"`, `"gpt-5.5"`, `"gpt-5.2"`, `"claude-haiku-4-5"`, etc.
 
 ### Last Resume Used
 
@@ -259,12 +259,12 @@ Tracks LLM (Large Language Model) usage statistics:
 - **llm_counts**: Object containing usage counts for each LLM model
   - **Type**: `object` (dictionary)
   - **Structure**: Key-value pairs where key is the LLM name and value is the usage count
-  - **Example**: `{"gpt-4.1": 15, "claude-sonnet-4-6": 8, "claude-haiku-4-5": 3}`
+  - **Example**: `{"gpt-5.2": 10, "gpt-5.5": 15, "claude-haiku-4-5": 3}`
   - **Initialization**: Empty object `{}` for new users
   - **Auto-increment**: Automatically incremented when an LLM is successfully called
 - **last_llm_used**: The most recently used LLM model
   - **Type**: `string` (optional, can be `null`)
-  - **Example**: `"gpt-4.1"`
+  - **Example**: `"gpt-5.5"`
   - **Initialization**: `null` for new users
   - **Auto-update**: Automatically updated when an LLM is successfully called
 

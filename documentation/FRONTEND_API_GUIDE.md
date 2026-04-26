@@ -77,12 +77,12 @@ http://localhost:8000/api/users/693326c07fcdaab8e81cdd2f
   "dateUpdated": "2024-04-27T00:00:00.000Z",
   "lastLogin": null,
   "llm_counts": {
-    "gpt-4.1": 15,
-    "claude-sonnet-4-6": 8,
+    "gpt-5.2": 10,
+    "gpt-5.5": 15,
     "claude-haiku-4-5": 3,
     "gemini-2.5-flash": 3
   },
-  "last_llm_used": "gpt-4.1"
+  "last_llm_used": "gpt-5.5"
 }
 ```
 
