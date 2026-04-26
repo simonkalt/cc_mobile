@@ -9,6 +9,7 @@ Upstream base URL: ``settings.DOCX_SERVICE_BASE_URL`` (see ``app/core/config.py`
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict
 
@@ -21,6 +22,17 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pdf", tags=["docx-proxy"])
+
+# Upstream (e.g. Render) may return 429 with a plain-text body; retry before failing the client.
+_DOCX_TO_PDF_MAX_ATTEMPTS = 3
+_DOCX_TO_PDF_RETRY_STATUS = {429, 503}
+
+
+def _retry_delay_seconds(attempt: int, resp: httpx.Response) -> float:
+    ra = (resp.headers.get("Retry-After") or "").strip()
+    if ra.isdigit():
+        return min(float(ra), 60.0)
+    return min(1.0 * (2**attempt), 30.0)
 
 
 def _upstream_base() -> str:
@@ -67,7 +79,25 @@ async def proxy_docx_to_pdf(request: Request, file: UploadFile = File(...)) -> J
     timeout = httpx.Timeout(120.0, connect=30.0)
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.post(upstream, headers=headers, files=files)
+            resp: httpx.Response | None = None
+            for attempt in range(_DOCX_TO_PDF_MAX_ATTEMPTS):
+                resp = await client.post(upstream, headers=headers, files=files)
+                if (
+                    resp.status_code in _DOCX_TO_PDF_RETRY_STATUS
+                    and attempt < _DOCX_TO_PDF_MAX_ATTEMPTS - 1
+                ):
+                    delay = _retry_delay_seconds(attempt, resp)
+                    logger.warning(
+                        "Upstream docx-to-pdf returned %s; retrying in %.1fs (attempt %s/%s)",
+                        resp.status_code,
+                        delay,
+                        attempt + 1,
+                        _DOCX_TO_PDF_MAX_ATTEMPTS,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                break
+            assert resp is not None
     except httpx.RequestError as exc:
         logger.warning("Upstream docx-to-pdf request failed: %s", exc)
         raise HTTPException(
@@ -93,18 +123,22 @@ async def proxy_docx_to_pdf(request: Request, file: UploadFile = File(...)) -> J
             except Exception:
                 snippet = ""
 
-        logger.error(
+        us = resp.status_code
+        log_fn = logger.error if us >= 500 else logger.warning
+        log_fn(
             "Upstream docx-to-pdf returned non-JSON (http=%s, content-type=%r, bytes=%s): %r",
-            resp.status_code,
+            us,
             resp.headers.get("content-type"),
             len(resp.content or b""),
             snippet[:500],
         )
+        # Forward upstream 4xx/5xx (e.g. 429 rate limit) instead of always 502.
+        out_status = us if 400 <= us < 600 else status.HTTP_502_BAD_GATEWAY
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=out_status,
             detail={
                 "message": "Upstream docx service returned a non-JSON response to docx-to-pdf",
-                "upstream_status": resp.status_code,
+                "upstream_status": us,
                 "upstream_content_type": resp.headers.get("content-type"),
                 "upstream_url": upstream,
                 "snippet": snippet,
