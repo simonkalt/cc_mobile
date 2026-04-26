@@ -10,11 +10,11 @@ Upstream base URL: ``settings.DOCX_SERVICE_BASE_URL`` (see ``app/core/config.py`
 from __future__ import annotations
 
 import logging
-from typing import Dict
+from typing import Any, Dict
 
 import httpx
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 
@@ -33,36 +33,19 @@ def _upstream_base() -> str:
     return base
 
 
-def _forward_headers_from_request(request: Request) -> Dict[str, str]:
-    hop_by_hop = {
-        "host",
-        "connection",
-        "content-length",
-        "transfer-encoding",
-        "keep-alive",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "te",
-        "trailer",
-        "upgrade",
-    }
-    out: Dict[str, str] = {}
-    for key, value in request.headers.items():
-        lk = key.lower()
-        if lk in hop_by_hop:
-            continue
-        out[key] = value
-    return out
-
-
 @router.post("/docx-to-pdf")
-async def proxy_docx_to_pdf(request: Request, file: UploadFile = File(...)) -> Response:
+async def proxy_docx_to_pdf(request: Request, file: UploadFile = File(...)) -> JSONResponse:
     """
     Multipart proxy: forwards the uploaded ``file`` field to the upstream
     ``POST {DOCX_SERVICE_BASE_URL}/api/pdf/docx-to-pdf`` and returns the JSON body.
     """
     upstream = f"{_upstream_base()}/api/pdf/docx-to-pdf"
-    headers = _forward_headers_from_request(request)
+    # Do not forward browser headers (especially Authorization / cookies / content-type).
+    # The upstream .NET endpoint expects a simple multipart upload; forwarding client auth
+    # headers can cause confusing failures.
+    headers: Dict[str, str] = {
+        "accept": "application/json",
+    }
 
     try:
         file_bytes = await file.read()
@@ -92,22 +75,47 @@ async def proxy_docx_to_pdf(request: Request, file: UploadFile = File(...)) -> R
             detail=f"Upstream docx service unreachable: {exc}",
         ) from exc
 
+    raw_text = ""
+    try:
+        raw_text = resp.text
+    except Exception:
+        raw_text = ""
+
+    payload: Any
+    try:
+        payload = resp.json()
+    except Exception:
+        # If upstream isn't JSON, don't forward opaque bytes to browsers/clients.
+        snippet = (raw_text or "")[:2000]
+        if not snippet:
+            try:
+                snippet = resp.content[:2000].decode("utf-8", errors="replace")
+            except Exception:
+                snippet = ""
+
+        logger.error(
+            "Upstream docx-to-pdf returned non-JSON (http=%s, content-type=%r, bytes=%s): %r",
+            resp.status_code,
+            resp.headers.get("content-type"),
+            len(resp.content or b""),
+            snippet[:500],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": "Upstream docx service returned a non-JSON response to docx-to-pdf",
+                "upstream_status": resp.status_code,
+                "upstream_content_type": resp.headers.get("content-type"),
+                "upstream_url": upstream,
+                "snippet": snippet,
+            },
+        ) from None
+
     if resp.status_code >= 400:
         logger.warning(
             "Upstream docx-to-pdf returned HTTP %s: %s",
             resp.status_code,
-            (resp.text or "")[:2000],
+            (raw_text or "")[:2000],
         )
 
-    content_type = resp.headers.get("content-type") or "application/json"
-    cache_control = resp.headers.get("cache-control")
-    response_headers = {}
-    if cache_control:
-        response_headers["cache-control"] = cache_control
-
-    return Response(
-        status_code=resp.status_code,
-        content=resp.content,
-        media_type=content_type,
-        headers=response_headers,
-    )
+    return JSONResponse(status_code=resp.status_code, content=payload)
