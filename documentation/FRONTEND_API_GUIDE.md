@@ -4,6 +4,8 @@
 
 This guide shows how to retrieve user settings and preferences from the backend API when a user loads the application.
 
+**Letter form defaults (`preferences.formDefaults`):** Keys such as `address`, `phoneNumber`, and `tone` (cover-letter applicant lines, distinct from top-level `user.address` / `user.phone`) persist on `PUT /api/users/{id}` via partial merge; full rules are in [`FORM_DEFAULTS_ADDRESS_PHONE_BACKEND.md`](./FORM_DEFAULTS_ADDRESS_PHONE_BACKEND.md) (**source of truth**).
+
 ## API Endpoint
 
 ### Get User by ID
