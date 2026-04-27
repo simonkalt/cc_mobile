@@ -11,7 +11,7 @@ import re
 import hashlib
 import time
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, status  # type: ignore[import-untyped]
 from dotenv import dotenv_values
@@ -68,6 +68,71 @@ _USER_PROFILE_CACHE_TTL_SECONDS = 5 * 60
 _local_resume_cache: Dict[str, tuple[float, str]] = {}
 _local_result_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
 _local_user_profile_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+
+
+def _rewrite_json_quoted_value_escaping_unescaped_control_chars(
+    s: str, value_start: int
+) -> Tuple[str, int, bool]:
+    """
+    Walk a JSON string value from the first char after the opening quote, copying
+    valid \\-escapes as-is, and replacing unescaped U+00–U+1F (including bare
+    newlines) with JSON \\n / \\r / \\t / \\u00xx. Returns
+    (escaped_string_body, index_after_closing_double_quote, did_change). If the
+    string is not closed, ends at len(s) with did_change True when controls were fixed.
+    """
+    i = value_start
+    out: List[str] = []
+    did_change = False
+    while i < len(s):
+        c = s[i]
+        if c == "\\" and i + 1 < len(s):
+            out.append(s[i])
+            out.append(s[i + 1])
+            i += 2
+            continue
+        if c == '"':
+            return ("".join(out), i + 1, did_change)
+        o = ord(c)
+        if o < 0x20:
+            did_change = True
+            if c == "\n":
+                out.append("\\n")
+            elif c == "\r":
+                out.append("\\r")
+            elif c == "\t":
+                out.append("\\t")
+            else:
+                out.append(f"\\u{o:04x}")
+        else:
+            out.append(c)
+        i += 1
+    return ("".join(out), len(s), did_change)
+
+
+def _try_repair_json_unescaped_string_controls(json_str: str) -> Optional[str]:
+    """
+    Re-encode known top-level string fields when the model broke JSON with literal
+    line breaks or unescaped control characters inside quoted values.
+    """
+    t = json_str
+    for _ in range(8):
+        before = t
+        for key in ("content", "markdown", "html"):
+            m = re.search(rf'"{re.escape(key)}"\s*:\s*"', t)
+            if not m:
+                continue
+            value_start = m.end()
+            escaped, end_idx, did_change = _rewrite_json_quoted_value_escaping_unescaped_control_chars(
+                t, value_start
+            )
+            if not did_change:
+                continue
+            t = t[:value_start] + escaped + '"' + t[end_idx:]
+        if t == before:
+            break
+    if t == json_str:
+        return None
+    return t
 
 
 def _sha256_text(value: str) -> str:
@@ -1590,26 +1655,39 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             # If parsing fails, try to fix common issues
             logger.warning(f"Initial JSON parse failed: {e}, attempting to fix...")
 
-            # Fix 1: Look for the last complete JSON object (balanced braces)
-            brace_count = 0
-            last_valid_end = -1
-            for i, char in enumerate(json_str):
-                if char == "{":
-                    brace_count += 1
-                elif char == "}":
-                    brace_count -= 1
-                    if brace_count == 0:
-                        last_valid_end = i
-                        break
-
-            if last_valid_end > 0:
+            # Fix 0: literal newlines / control characters inside a quoted "content" (etc.)
+            repaired = _try_repair_json_unescaped_string_controls(json_str)
+            json_r: Optional[Dict[str, Any]] = None
+            if repaired is not None:
                 try:
-                    json_r = json.loads(json_str[: last_valid_end + 1])
-                    logger.info("Successfully fixed truncated JSON (balanced braces)")
-                except json.JSONDecodeError:
+                    json_r = json.loads(repaired)
+                    logger.info(
+                        "JSON parse succeeded after re-escaping unescaped string controls"
+                    )
+                except json.JSONDecodeError as e0:
+                    logger.debug(f"Control-char repair not sufficient: {e0}")
                     json_r = None
-            else:
-                json_r = None
+            # Fix 1: Look for the last complete JSON object (balanced braces)
+            if json_r is None:
+                brace_count = 0
+                last_valid_end = -1
+                for i, char in enumerate(json_str):
+                    if char == "{":
+                        brace_count += 1
+                    elif char == "}":
+                        brace_count -= 1
+                        if brace_count == 0:
+                            last_valid_end = i
+                            break
+
+                if last_valid_end > 0:
+                    try:
+                        json_r = json.loads(json_str[: last_valid_end + 1])
+                        logger.info("Successfully fixed truncated JSON (balanced braces)")
+                    except json.JSONDecodeError:
+                        json_r = None
+                else:
+                    json_r = None
 
             # Fix 2: If still no parse (e.g. unterminated string), recover "content" or "markdown" from start
             if json_r is None and ("Unterminated string" in str(e) or "Expecting" in str(e)):
