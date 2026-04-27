@@ -29,6 +29,7 @@ from app.utils.user_helpers import (
     normalize_personality_profiles,
     USERS_COLLECTION,
 )
+from app.utils.resume_files_list import list_user_resume_files_for_login
 from app.utils.registration_notice import (
     assert_data_use_sharing_notice_accepted,
 )
@@ -979,6 +980,8 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     access_token = _make_signed_token(access_payload, jwt_secret)
     refresh_token = _make_signed_token(refresh_payload, jwt_secret)
 
+    files_list = list_user_resume_files_for_login(user_id)
+
     return UserLoginResponse(
         success=True,
         user=user_doc_to_response(user),
@@ -987,6 +990,7 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
         refresh_token=refresh_token,
         token_type="bearer",
         expires_in=access_ttl_seconds,
+        files=files_list,
     )
 
 

@@ -32,6 +32,7 @@ from app.utils.pdf_utils import read_pdf_from_bytes, read_pdf_markdown_from_byte
 from app.services.user_service import get_user_by_email
 from app.core.config import settings
 from app.db.mongodb import is_connected
+from app.utils.resume_files_list import list_user_resume_files_sync
 
 MONGODB_AVAILABLE = True  # Always available if imported successfully
 
@@ -355,35 +356,7 @@ async def list_files(user_id: Optional[str] = None, user_email: Optional[str] = 
         raise HTTPException(status_code=400, detail="user_id is required to list files")
 
     try:
-        ensure_user_s3_folder(user_id)
-        s3_client = get_s3_client()
-        bucket_name = get_s3_bucket_name()
-        
-        if not bucket_name:
-            raise HTTPException(status_code=500, detail="S3 bucket name not configured")
-
-        prefix = f"{user_id}/"
-        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
-
-        files = []
-        cover_letters_prefix = f"{user_id}/generated_cover_letters/"
-        if "Contents" in response:
-            for obj in response["Contents"]:
-                if not obj["Key"].endswith("/") and not obj["Key"].endswith(".folder_initialized"):
-                    if obj["Key"].startswith(cover_letters_prefix):
-                        continue
-                    key_after_prefix = obj["Key"][len(prefix):]
-                    if "/" in key_after_prefix:
-                        continue
-                    filename = obj["Key"].replace(prefix, "")
-                    files.append({
-                        "key": obj["Key"],
-                        "name": filename,
-                        "size": obj["Size"],
-                        "lastModified": obj["LastModified"].isoformat(),
-                    })
-
-        files.sort(key=lambda x: x["lastModified"], reverse=True)
+        files = list_user_resume_files_sync(user_id)
         logger.info(f"Listed {len(files)} files for user_id: {user_id}")
         return {"files": files}
 
