@@ -3,7 +3,7 @@ User API endpoints for registration and CRUD operations
 """
 import bcrypt
 from fastapi import HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from bson import ObjectId
@@ -19,12 +19,11 @@ from app.utils.letter_template_selection import (
 )
 import logging
 
+from app.utils.resume_files_list import list_user_resume_files_for_login
+
 logger = logging.getLogger(__name__)
 
 USERS_COLLECTION = "users"
-
-
-# Nested Models for Preferences
 class PrintMargins(BaseModel):
     top: Optional[float] = 1.0
     right: Optional[float] = 0.75
@@ -126,6 +125,10 @@ class UserLoginResponse(BaseModel):
     success: bool
     user: Optional[UserResponse] = None
     message: str
+    files: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Resume files in S3; same shape as GET /api/files/list.files",
+    )
 
 
 # Helper Functions
@@ -816,9 +819,11 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
         logger.warning(f"Could not ensure S3 folder during login: {e}")
     
     logger.info(f"User logged in: {login_data.email}")
+    files_list = list_user_resume_files_for_login(user_id)
     return UserLoginResponse(
         success=True,
         user=user_doc_to_response(user),
-        message="Login successful"
+        message="Login successful",
+        files=files_list,
     )
 

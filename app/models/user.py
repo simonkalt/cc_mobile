@@ -2,7 +2,7 @@
 User-related Pydantic models
 """
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -134,6 +134,10 @@ class UserLoginResponse(BaseModel):
     refresh_token: Optional[str] = None
     token_type: Optional[str] = "bearer"
     expires_in: Optional[int] = 86400
+    files: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Resume files in S3 for this user; same shape as GET /api/files/list.files",
+    )
 
 
 class RefreshTokenRequest(BaseModel):

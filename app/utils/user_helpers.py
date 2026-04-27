@@ -103,9 +103,16 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         app_settings["personalityProfiles"] = normalize_personality_profiles(
             app_settings.get("personalityProfiles", [])
         )
-    # Backward compatibility: normalize legacy snake_case last resume key for clients.
-    if "lastResumeUsed" not in app_settings and "last_resume_used" in app_settings:
-        app_settings["lastResumeUsed"] = app_settings.get("last_resume_used")
+    # Backward compatibility: normalize legacy last-resume keys; then always emit
+    # camelCase lastResumeUsed (string or explicit null) for login/GET parity — see
+    # documentation/API_LOGIN_RESPONSE_LAST_RESUME_USED.md
+    if "lastResumeUsed" not in app_settings:
+        if "last_resume_used" in app_settings:
+            app_settings["lastResumeUsed"] = app_settings.get("last_resume_used")
+        elif "last_resume" in app_settings:
+            app_settings["lastResumeUsed"] = app_settings.get("last_resume")
+        else:
+            app_settings["lastResumeUsed"] = None
     # Runtime-configured DOCX service base URL injected by backend.
     # This should not be persisted from client; server remains source of truth.
     app_settings["docxServiceBaseUrl"] = settings.DOCX_SERVICE_BASE_URL
