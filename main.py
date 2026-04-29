@@ -315,6 +315,7 @@ try:
         llm_config,
         personality,
         config,
+        version,
         cover_letter,
         files,
         cover_letters,
@@ -331,6 +332,7 @@ try:
     app.include_router(llm_config.router)
     app.include_router(personality.router)
     app.include_router(config.router)
+    app.include_router(version.router)
     app.include_router(cover_letter.router)
     app.include_router(files.router)
     app.include_router(cover_letters.router)

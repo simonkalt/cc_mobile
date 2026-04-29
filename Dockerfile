@@ -43,6 +43,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Copy the rest of the application
 COPY . /app
 
+# Mobile semver metadata for /api/version and app-update-policy fallbacks
+ENV VERSION_JSON_PATH=/app/version.json
+
 # Expose FastAPI port
 EXPOSE 8675
 
