@@ -186,6 +186,16 @@ class Settings:
         os.getenv("PRINT_PREVIEW_RAW_HTML", "false").lower() == "true"
     )
     
+    # Shipped mobile app semver (version.json); see documentation/API_APP_UPDATE_AND_VERSION.md
+    VERSION_JSON_PATH: Path = Path(
+        os.getenv("VERSION_JSON_PATH", str(_ROOT / "version.json"))
+    )
+    APP_UPDATE_MIN_REQUIRED_VERSION: Optional[str] = os.getenv("APP_UPDATE_MIN_REQUIRED_VERSION")
+    APP_UPDATE_LATEST_VERSION: Optional[str] = os.getenv("APP_UPDATE_LATEST_VERSION")
+    APP_UPDATE_MESSAGE: Optional[str] = os.getenv("APP_UPDATE_MESSAGE")
+    APP_UPDATE_STORE_ANDROID_URL: Optional[str] = os.getenv("APP_UPDATE_STORE_ANDROID_URL")
+    APP_UPDATE_STORE_IOS_URL: Optional[str] = os.getenv("APP_UPDATE_STORE_IOS_URL")
+
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     USE_SYSTEM_PROMPT_FILE: bool = (
