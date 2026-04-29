@@ -1201,6 +1201,13 @@ Apply this personality throughout the entire cover letter. This instruction take
                     "with a single blank line inside that slot. Do not add or remove blank lines "
                     "before/after that block relative to the template."
                 )
+            hm_company_rule = ""
+            if any("hiring manager" in t.lower() for t in ph) and any(
+                "company name" in t.lower() for t in ph
+            ):
+                hm_company_rule = """
+- <<hiring manager>> is only for a person's name (use JSON hiring_manager). If hiring_manager is empty or unknown, use one short generic addressee on that line only (e.g. Hiring Manager or Recruiting Team)—never the company name. <<company name>> is the only line for the employer's organization name; do not duplicate the company name on the hiring-manager line.
+"""
             line_layout_spec = _build_template_line_layout_spec(resolved_template_for_layout)
             template_instruction = f"""
 === TEMPLATE STRUCTURE - MATCH LINE BREAKS EXACTLY ===
@@ -1215,7 +1222,7 @@ RULES:
 - Your "content" output must reproduce this template line-for-line.
 - Replace <<placeholders>> with real data; keep every blank line exactly as shown.
 - Do not collapse, add, or remove blank lines.
-- For <<body paragraphs>>: write one or more paragraphs separated by single blank lines.
+- For <<body paragraphs>>: write one or more paragraphs separated by single blank lines.{hm_company_rule}
 
 {line_layout_spec}
 
