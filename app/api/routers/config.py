@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.utils.registration_notice import load_registration_data_use_notice
-from app.utils.shipped_app_version import default_play_store_url, load_shipped_version
+from app.services.app_version_policy_service import build_layer_b_payload
 
 logger = logging.getLogger(__name__)
 
@@ -49,25 +49,15 @@ def get_client_settings():
 def get_app_update_policy():
     """
     Layer B: optional vs required update gate for native clients. Public; no JWT.
+    Primary: MongoDB policy document; env overrides; version.json / APP_VERSION fallback.
     """
-    shipped = load_shipped_version(settings.VERSION_JSON_PATH)
-    ship_ver = (shipped.get("version") or "").strip() or settings.APP_VERSION
-
-    min_v = (settings.APP_UPDATE_MIN_REQUIRED_VERSION or "").strip() or ship_ver
-    latest_v = (settings.APP_UPDATE_LATEST_VERSION or "").strip() or ship_ver
-    msg_raw = (settings.APP_UPDATE_MESSAGE or "").strip()
-    msg: Optional[str] = msg_raw if msg_raw else None
-
-    android = (settings.APP_UPDATE_STORE_ANDROID_URL or "").strip() or default_play_store_url()
-    ios_raw = (settings.APP_UPDATE_STORE_IOS_URL or "").strip()
-    ios: Optional[str] = ios_raw if ios_raw else None
-
+    payload = build_layer_b_payload()
     return AppUpdatePolicyResponse(
-        min_required_version=min_v,
-        latest_version=latest_v,
-        update_message=msg,
-        store_android_url=android,
-        store_ios_url=ios,
+        min_required_version=payload["min_required_version"],
+        latest_version=payload["latest_version"],
+        update_message=payload["update_message"],
+        store_android_url=payload["store_android_url"],
+        store_ios_url=payload["store_ios_url"],
     )
 
 

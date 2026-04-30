@@ -90,6 +90,22 @@ def get_database():
     return mongodb_db
 
 
+def get_app_update_policy_collection():
+    """
+    Collection for the canonical mobile semver / update-policy document
+    (documentation/API_APP_UPDATE_AND_VERSION.md).
+    """
+    if mongodb_client is None:
+        return None
+    if settings.APP_UPDATE_POLICY_DB_NAME:
+        db = mongodb_client[settings.APP_UPDATE_POLICY_DB_NAME]
+    elif mongodb_db is not None:
+        db = mongodb_db
+    else:
+        return None
+    return db[settings.APP_UPDATE_POLICY_COLLECTION]
+
+
 def get_collection(collection_name: Optional[str] = None):
     """
     Get MongoDB collection instance
