@@ -1,13 +1,15 @@
 """
-Reference: app update policy + shipped version endpoints.
+Mobile app update policy — implementation in this repo:
 
-Production implementation lives in this repo:
-  - GET /api/version              -> app/api/routers/version.py
-  - GET /api/config/app-update-policy -> app/api/routers/config.py (get_app_update_policy)
-  - version.json loading          -> app/utils/shipped_app_version.py
-  - settings / env vars           -> app/core/config.py (VERSION_JSON_PATH, APP_UPDATE_*)
+- `app/services/app_version_policy_service.py` — MongoDB (primary), env overrides, version.json fallback
+- `GET /api/version` — `app/api/routers/version.py`
+- `GET /api/config/app-update-policy` — `app/api/routers/config.py` (`get_app_update_policy`)
+- Collection access — `app/db/mongodb.py` (`get_app_update_policy_collection`)
 
-Environment variables (see documentation/API_APP_UPDATE_AND_VERSION.md):
-  VERSION_JSON_PATH, APP_UPDATE_MIN_REQUIRED_VERSION, APP_UPDATE_LATEST_VERSION,
-  APP_UPDATE_MESSAGE, APP_UPDATE_STORE_ANDROID_URL, APP_UPDATE_STORE_IOS_URL
+Environment variables: see documentation/API_APP_UPDATE_AND_VERSION.md
+(`APP_UPDATE_POLICY_*`, `VERSION_JSON_PATH`, `APP_UPDATE_*` overrides).
+
+Canonical document: database **`CoverLetter`**, collection **`version`** (defaults in `app/core/config.py`; override with `APP_UPDATE_POLICY_*`).
+Resolve the document via `APP_UPDATE_POLICY_DOC_ID`, `APP_UPDATE_POLICY_DOC_FILTER_JSON`, or
+heuristic queries on `version` / `min_required_version` fields.
 """

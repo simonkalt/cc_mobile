@@ -7,8 +7,7 @@ from typing import Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.core.config import settings
-from app.utils.shipped_app_version import load_shipped_version
+from app.services.app_version_policy_service import build_layer_a_payload
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +23,10 @@ class ShippedVersionResponse(BaseModel):
 @router.get("/version", response_model=ShippedVersionResponse)
 def get_shipped_app_version():
     """
-    Layer A: semver and Android versionCode from version.json (VERSION_JSON_PATH).
+    Layer A: semver / Android metadata. Primary source: MongoDB policy document;
+    optional fallback fields from version.json (VERSION_JSON_PATH).
     """
-    data = load_shipped_version(settings.VERSION_JSON_PATH)
+    data = build_layer_a_payload()
     return ShippedVersionResponse(
         version=data.get("version"),
         androidVersionCode=data.get("androidVersionCode"),

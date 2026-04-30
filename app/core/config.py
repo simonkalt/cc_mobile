@@ -87,6 +87,24 @@ class Settings:
     MONGODB_URI: Optional[str] = os.getenv("MONGODB_URI")
     MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "CoverLetter")
     MONGODB_COLLECTION_NAME: str = os.getenv("MONGODB_COLLECTION_NAME", "users")
+
+    # Mobile app version / update policy doc (see documentation/API_APP_UPDATE_AND_VERSION.md).
+    # Default DB: same as the active connection (URI/MONGODB_DB_NAME). Override if policy lives elsewhere.
+    APP_UPDATE_POLICY_DB_NAME: Optional[str] = (
+        (os.getenv("APP_UPDATE_POLICY_DB_NAME") or "").strip() or None
+    )
+    APP_UPDATE_POLICY_COLLECTION: str = (
+        (os.getenv("APP_UPDATE_POLICY_COLLECTION") or "").strip() or "version"
+    )
+    APP_UPDATE_POLICY_DOC_ID: Optional[str] = (
+        (os.getenv("APP_UPDATE_POLICY_DOC_ID") or "").strip() or None
+    )
+    APP_UPDATE_POLICY_DOC_FILTER_JSON: Optional[str] = (
+        (os.getenv("APP_UPDATE_POLICY_DOC_FILTER_JSON") or "").strip() or None
+    )
+    APP_UPDATE_POLICY_CACHE_TTL_SECONDS: int = int(
+        os.getenv("APP_UPDATE_POLICY_CACHE_TTL_SECONDS", "60")
+    )
     
     # API Keys
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
