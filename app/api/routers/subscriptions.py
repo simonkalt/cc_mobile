@@ -10,6 +10,8 @@ from app.core.config import settings
 from app.models.user import UserResponse
 
 from app.models.subscription import (
+    AppleSubscriptionVerifyRequest,
+    AppleSubscriptionVerifyResponse,
     SubscriptionResponse,
     SubscribeRequest,
     UpgradeRequest,
@@ -33,6 +35,11 @@ from app.services.subscription_service import (
     get_subscription_plans,
     get_raw_stripe_products,
     handle_stripe_webhook_event,
+)
+from app.services.apple_subscription_service import (
+    apple_subscription_configured,
+    process_apple_server_notification_v2,
+    verify_apple_transaction_and_grant_entitlement,
 )
 
 logger = logging.getLogger(__name__)
@@ -478,6 +485,100 @@ def list_subscription(user_id: str, current_user: UserResponse = Depends(get_cur
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving subscription: {str(e)}",
         )
+
+
+@router.post("/subscriptions/apple/verify", response_model=AppleSubscriptionVerifyResponse)
+def apple_subscription_verify(
+    body: AppleSubscriptionVerifyRequest,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """
+    Verify a StoreKit 2 `signedTransaction` JWS via the App Store Server API, validate Apple's
+    `signedTransactionInfo`, and grant or refresh subscription entitlement idempotently.
+
+    Renewals and cancellations are reflected via App Store Server Notifications V2
+    (`POST /api/subscriptions/apple/notifications`).
+
+    Configure: APP_STORE_ISSUER_ID, APP_STORE_KEY_ID, APP_STORE_PRIVATE_KEY or
+    APP_STORE_PRIVATE_KEY_PATH, APP_STORE_BUNDLE_ID, APP_STORE_ROOT_CERTIFICATES_DIR,
+    APP_APPLE_ID (production verification), APP_STORE_USE_SANDBOX.
+    """
+    if str(current_user.id) != body.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="user_id does not match authenticated user",
+        )
+    try:
+        verify_apple_transaction_and_grant_entitlement(body.user_id, body.signed_transaction)
+        subscription = get_user_subscription(body.user_id)
+        return AppleSubscriptionVerifyResponse(subscription=subscription)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Apple subscription verify error for user %s: %s", body.user_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Apple subscription verification failed: {str(e)}",
+        )
+
+
+@router.post("/subscriptions/apple/notifications", include_in_schema=False)
+async def apple_server_notifications_v2(request: Request):
+    """
+    App Store Server Notifications V2 endpoint.
+
+    Apple POSTs JSON: `{ "signedPayload": "<JWS>" }`. The outer payload is verified with the
+    same root certificates as /subscriptions/apple/verify; inner signed transaction and renewal
+    JWS update the user document matched by `appleOriginalTransactionId` or `appAccountToken`.
+
+    Configure this URL in App Store Connect (same environment as APP_STORE_USE_SANDBOX).
+    Deduplicates by `notificationUUID` in collection `MONGODB_APPLE_NOTIFICATIONS_COLLECTION`.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid JSON body")
+    signed_payload = body.get("signedPayload") if isinstance(body, dict) else None
+    if not signed_payload or not isinstance(signed_payload, str):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "signedPayload is required")
+
+    if not apple_subscription_configured():
+        logger.error("Apple ASN received but App Store signing is not configured")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Apple subscription signing is not configured",
+        )
+
+    try:
+        result = process_apple_server_notification_v2(signed_payload.strip())
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Apple ASN v2 processing error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Apple notification processing failed",
+        ) from e
+
+    if not result.get("handled", True):
+        err = result.get("error", "")
+        if err == "invalid_signed_payload":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid signedPayload",
+            )
+        err_l = err.lower()
+        if any(x in err_l for x in ("not configured", "not installed", "unavailable")):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                result.get("error", "error"),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("error", "notification processing failed"),
+        )
+
+    return {"received": True, **{k: v for k, v in result.items() if k != "handled"}}
 
 
 @router.post("/subscriptions/create-payment-intent", response_model=CreatePaymentIntentResponse)

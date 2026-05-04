@@ -1,13 +1,15 @@
 """
 Subscription-related Pydantic models
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 
 
 class SubscriptionResponse(BaseModel):
     """Subscription information response"""
+    billingProvider: Optional[str] = None  # "stripe" | "apple" when subscribed; null/omitted for free
+    appleProductId: Optional[str] = None
     subscriptionId: Optional[str] = None
     subscriptionStatus: str = "free"  # free or Stripe-native status (active, trialing, incomplete, ...)
     subscriptionPlan: str = "free"  # free, basic, premium, enterprise
@@ -131,3 +133,23 @@ class PaymentIntentStatusResponse(BaseModel):
     client_secret: Optional[str] = None
     next_action: Optional[dict] = None  # For 3DS authentication
     message: str  # Human-readable status message
+
+
+class AppleSubscriptionVerifyRequest(BaseModel):
+    """Verify a StoreKit 2 transaction JWS and grant subscription entitlement."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str
+    signed_transaction: str = Field(
+        ...,
+        alias="signedTransaction",
+        description="StoreKit JWS string (signedTransaction on the device / from Transaction).",
+    )
+
+
+class AppleSubscriptionVerifyResponse(BaseModel):
+    """Response after successful Apple subscription verification."""
+
+    ok: bool = True
+    subscription: SubscriptionResponse

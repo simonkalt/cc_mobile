@@ -203,6 +203,7 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
     # Start with values from MongoDB
+    billing_provider = user.get("billingProvider")
     subscription_id = user.get("subscriptionId")
     subscription_status = user.get("subscriptionStatus", "free")
     subscription_plan = user.get("subscriptionPlan", "free")
@@ -212,8 +213,15 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     cancel_at_period_end = bool(user.get("cancelAtPeriodEnd", False))
     canceled_at = user.get("canceledAt")
 
+    def _infer_billing_provider() -> Optional[str]:
+        if billing_provider:
+            return billing_provider
+        if subscription_id and isinstance(subscription_id, str) and subscription_id.startswith("sub_"):
+            return "stripe"
+        return None
+
     # Sync with Stripe when we have a subscription ID to avoid stale "expired" dates in DB
-    if subscription_id and STRIPE_AVAILABLE:
+    if subscription_id and STRIPE_AVAILABLE and billing_provider != "apple":
         try:
             stripe_to_use = _get_stripe_module()
             if stripe_to_use:
@@ -452,7 +460,12 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                 )
     
     # If we still don't have product_id stored but have a subscription, try to get it from Stripe
-    if not product_id and subscription_id and STRIPE_AVAILABLE:
+    if (
+        not product_id
+        and subscription_id
+        and STRIPE_AVAILABLE
+        and billing_provider != "apple"
+    ):
         try:
             stripe_to_use = _get_stripe_module()
             if stripe_to_use:
@@ -509,6 +522,20 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
         except Exception as e:
             logger.error(f"Could not fetch product ID from Stripe: {e}", exc_info=True)
 
+    if billing_provider == "apple" and current_period_end:
+        try:
+            cpe = current_period_end
+            if isinstance(cpe, datetime):
+                if cpe.tzinfo is None:
+                    cpe = cpe.replace(tzinfo=timezone.utc)
+                now_utc = datetime.now(timezone.utc)
+                if cpe <= now_utc:
+                    subscription_status = "expired"
+                elif str(subscription_status).lower() not in ("expired", "revoked", "canceled"):
+                    subscription_status = "active"
+        except Exception:
+            pass
+
     # Ensure free-tier credit fields are always present in response.
     max_credits_raw = user.get("max_credits", 10)
     try:
@@ -534,7 +561,12 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     if subscription_id and not subscription_status:
         subscription_status = "incomplete"
 
+    effective_billing = _infer_billing_provider()
+    apple_product_id = user.get("appleProductId") if effective_billing == "apple" else None
+
     return SubscriptionResponse(
+        billingProvider=effective_billing,
+        appleProductId=apple_product_id,
         subscriptionId=subscription_id,
         subscriptionStatus=subscription_status,
         subscriptionPlan=subscription_plan,
