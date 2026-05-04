@@ -11,6 +11,16 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_ROOT / ".env")
 load_dotenv(_ROOT / ".secrets", override=True)
 
+
+def _env_int_optional(name: str) -> Optional[int]:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
 def _default_docx_service_base_url(debug_enabled: bool) -> str:
     deploy_env = (
         os.getenv("DEPLOYMENT_ENV")
@@ -176,6 +186,35 @@ class Settings:
     STRIPE_PRICE_ID_MONTHLY: Optional[str] = os.getenv("STRIPE_PRICE_ID_MONTHLY")
     STRIPE_PRICE_ID_ANNUAL: Optional[str] = os.getenv("STRIPE_PRICE_ID_ANNUAL")
     STRIPE_PRODUCT_CAMPAIGN: Optional[str] = os.getenv("STRIPE_PRODUCT_CAMPAIGN")
+
+    # App Store Server API (StoreKit 2 / in-app purchase verification)
+    # Root certs: download Apple Root CA – G3 (and intermediates per Apple docs) into a directory,
+    # then set APP_STORE_ROOT_CERTIFICATES_DIR to that path.
+    APP_STORE_ISSUER_ID: Optional[str] = (os.getenv("APP_STORE_ISSUER_ID") or "").strip() or None
+    APP_STORE_KEY_ID: Optional[str] = (os.getenv("APP_STORE_KEY_ID") or "").strip() or None
+    APP_STORE_PRIVATE_KEY: Optional[str] = os.getenv("APP_STORE_PRIVATE_KEY")  # PEM, optional if PATH set
+    APP_STORE_PRIVATE_KEY_PATH: Optional[str] = (
+        (os.getenv("APP_STORE_PRIVATE_KEY_PATH") or "").strip() or None
+    )
+    APP_STORE_BUNDLE_ID: Optional[str] = (os.getenv("APP_STORE_BUNDLE_ID") or "").strip() or None
+    # Numeric App Store Connect app id; required for Production JWS verification (SignedDataVerifier).
+    APP_APPLE_ID: Optional[int] = _env_int_optional("APP_APPLE_ID")
+    APP_STORE_USE_SANDBOX: bool = os.getenv("APP_STORE_USE_SANDBOX", "true").lower() == "true"
+    # If the transaction is not found in the primary environment, try the other (sandbox ↔ production).
+    APP_STORE_RETRY_ALTERNATE_ENVIRONMENT: bool = (
+        os.getenv("APP_STORE_RETRY_ALTERNATE_ENVIRONMENT", "true").lower() == "true"
+    )
+    APP_STORE_ROOT_CERTIFICATES_DIR: Optional[str] = (
+        (os.getenv("APP_STORE_ROOT_CERTIFICATES_DIR") or "").strip() or None
+    )
+    # JSON object: { "com.myapp.sub.premium": "premium" }; values become subscriptionPlan in DB.
+    APP_STORE_PRODUCT_PLAN_MAP_JSON: Optional[str] = os.getenv("APP_STORE_PRODUCT_PLAN_MAP_JSON")
+    # Comma-separated product ids; if set, rejects verify for unknown products.
+    APP_STORE_ALLOWED_PRODUCT_IDS: Optional[str] = os.getenv("APP_STORE_ALLOWED_PRODUCT_IDS")
+    # Dedup collection for App Store Server Notifications V2 (same DB as MONGODB_URI).
+    MONGODB_APPLE_NOTIFICATIONS_COLLECTION: str = os.getenv(
+        "MONGODB_APPLE_NOTIFICATIONS_COLLECTION", "apple_store_notifications"
+    )
 
     # JWT Configuration
     JWT_ENABLED: bool = os.getenv("JWT_ENABLED", "true").lower() == "true"
