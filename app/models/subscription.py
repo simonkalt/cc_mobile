@@ -22,6 +22,12 @@ class SubscriptionResponse(BaseModel):
     stripeCustomerId: Optional[str] = None
     generation_credits: int = Field(default=10, ge=0)
     max_credits: int = Field(default=10, ge=0)
+    # Unified entitlement fields (BILLING_API_CONTRACT.md).
+    # Optional so older mobile clients that don't read them stay compatible.
+    entitlement_active: Optional[bool] = None
+    can_initiate_new_paid_subscription: Optional[bool] = None
+    cross_platform_billing: Optional[bool] = None
+    entitlement_source: Optional[str] = None
 
 
 class CreatePaymentIntentRequest(BaseModel):
@@ -133,6 +139,14 @@ class PaymentIntentStatusResponse(BaseModel):
     client_secret: Optional[str] = None
     next_action: Optional[dict] = None  # For 3DS authentication
     message: str  # Human-readable status message
+
+
+class PurchaseEligibilityResponse(BaseModel):
+    """Response for GET /api/subscriptions/purchase-eligibility."""
+
+    can_initiate_new_paid_subscription: bool
+    reason: str  # "free" | "already_entitled" | "lapsed"
+    billing_provider: Optional[str] = None
 
 
 class AppleSubscriptionVerifyRequest(BaseModel):

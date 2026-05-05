@@ -30,6 +30,18 @@ from app.utils.user_helpers import USERS_COLLECTION
 
 logger = logging.getLogger(__name__)
 
+
+class AppleBillingError(Exception):
+    """Raised by the Apple subscription service for billing-specific errors that need a stable
+    machine-readable ``code`` in the HTTP response body (e.g. ``apple_validation_failed``)."""
+
+    def __init__(self, code: str, detail: str, status_code: int = 400) -> None:
+        self.code = code
+        self.detail = detail
+        self.status_code = status_code
+        super().__init__(detail)
+
+
 try:
     from appstoreserverlibrary.api_client import APIException, AppStoreServerAPIClient
     from appstoreserverlibrary.models.AutoRenewStatus import AutoRenewStatus
@@ -56,6 +68,35 @@ except ImportError:
     VerificationException = Exception  # type: ignore[misc, assignment]
     VerificationStatus = None  # type: ignore[misc, assignment]
     APPLE_STOREKIT_LIB_AVAILABLE = False
+
+
+def _ensure_apple_indexes() -> None:
+    """Create the unique-sparse index on ``appleOriginalTransactionId`` in the users collection.
+
+    Called once at application startup (after MongoDB connects).  Safe to call multiple times —
+    PyMongo ``create_index`` is idempotent when the index specification is unchanged.
+    """
+    from app.db.mongodb import get_collection, is_connected
+
+    if not is_connected():
+        logger.warning("_ensure_apple_indexes: MongoDB not connected — skipping index creation")
+        return
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        logger.warning("_ensure_apple_indexes: could not access users collection")
+        return
+    try:
+        from pymongo import ASCENDING
+
+        collection.create_index(
+            [("appleOriginalTransactionId", ASCENDING)],
+            unique=True,
+            sparse=True,
+            name="apple_original_transaction_id_unique",
+        )
+        logger.info("Apple unique index on appleOriginalTransactionId ensured")
+    except Exception as exc:
+        logger.warning("_ensure_apple_indexes: index creation failed: %s", exc)
 
 
 def apple_subscription_configured() -> bool:
@@ -210,6 +251,11 @@ def _free_tier_apple_clear_set() -> Dict[str, Any]:
         "billingProvider": None,
         "appleProductId": None,
         "appleOriginalTransactionId": None,
+        "appleLatestTransactionId": None,
+        "appleSubscriptionGroupId": None,
+        "appleEnvironment": None,
+        "appleAutoRenewStatus": None,
+        "appleLastVerifiedAt": None,
         "appleAppAccountToken": None,
         "subscriptionId": None,
         "subscriptionStatus": "free",
@@ -227,6 +273,7 @@ def _subscription_fields_from_verified_apple_tx(
     decoded_tx: Any,
     renewal: Optional[Any] = None,
     *,
+    env: Any = None,
     subscription_status_override: Optional[str] = None,
     cancel_at_period_end: Optional[bool] = None,
     canceled_at: Optional[datetime] = None,
@@ -282,10 +329,41 @@ def _subscription_fields_from_verified_apple_tx(
     if cap is None:
         cap = False
 
+    # --- extended schema fields ---
+    latest_tx_id = getattr(decoded_tx, "transactionId", None)
+    subscription_group_id = getattr(decoded_tx, "subscriptionGroupIdentifier", None)
+
+    env_str: Optional[str] = None
+    if env is not None and Environment is not None:
+        try:
+            if env == Environment.SANDBOX:
+                env_str = "sandbox"
+            elif env == Environment.PRODUCTION:
+                env_str = "production"
+            else:
+                env_str = str(env).lower()
+        except Exception:
+            env_str = str(env).lower()
+
+    auto_renew_status: Optional[bool] = None
+    if renewal is not None and AutoRenewStatus is not None:
+        ars_val = getattr(renewal, "autoRenewStatus", None)
+        if ars_val == AutoRenewStatus.ON:
+            auto_renew_status = True
+        elif ars_val == AutoRenewStatus.OFF:
+            auto_renew_status = False
+    if auto_renew_status is None:
+        auto_renew_status = not cap  # infer from cancelAtPeriodEnd when renewal info absent
+
     return {
         "billingProvider": "apple",
         "appleProductId": product_id,
         "appleOriginalTransactionId": str(original_tx_id),
+        "appleLatestTransactionId": str(latest_tx_id) if latest_tx_id else None,
+        "appleSubscriptionGroupId": str(subscription_group_id) if subscription_group_id else None,
+        "appleEnvironment": env_str,
+        "appleAutoRenewStatus": auto_renew_status,
+        "appleLastVerifiedAt": datetime.utcnow(),
         "subscriptionId": str(original_tx_id),
         "subscriptionStatus": subscription_status,
         "subscriptionPlan": subscription_plan,
@@ -485,14 +563,17 @@ def process_apple_server_notification_v2(signed_payload: str) -> Dict[str, Any]:
         )
         return {"handled": True, "no_user": True}
 
+    from app.services.entitlement_service import recompute_and_persist
+
     if NotificationTypeV2 and n_type in (NotificationTypeV2.REFUND, NotificationTypeV2.REVOKE):
         users.update_one({"_id": user_doc["_id"]}, {"$set": _free_tier_apple_clear_set()})
         logger.info(
-            "Apple notification uuid=%s: cleared subscription for user %s (type=%s)",
+            "apple_assn_received uuid=%s user=%s type=%s action=cleared",
             n_uuid,
             user_doc["_id"],
             raw_ntype,
         )
+        recompute_and_persist(str(user_doc["_id"]))
         return {"handled": True, "updated": "free", "user_id": str(user_doc["_id"])}
 
     if not tx and renewal:
@@ -501,6 +582,7 @@ def process_apple_server_notification_v2(signed_payload: str) -> Dict[str, Any]:
         if ars is not None and AutoRenewStatus is not None:
             partial["cancelAtPeriodEnd"] = ars == AutoRenewStatus.OFF
         users.update_one({"_id": user_doc["_id"]}, {"$set": partial})
+        recompute_and_persist(str(user_doc["_id"]))
         return {"handled": True, "partial_renewal_only": True, "user_id": str(user_doc["_id"])}
 
     if Type is not None and getattr(tx, "type", None) != Type.AUTO_RENEWABLE_SUBSCRIPTION:
@@ -558,6 +640,7 @@ def process_apple_server_notification_v2(signed_payload: str) -> Dict[str, Any]:
         set_doc = _subscription_fields_from_verified_apple_tx(
             tx,
             renewal,
+            env=env,
             subscription_status_override=status_override,
             cancel_at_period_end=cap_override,
             canceled_at=cat_override,
@@ -568,12 +651,13 @@ def process_apple_server_notification_v2(signed_payload: str) -> Dict[str, Any]:
 
     users.update_one({"_id": user_doc["_id"]}, {"$set": set_doc})
     logger.info(
-        "Apple notification uuid=%s user=%s type=%s status=%s",
+        "apple_assn_received uuid=%s user=%s type=%s status=%s",
         n_uuid,
         user_doc["_id"],
         raw_ntype,
         set_doc.get("subscriptionStatus"),
     )
+    recompute_and_persist(str(user_doc["_id"]))
     return {"handled": True, "updated": True, "user_id": str(user_doc["_id"])}
 
 
@@ -619,16 +703,18 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
     try:
         unsafe = _decode_jws_payload_unverified(signed_transaction)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="Invalid signed_transaction JWS",
+            status_code=400,
         ) from e
 
     transaction_id = unsafe.get("transactionId")
     if not transaction_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="JWS payload missing transactionId",
+            status_code=400,
         )
 
     _env, decoded = _fetch_transaction_with_fallback(str(transaction_id))
@@ -685,9 +771,10 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
         existing_token = user.get("appleAppAccountToken")
         if existing_token:
             if str(existing_token).strip().lower() != token_norm:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
+                raise AppleBillingError(
+                    code="user_mismatch",
                     detail="App account token does not match this user",
+                    status_code=403,
                 )
 
     conflict = collection.find_one(
@@ -697,17 +784,19 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
         }
     )
     if conflict:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+        raise AppleBillingError(
+            code="transaction_already_consumed",
             detail="This Apple subscription is already linked to another account",
+            status_code=409,
         )
 
     try:
-        set_doc = _subscription_fields_from_verified_apple_tx(decoded, None)
+        set_doc = _subscription_fields_from_verified_apple_tx(decoded, None, env=_env)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail=str(e),
+            status_code=400,
         ) from e
 
     set_doc["cancelAtPeriodEnd"] = False
@@ -719,10 +808,14 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
     collection.update_one({"_id": user_id_obj}, {"$set": set_doc})
     period_end = set_doc.get("subscriptionCurrentPeriodEnd")
     logger.info(
-        "Apple subscription verified user=%s original_tx=%s product=%s status=%s expires=%s",
+        "apple_verify_ok user_id=%s original_tx=%s product=%s status=%s expires=%s",
         user_id,
         original_tx_id,
         product_id,
         set_doc.get("subscriptionStatus"),
         period_end.isoformat() if isinstance(period_end, datetime) else period_end,
     )
+
+    # Recompute and persist unified entitlement fields (Step 3).
+    from app.services.entitlement_service import recompute_and_persist
+    recompute_and_persist(user_id)
