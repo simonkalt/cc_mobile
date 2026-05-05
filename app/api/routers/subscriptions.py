@@ -5,6 +5,7 @@ Subscription management API routes
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request, status, Depends
+from fastapi.responses import JSONResponse
 from app.core.auth import get_current_user, get_optional_current_user
 from app.core.config import settings
 from app.models.user import UserResponse
@@ -12,6 +13,7 @@ from app.models.user import UserResponse
 from app.models.subscription import (
     AppleSubscriptionVerifyRequest,
     AppleSubscriptionVerifyResponse,
+    PurchaseEligibilityResponse,
     SubscriptionResponse,
     SubscribeRequest,
     UpgradeRequest,
@@ -37,6 +39,7 @@ from app.services.subscription_service import (
     handle_stripe_webhook_event,
 )
 from app.services.apple_subscription_service import (
+    AppleBillingError,
     apple_subscription_configured,
     process_apple_server_notification_v2,
     verify_apple_transaction_and_grant_entitlement,
@@ -49,6 +52,18 @@ router = APIRouter(
     tags=["subscriptions"],
     # No router-level dependencies - protect endpoints individually
 )
+
+
+def _billing_http_error(code: str, detail: str, status_code: int) -> JSONResponse:
+    """Return a JSONResponse with a stable machine-readable ``code`` alongside ``detail``.
+
+    Mobile clients log the ``code`` field for structured error tracking; the ``detail`` field
+    is human-readable.  Example: ``{"detail": "...", "code": "apple_validation_failed"}``.
+    """
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": detail, "code": code},
+    )
 
 
 @router.get(
@@ -456,31 +471,88 @@ async def get_raw_products(
         )
 
 
-@router.get("/subscriptions/{user_id}", response_model=SubscriptionResponse)
-def list_subscription(user_id: str, current_user: UserResponse = Depends(get_current_user)):
-    """
-    Get user's subscription information
+@router.get(
+    "/subscriptions/purchase-eligibility",
+    response_model=PurchaseEligibilityResponse,
+)
+def purchase_eligibility(
+    request: Request,
+    platform: str = "",
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Return whether the authenticated user can start a new paid subscription.
 
-    Args:
-        user_id: User ID
-
-    Returns:
-        SubscriptionResponse with subscription details
+    Query param ``?platform=ios`` or ``?platform=android`` is optional; if provided it is used
+    to compute ``cross_platform_billing``.  Mobile may also rely on
+    ``GET /api/subscriptions/{user_id}`` which exposes the same fields.
     """
-    logger.info(f"Subscription request received for user_id: {user_id}")
+    from app.db.mongodb import get_collection, is_connected
+    from app.services.entitlement_service import compute_eligibility
+    from app.utils.user_helpers import USERS_COLLECTION
+    from bson import ObjectId
+
+    platform_str = platform or request.headers.get("X-Client-Platform") or None
+
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
     try:
-        subscription = get_user_subscription(user_id)
+        user_id_obj = ObjectId(str(current_user.id))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        )
+
+    user_doc = collection.find_one({"_id": user_id_obj})
+    if not user_doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    eligibility = compute_eligibility(user_doc, platform=platform_str)
+    return PurchaseEligibilityResponse(**eligibility)
+
+
+@router.get("/subscriptions/{user_id}", response_model=SubscriptionResponse)
+def list_subscription(
+    user_id: str,
+    request: Request,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """
+    Get user's subscription information.
+
+    Reads the optional ``X-Client-Platform`` header (``ios`` | ``android``) to compute
+    ``cross_platform_billing`` in the response.
+    """
+    client_platform = request.headers.get("X-Client-Platform") or None
+    logger.info(
+        "Subscription request received for user_id=%s platform=%s", user_id, client_platform
+    )
+    try:
+        subscription = get_user_subscription(user_id, client_platform=client_platform)
         logger.info(
-            f"Successfully retrieved subscription for user {user_id}: status={subscription.subscriptionStatus}"
+            "Successfully retrieved subscription for user %s: status=%s entitlement_active=%s",
+            user_id,
+            subscription.subscriptionStatus,
+            subscription.entitlement_active,
         )
         return subscription
     except HTTPException as e:
         logger.warning(
-            f"HTTP error retrieving subscription for user {user_id}: {e.status_code} - {e.detail}"
+            "HTTP error retrieving subscription for user %s: %s - %s",
+            user_id, e.status_code, e.detail,
         )
         raise
     except Exception as e:
-        logger.error(f"Error retrieving subscription for user {user_id}: {e}", exc_info=True)
+        logger.error("Error retrieving subscription for user %s: %s", user_id, e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving subscription: {str(e)}",
@@ -504,21 +576,29 @@ def apple_subscription_verify(
     APP_APPLE_ID (production verification), APP_STORE_USE_SANDBOX.
     """
     if str(current_user.id) != body.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+        return _billing_http_error(
+            code="user_mismatch",
             detail="user_id does not match authenticated user",
+            status_code=status.HTTP_403_FORBIDDEN,
         )
     try:
         verify_apple_transaction_and_grant_entitlement(body.user_id, body.signed_transaction)
         subscription = get_user_subscription(body.user_id)
         return AppleSubscriptionVerifyResponse(subscription=subscription)
+    except AppleBillingError as e:
+        logger.warning(
+            "Apple billing error for user %s: code=%s detail=%s",
+            body.user_id, e.code, e.detail,
+        )
+        return _billing_http_error(code=e.code, detail=e.detail, status_code=e.status_code)
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Apple subscription verify error for user %s: %s", body.user_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        return _billing_http_error(
+            code="apple_validation_failed",
             detail=f"Apple subscription verification failed: {str(e)}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
