@@ -661,10 +661,28 @@ def process_apple_server_notification_v2(signed_payload: str) -> Dict[str, Any]:
     return {"handled": True, "updated": True, "user_id": str(user_doc["_id"])}
 
 
-def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transaction: str) -> None:
+def _optional_client_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
+
+
+def verify_apple_transaction_and_grant_entitlement(
+    user_id: str,
+    signed_transaction: str,
+    *,
+    client_product_id: Optional[str] = None,
+    client_transaction_id: Optional[str] = None,
+    client_original_transaction_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+) -> None:
     """
     Validate signed_transaction with App Store Server API + SignedDataVerifier, then $set user entitlement.
     Idempotent for the same originalTransactionId on the same user. Conflict if another user holds the sub.
+
+    Optional client-reported IDs (``product_id``, ``transaction_id``, ``original_transaction_id``)
+    are compared to Apple's verified payload when provided (BILLING_APPLE_VERIFY_AND_ASSN.md).
     """
     if not APPLE_STOREKIT_LIB_AVAILABLE:
         raise HTTPException(
@@ -700,9 +718,24 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    logger.info(
+        "apple_verify_start user_id=%s correlation_id=%s client_product_id=%s "
+        "client_transaction_id=%s client_original_transaction_id=%s",
+        user_id,
+        correlation_id or "-",
+        client_product_id or "-",
+        client_transaction_id or "-",
+        client_original_transaction_id or "-",
+    )
+
     try:
         unsafe = _decode_jws_payload_unverified(signed_transaction)
     except Exception as e:
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=jws_decode",
+            user_id,
+            correlation_id or "-",
+        )
         raise AppleBillingError(
             code="apple_validation_failed",
             detail="Invalid signed_transaction JWS",
@@ -711,6 +744,11 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
 
     transaction_id = unsafe.get("transactionId")
     if not transaction_id:
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=missing_transaction_id_in_jws",
+            user_id,
+            correlation_id or "-",
+        )
         raise AppleBillingError(
             code="apple_validation_failed",
             detail="JWS payload missing transactionId",
@@ -720,49 +758,132 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
     _env, decoded = _fetch_transaction_with_fallback(str(transaction_id))
 
     if str(unsafe.get("transactionId") or "") != str(getattr(decoded, "transactionId", None) or ""):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=client_jws_tx_mismatch",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="Client JWS transactionId does not match App Store signed transaction",
+            status_code=400,
         )
 
     if Type is not None and getattr(decoded, "type", None) != Type.AUTO_RENEWABLE_SUBSCRIPTION:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=not_auto_renewable",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="Transaction is not an auto-renewable subscription",
+            status_code=400,
         )
 
     product_id = getattr(decoded, "productId", None)
     if not product_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=missing_product_id",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="Verified transaction missing productId",
+            status_code=400,
+        )
+
+    hint_p = _optional_client_id(client_product_id)
+    if hint_p is not None and str(product_id) != hint_p:
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=product_id_mismatch",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
+            detail="product_id does not match verified transaction",
+            status_code=400,
+        )
+
+    verified_tx_id = str(getattr(decoded, "transactionId", None) or "")
+    hint_tx = _optional_client_id(client_transaction_id)
+    if hint_tx is not None and verified_tx_id != hint_tx:
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=transaction_id_mismatch",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
+            detail="transaction_id does not match verified transaction",
+            status_code=400,
         )
 
     allowed = _allowed_product_ids()
     if allowed is not None and product_id not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=product_not_allowed product_id=%s",
+            user_id,
+            correlation_id or "-",
+            product_id,
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="Subscription product is not allowed for this server",
+            status_code=400,
         )
 
     original_tx_id = getattr(decoded, "originalTransactionId", None)
     if not original_tx_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=missing_original_tx_id",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="Verified transaction missing originalTransactionId",
+            status_code=400,
+        )
+
+    hint_orig = _optional_client_id(client_original_transaction_id)
+    if hint_orig is not None and str(original_tx_id) != hint_orig:
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=original_transaction_id_mismatch",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
+            detail="original_transaction_id does not match verified transaction",
+            status_code=400,
         )
 
     if getattr(decoded, "revocationDate", None):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=revoked",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="This transaction has been revoked",
+            status_code=400,
         )
 
     expires_ms = getattr(decoded, "expiresDate", None)
     if expires_ms is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        logger.warning(
+            "apple_verify_fail user_id=%s correlation_id=%s reason=missing_expires_date",
+            user_id,
+            correlation_id or "-",
+        )
+        raise AppleBillingError(
+            code="apple_validation_failed",
             detail="Verified subscription transaction missing expiresDate",
+            status_code=400,
         )
 
     token = getattr(decoded, "appAccountToken", None)
@@ -808,8 +929,10 @@ def verify_apple_transaction_and_grant_entitlement(user_id: str, signed_transact
     collection.update_one({"_id": user_id_obj}, {"$set": set_doc})
     period_end = set_doc.get("subscriptionCurrentPeriodEnd")
     logger.info(
-        "apple_verify_ok user_id=%s original_tx=%s product=%s status=%s expires=%s",
+        "apple_verify_ok user_id=%s correlation_id=%s transaction_id=%s original_tx=%s product=%s status=%s expires=%s",
         user_id,
+        correlation_id or "-",
+        verified_tx_id,
         original_tx_id,
         product_id,
         set_doc.get("subscriptionStatus"),

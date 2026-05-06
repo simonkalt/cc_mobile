@@ -56,9 +56,24 @@ class TestAppleVerifyEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert "subscription" in body
+        assert "data" in body
+        assert body["data"]["billingProvider"] == body["subscription"]["billingProvider"]
         assert body["subscription"]["billingProvider"] == "apple"
         assert body["subscription"]["entitlement_active"] is True
         assert body["subscription"]["can_initiate_new_paid_subscription"] is False
+
+    def test_accepts_snake_case_body_per_contract(self, client, _apple_success):
+        resp = client.post(
+            "/api/subscriptions/apple/verify",
+            json={
+                "user_id": FAKE_USER_ID,
+                "signed_transaction": "dummy.jws.token",
+                "product_id": "MONTHLY001",
+                "transaction_id": "tx-1",
+                "original_transaction_id": "orig-1",
+            },
+        )
+        assert resp.status_code == 200
 
     def test_user_id_mismatch_returns_user_mismatch_code(self, client):
         """Authenticated user ID doesn't match the body user_id."""
