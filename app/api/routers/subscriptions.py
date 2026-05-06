@@ -562,6 +562,7 @@ def list_subscription(
 @router.post("/subscriptions/apple/verify", response_model=AppleSubscriptionVerifyResponse)
 def apple_subscription_verify(
     body: AppleSubscriptionVerifyRequest,
+    request: Request,
     current_user: UserResponse = Depends(get_current_user),
 ):
     """
@@ -581,9 +582,20 @@ def apple_subscription_verify(
             detail="user_id does not match authenticated user",
             status_code=status.HTTP_403_FORBIDDEN,
         )
+    correlation_id = request.headers.get("X-Billing-Correlation-Id")
+    client_platform = request.headers.get("X-Client-Platform") or None
     try:
-        verify_apple_transaction_and_grant_entitlement(body.user_id, body.signed_transaction)
-        subscription = get_user_subscription(body.user_id)
+        verify_apple_transaction_and_grant_entitlement(
+            body.user_id,
+            body.signed_transaction,
+            client_product_id=body.product_id,
+            client_transaction_id=body.transaction_id,
+            client_original_transaction_id=body.original_transaction_id,
+            correlation_id=correlation_id,
+        )
+        subscription = get_user_subscription(
+            body.user_id, client_platform=client_platform
+        )
         return AppleSubscriptionVerifyResponse(subscription=subscription)
     except AppleBillingError as e:
         logger.warning(

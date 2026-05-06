@@ -282,6 +282,46 @@ class TestVerifyErrorCodes:
         assert exc_info.value.code == "user_mismatch"
         assert exc_info.value.status_code == 403
 
+    def test_client_product_id_mismatch_gives_apple_validation_failed(self):
+        from app.services.apple_subscription_service import (
+            AppleBillingError,
+            verify_apple_transaction_and_grant_entitlement,
+        )
+        import mongomock
+
+        mc = mongomock.MongoClient()
+        col = mc["test"]["users"]
+        col.insert_one({"_id": FAKE_USER_OBJ_ID, "subscriptionStatus": "free"})
+
+        decoded = _make_decoded_tx(product_id="com.example.monthly")
+        env = _make_sandbox_env()
+
+        patches = self._apple_service_patches(col) + [
+            patch(
+                "app.services.apple_subscription_service._fetch_transaction_with_fallback",
+                return_value=(env, decoded),
+            ),
+            patch(
+                "app.services.apple_subscription_service._decode_jws_payload_unverified",
+                return_value={"transactionId": "TX-001"},
+            ),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            with pytest.raises(AppleBillingError) as exc_info:
+                verify_apple_transaction_and_grant_entitlement(
+                    FAKE_USER_ID,
+                    "dummy.jws.payload",
+                    client_product_id="wrong.product",
+                )
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert exc_info.value.code == "apple_validation_failed"
+        assert exc_info.value.status_code == 400
+
 
 # ---------------------------------------------------------------------------
 # Full persist path — all new fields written, idempotent

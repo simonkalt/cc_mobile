@@ -57,6 +57,32 @@ Apple-specific fields when `billing_provider === "apple"`: see [BILLING_MONGODB_
 
 **Errors:** JSON with `detail` and preferably `code`: `apple_validation_failed`, `user_mismatch`, `transaction_already_consumed`, etc.
 
+### Server checklist (needed for Settings → Billing UI after Apple purchase)
+
+The iOS client **must** persist entitlement on your side; Apple’s “purchase successful” sheet does not update MongoDB.
+
+1. **Implement `POST /api/subscriptions/apple/verify`** (or proxy to another service): decode and validate `signed_transaction` (**StoreKit 2-style JWS**) with **App Store Server API** — including **sandbox**, **StoreKit Xcode local testing**, and **production**. If validation only accepts production keys, Xcode Test / Simulator purchases will succeed on-device but **`verify` returns 4xx**, the mobile user sees **“Could not confirm subscription with our servers”**, **`GET /api/subscriptions/{user}` stays on free tier**, and no user document fields appear.
+
+2. **After successful verify**, update the subscription / user record with at least ([`BILLING_MONGODB_SCHEMA.md`](./BILLING_MONGODB_SCHEMA.md)):
+   - `billing_provider`: `"apple"`
+   - Apple identifiers (`apple_product_id`, `apple_original_transaction_id`, etc.)
+   - `subscription_current_period_end` (ISO string from decoded renewal / expiry)
+   - `subscription_status`: use a value the client treats as active (see below)
+
+3. **`GET /api/subscriptions/{user_id}` must reflect the new state immediately** (same read model the app already calls via `getUserSubscription`). The mobile app deduces “active Apple subscription” and switches from **Subscribe with Apple** to **App Store subscription / Manage subscription** using:
+
+   - `subscription_status` / `subscriptionStatus`: **`active`** or **`trialing`** (preferred), **or**
+   - `entitlement_active` / `entitlementActive`: **`true`**, **or**
+   - a future `subscription_current_period_end` later than “now” together with a stable subscription id / plan.
+
+4. **Expose Apple SKU on the snapshot** — at least one of:
+   - `apple_product_id` / `appleProductId`: e.g. `MONTHLY001`, `SIXMONTH001`, `ANNUAL001` (aligned with [`src/utils/constants.js`](../src/utils/constants.js)), **or**
+   - `product_id` / `productId` set to that **App Store SKU** when `billing_provider === "apple"`.
+
+If `billing_provider` is missing, all Apple SKUs missing, and status stays `free`, the UX will **never leave the storefront** despite a finished StoreKit transaction.
+
+See also [STOREKIT_LOCAL_TESTING.md](./STOREKIT_LOCAL_TESTING.md) (local `.storekit` JWS ≠ production receipts).
+
 ---
 
 ## GET `/api/subscriptions/purchase-eligibility` (optional)
@@ -82,3 +108,4 @@ Mobile may use this **or** only the extended `GET /api/subscriptions/{user_id}` 
 - [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md)
 - [BILLING_APPLE_VERIFY_AND_ASSN.md](./BILLING_APPLE_VERIFY_AND_ASSN.md)
 - [BILLING_UNIFIED_ENTITLEMENT_AND_ELIGIBILITY.md](./BILLING_UNIFIED_ENTITLEMENT_AND_ELIGIBILITY.md)
+- [STOREKIT_LOCAL_TESTING.md](./STOREKIT_LOCAL_TESTING.md)

@@ -12,12 +12,14 @@ Mobile sends (snake_case):
 
 ### Server responsibilities
 
-1. Validate JWS with **App Store Server API** (or equivalent) for the correct bundle ID and environment (sandbox vs production).
+1. Validate JWS with **App Store Server API** (or equivalent) for the correct bundle ID and environment (**production**, **App Store sandbox**, and **Xcode StoreKit local testing** each require the matching validation path / keys).
 2. Confirm `original_transaction_id` / `product_id` match decoded payload.
 3. **Idempotent update:** same `original_transaction_id` + user should not create duplicate billing records.
 4. Persist Apple fields from [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md); set `billing_provider` to `"apple"`.
 5. **Recompute unified entitlement** (Stripe + Apple → `entitlement_active`, `can_initiate_new_paid_subscription`, etc.).
 6. Return updated subscription JSON (same shape as `GET /api/subscriptions/:userId`) or `{ data: {...} }` / `{ subscription: {...} }`.
+
+Implementation details required for Settings → Billing to update after Xcode StoreKit Testing or Sandbox are summarized in **[BILLING_API_CONTRACT.md](./BILLING_API_CONTRACT.md)** under `POST /api/subscriptions/apple/verify` (server checklist).
 
 ### Error codes (suggested)
 

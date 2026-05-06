@@ -1,7 +1,7 @@
 """
 Subscription-related Pydantic models
 """
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from typing import Optional
 from datetime import datetime
 
@@ -150,20 +150,50 @@ class PurchaseEligibilityResponse(BaseModel):
 
 
 class AppleSubscriptionVerifyRequest(BaseModel):
-    """Verify a StoreKit 2 transaction JWS and grant subscription entitlement."""
+    """Verify a StoreKit 2 transaction JWS and grant subscription entitlement.
+
+    Mobile may send snake_case (contract) or camelCase; both are accepted for interoperability.
+    Optional ``product_id`` / ``transaction_id`` / ``original_transaction_id`` are cross-checked
+    against Apple's verified transaction payload when provided.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
     user_id: str
     signed_transaction: str = Field(
         ...,
-        alias="signedTransaction",
-        description="StoreKit JWS string (signedTransaction on the device / from Transaction).",
+        validation_alias=AliasChoices("signed_transaction", "signedTransaction"),
+        description="StoreKit JWS string (signedTransaction / purchaseToken from the client).",
+    )
+    product_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("product_id", "productId"),
+    )
+    transaction_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("transaction_id", "transactionId"),
+    )
+    original_transaction_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices(
+            "original_transaction_id", "originalTransactionId"
+        ),
     )
 
 
 class AppleSubscriptionVerifyResponse(BaseModel):
-    """Response after successful Apple subscription verification."""
+    """Response after successful Apple subscription verification.
+
+    ``data`` mirrors ``subscription`` when omitted so clients that unwrap ``data``
+    (BILLING_API_CONTRACT.md) work without change.
+    """
 
     ok: bool = True
     subscription: SubscriptionResponse
+    data: Optional[SubscriptionResponse] = None
+
+    @model_validator(mode="after")
+    def _data_defaults_to_subscription(self):
+        if self.data is None:
+            object.__setattr__(self, "data", self.subscription)
+        return self
