@@ -11,6 +11,8 @@ from app.core.config import settings
 from app.models.user import UserResponse
 
 from app.models.subscription import (
+    AppleCatalogProductItem,
+    AppleCatalogResponse,
     AppleSubscriptionVerifyRequest,
     AppleSubscriptionVerifyResponse,
     PurchaseEligibilityResponse,
@@ -518,6 +520,37 @@ def purchase_eligibility(
 
     eligibility = compute_eligibility(user_doc, platform=platform_str)
     return PurchaseEligibilityResponse(**eligibility)
+
+
+@router.get("/subscriptions/apple/catalog", response_model=AppleCatalogResponse)
+def apple_subscription_product_catalog(
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """
+    iOS / Apple subscription product tiers from MongoDB ``subscription_product_catalog``
+    (``planKey``, ``rank``, labels). Same source as ``applePlanKey`` / ``applePlanRank`` on
+    ``GET /api/subscriptions/{user_id}`` when ``billingProvider`` is Apple.
+    """
+    from app.services.subscription_product_catalog_service import (
+        ios_apple_catalog_environment_label,
+        list_ios_apple_catalog_products,
+    )
+
+    rows = list_ios_apple_catalog_products()
+    products = [
+        AppleCatalogProductItem(
+            productId=p.get("productId"),
+            planKey=p.get("planKey"),
+            rank=p.get("rank"),
+            enabled=bool(p.get("enabled", True)),
+            label=p.get("label"),
+        )
+        for p in rows
+    ]
+    return AppleCatalogResponse(
+        products=products,
+        environment=ios_apple_catalog_environment_label(),
+    )
 
 
 @router.get("/subscriptions/{user_id}", response_model=SubscriptionResponse)

@@ -215,6 +215,11 @@ class Settings:
     MONGODB_APPLE_NOTIFICATIONS_COLLECTION: str = os.getenv(
         "MONGODB_APPLE_NOTIFICATIONS_COLLECTION", "apple_store_notifications"
     )
+    # Remote config: iOS/Android subscription product ids, planKey, rank (see BILLING_MONGODB_SCHEMA.md).
+    MONGODB_SUBSCRIPTION_PRODUCT_CATALOG_COLLECTION: str = os.getenv(
+        "MONGODB_SUBSCRIPTION_PRODUCT_CATALOG_COLLECTION",
+        "subscription_product_catalog",
+    )
 
     # JWT Configuration
     JWT_ENABLED: bool = os.getenv("JWT_ENABLED", "true").lower() == "true"

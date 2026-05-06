@@ -21,6 +21,7 @@ Mobile callers live in [`src/services/subscriptionService.js`](../src/services/s
 | PUT | `/api/subscriptions/upgrade` | Change Stripe plan |
 | POST | `/api/subscriptions/cancel` | Body: `user_id`, `cancel_immediately` |
 | POST | `/api/subscriptions/apple/verify` | Verify StoreKit JWS; persist Apple entitlement |
+| GET | `/api/subscriptions/apple/catalog` | iOS/Apple tier config from Mongo (`planKey`, `rank`, labels); authenticated |
 
 ---
 
@@ -34,8 +35,20 @@ In addition to existing fields (`subscription_status`, `subscription_plan`, `sub
 | `can_initiate_new_paid_subscription` | boolean | `false` when already entitled via Stripe **or** Apple |
 | `cross_platform_billing` | boolean | Management on another surface (see unified entitlement doc) |
 | `entitlement_source` | `"stripe"` \| `"apple"` \| null | Optional |
+| `applePlanKey` | string \| null | When `billingProvider === "apple"` and SKU maps in `subscription_product_catalog`: logical plan (`monthly`, `semiannual`, `annual`, …) |
+| `applePlanRank` | integer \| null | Same condition: integer rank for upgrade/disable UX (higher = higher tier in catalog) |
 
-Apple-specific fields when `billing_provider === "apple"`: see [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md).
+Apple-specific fields when `billing_provider === "apple"`: see [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md). Catalog document layout: **subscription_product_catalog** collection.
+
+---
+
+## GET `/api/subscriptions/apple/catalog`
+
+**Auth:** Bearer JWT (same as other subscription reads).
+
+**Response (JSON):** `environment` (`sandbox` \| `production`, aligned with `APP_STORE_USE_SANDBOX`) and `products[]` with `productId`, `planKey`, `rank`, `enabled`, optional `label` — sorted by `rank` then `productId`. Used to render StoreKit offering rows without hard-coding SKUs; combine with `applePlanKey` / `applePlanRank` on `GET /api/subscriptions/{user_id}` for Manage vs Subscribe vs disabled states.
+
+See also [IOS_APPLE_SUBSCRIPTION_TIER_UX.md](./IOS_APPLE_SUBSCRIPTION_TIER_UX.md) for client-side rank rules.
 
 ---
 
