@@ -3,7 +3,8 @@ Billing correlation middleware and logging filter.
 
 Behaviour
 ---------
-For every request whose path starts with ``/api/subscriptions`` or ``/api/stripe/webhook``:
+For every request whose path starts with ``/api/subscriptions``, ``/api/webhooks/apple``,
+or ``/api/stripe/webhook``:
 
 1. Reads ``X-Billing-Correlation-Id`` from the incoming request.
 2. Generates a UUID4 when the header is absent.
@@ -34,7 +35,11 @@ _billing_correlation_id: ContextVar[str] = ContextVar(
     "_billing_correlation_id", default=""
 )
 
-_BILLING_PATH_PREFIXES = ("/api/subscriptions", "/api/stripe/webhook")
+_BILLING_PATH_PREFIXES = (
+    "/api/subscriptions",
+    "/api/webhooks/apple",
+    "/api/stripe/webhook",
+)
 
 
 class BillingCorrelationMiddleware(BaseHTTPMiddleware):
