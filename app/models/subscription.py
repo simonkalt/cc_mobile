@@ -28,6 +28,26 @@ class SubscriptionResponse(BaseModel):
     can_initiate_new_paid_subscription: Optional[bool] = None
     cross_platform_billing: Optional[bool] = None
     entitlement_source: Optional[str] = None
+    # iOS / Apple — resolved from Mongo ``subscription_product_catalog`` (Phase 1 plan rank UX).
+    applePlanKey: Optional[str] = None
+    applePlanRank: Optional[int] = None
+
+
+class AppleCatalogProductItem(BaseModel):
+    """One row from Mongo iOS/Apple subscription_product_catalog.products."""
+
+    productId: Optional[str] = None
+    planKey: Optional[str] = None
+    rank: Optional[int] = None
+    enabled: bool = True
+    label: Optional[str] = None
+
+
+class AppleCatalogResponse(BaseModel):
+    """Response for GET /api/subscriptions/apple/catalog."""
+
+    products: list[AppleCatalogProductItem]
+    environment: Optional[str] = None  # catalog doc environment used (production | sandbox)
 
 
 class CreatePaymentIntentRequest(BaseModel):

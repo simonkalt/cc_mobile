@@ -310,6 +310,8 @@ def get_user_subscription(
                                 stripeCustomerId=stripe_customer_id,
                                 generation_credits=user.get("generation_credits", 10),
                                 max_credits=user.get("max_credits", 10),
+                                applePlanKey=None,
+                                applePlanRank=None,
                             )
                     except Exception as choose_exc:
                         logger.warning(
@@ -346,6 +348,8 @@ def get_user_subscription(
                         stripeCustomerId=stripe_customer_id,
                         generation_credits=user.get("generation_credits", 10),
                         max_credits=user.get("max_credits", 10),
+                        applePlanKey=None,
+                        applePlanRank=None,
                     )
 
                 logger.info(
@@ -578,6 +582,20 @@ def get_user_subscription(
     from app.services.entitlement_service import compute_entitlement
     _ent = compute_entitlement(_ent_doc, client_platform=client_platform)
 
+    apple_plan_key = None
+    apple_plan_rank = None
+    if effective_billing == "apple":
+        from app.services.subscription_product_catalog_service import (
+            resolve_ios_apple_product,
+        )
+
+        apple_sku = (
+            user.get("appleProductId")
+            or user.get("subscriptionProductId")
+            or product_id
+        )
+        apple_plan_key, apple_plan_rank = resolve_ios_apple_product(apple_sku)
+
     return SubscriptionResponse(
         billingProvider=effective_billing,
         appleProductId=apple_product_id,
@@ -597,6 +615,8 @@ def get_user_subscription(
         can_initiate_new_paid_subscription=_ent["can_initiate_new_paid_subscription"],
         cross_platform_billing=_ent["cross_platform_billing"],
         entitlement_source=_ent["entitlement_source"],
+        applePlanKey=apple_plan_key,
+        applePlanRank=apple_plan_rank,
     )
 
 

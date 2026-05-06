@@ -171,16 +171,10 @@ def _load_root_certificates() -> List[bytes]:
 
 
 def _product_plan_map() -> Dict[str, str]:
-    raw = settings.APP_STORE_PRODUCT_PLAN_MAP_JSON
-    if not raw or not str(raw).strip():
-        return {}
-    try:
-        data = json.loads(raw)
-        if isinstance(data, dict):
-            return {str(k): str(v) for k, v in data.items()}
-    except json.JSONDecodeError as e:
-        logger.warning("APP_STORE_PRODUCT_PLAN_MAP_JSON is not valid JSON: %s", e)
-    return {}
+    """SKU → persisted ``subscriptionPlan`` value; Mongo catalog overrides env JSON."""
+    from app.services.subscription_product_catalog_service import merged_apple_product_plan_map
+
+    return merged_apple_product_plan_map()
 
 
 def _allowed_product_ids() -> Optional[set]:
