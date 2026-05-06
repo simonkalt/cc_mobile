@@ -570,7 +570,7 @@ def apple_subscription_verify(
     `signedTransactionInfo`, and grant or refresh subscription entitlement idempotently.
 
     Renewals and cancellations are reflected via App Store Server Notifications V2
-    (`POST /api/subscriptions/apple/notifications`).
+    (`POST /api/webhooks/apple/subscriptions`, legacy: `POST /api/subscriptions/apple/notifications`).
 
     Configure: APP_STORE_ISSUER_ID, APP_STORE_KEY_ID, APP_STORE_PRIVATE_KEY or
     APP_STORE_PRIVATE_KEY_PATH, APP_STORE_BUNDLE_ID, APP_STORE_ROOT_CERTIFICATES_DIR,
@@ -614,17 +614,15 @@ def apple_subscription_verify(
         )
 
 
-@router.post("/subscriptions/apple/notifications", include_in_schema=False)
-async def apple_server_notifications_v2(request: Request):
+async def _handle_apple_store_server_notification_v2(request: Request):
     """
-    App Store Server Notifications V2 endpoint.
+    App Store Server Notifications v2 — shared implementation.
 
-    Apple POSTs JSON: `{ "signedPayload": "<JWS>" }`. The outer payload is verified with the
-    same root certificates as /subscriptions/apple/verify; inner signed transaction and renewal
-    JWS update the user document matched by `appleOriginalTransactionId` or `appAccountToken`.
+    Apple POSTs JSON: ``{ "signedPayload": "<JWS>" }``. The outer payload is verified with the
+    same root certificates as ``/subscriptions/apple/verify``; inner signed transaction and
+    renewal JWS update the user matched by ``appleOriginalTransactionId`` or ``appAccountToken``.
 
-    Configure this URL in App Store Connect (same environment as APP_STORE_USE_SANDBOX).
-    Deduplicates by `notificationUUID` in collection `MONGODB_APPLE_NOTIFICATIONS_COLLECTION`.
+    Deduplicates by ``notificationUUID`` in collection ``MONGODB_APPLE_NOTIFICATIONS_COLLECTION``.
     """
     try:
         body = await request.json()
@@ -671,6 +669,29 @@ async def apple_server_notifications_v2(request: Request):
         )
 
     return {"received": True, **{k: v for k, v in result.items() if k != "handled"}}
+
+
+@router.post("/webhooks/apple/subscriptions", include_in_schema=False)
+async def apple_subscription_webhook(request: Request):
+    """
+    **Canonical webhook URL** for App Store Server Notifications v2 (subscription lifecycle).
+
+    Register this URL in App Store Connect for both Production and Sandbox, matching
+    ``APP_STORE_USE_SANDBOX`` and your deployment environment.
+
+    Request body: ``{ "signedPayload": "<JWS>" }`` (Apple-assigned format; no auth header).
+    """
+    return await _handle_apple_store_server_notification_v2(request)
+
+
+@router.post("/subscriptions/apple/notifications", include_in_schema=False)
+async def apple_server_notifications_v2(request: Request):
+    """
+    Legacy alias for App Store Server Notifications v2.
+
+    Prefer ``POST /api/webhooks/apple/subscriptions`` for new App Store Connect configuration.
+    """
+    return await _handle_apple_store_server_notification_v2(request)
 
 
 @router.post("/subscriptions/create-payment-intent", response_model=CreatePaymentIntentResponse)
