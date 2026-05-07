@@ -31,6 +31,9 @@ Env (same as backend)
   APP_STORE_USE_SANDBOX=true|false   (default sandbox base URL when not using --production)
 
 Dependencies: PyJWT, cryptography, requests (and python-dotenv optional for .env loading)
+
+Use ``--require-nonempty-history`` if you want exit code 5 when credentials work but
+history is empty (wrong/placeholder ``originalTransactionId``).
 """
 
 from __future__ import annotations
@@ -204,6 +207,11 @@ def main() -> None:
         action="store_true",
         help="Try sandbox then production",
     )
+    p.add_argument(
+        "--require-nonempty-history",
+        action="store_true",
+        help="Exit 5 if HTTP 200 but signedTransactions is empty (JWT ok but id not linked to purchases)",
+    )
     args = p.parse_args()
 
     if not args.identifier:
@@ -274,16 +282,32 @@ def main() -> None:
             else:
                 data = last_resp.json()
                 n = len(data.get("signedTransactions") or [])
+                print(
+                    "\n--- Interpretation ---\n"
+                    "  • Credentials: OK — Apple returned HTTP 200 (JWT + key + issuer accepted).\n"
+                )
                 if n:
                     print(
-                        f"\nPASS: HTTP 200 — JWT is valid; history contains "
-                        f"{n} signedTransaction(s)."
+                        f"  • Transaction history for this id: {n} signedTransaction(s) — "
+                        "full check passed.\n"
                     )
-                else:
+                    sys.exit(0)
+                print(
+                    "  • Transaction history for this id: EMPTY.\n\n"
+                    "Apple often responds 200 with an empty signedTransactions array when "
+                    "the requested originalTransactionId is not tied to sandbox purchases "
+                    "for this bundle — e.g. a placeholder/example id, typo, or .storekit-only id.\n\n"
+                    "Next step: use the originalTransactionId from a real Sandbox purchase "
+                    "(device / TestFlight), or try:\n"
+                    "  .venv/bin/python scripts/validate_app_store_sandbox_api.py "
+                    "--transaction-info <renewal_transaction_id_from_logs>\n"
+                )
+                if args.require_nonempty_history:
                     print(
-                        "\nPASS: HTTP 200 — empty signedTransactions "
-                        "(unusual for a known purchase)."
+                        "FAIL: --require-nonempty-history set and history is empty (exit 5).",
+                        file=sys.stderr,
                     )
+                    sys.exit(5)
             sys.exit(0)
 
         _print_response_summary(last_resp)
