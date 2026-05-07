@@ -51,3 +51,6 @@ EXPOSE 8675
 
 # Start FastAPI with Uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8675"]
+
+# Start the document editor server (uat).  Remove for production.
+CMD ["curl", "https://syncfusion-uat.onrender.com"]

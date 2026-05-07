@@ -128,12 +128,19 @@ def _decode_jws_payload_unverified(jws: str) -> Dict[str, Any]:
 def _load_signing_key_bytes() -> bytes:
     if settings.APP_STORE_PRIVATE_KEY_PATH:
         path = Path(settings.APP_STORE_PRIVATE_KEY_PATH).expanduser()
-        if not path.is_file():
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="App Store private key file not found (APP_STORE_PRIVATE_KEY_PATH)",
-            )
-        return path.read_bytes()
+        if path.is_file():
+            return path.read_bytes()
+        # Path set but missing (wrong cwd, Docker without keys/, typo): fall back to PEM in env
+        pem = (settings.APP_STORE_PRIVATE_KEY or "").strip()
+        if pem:
+            raw = settings.APP_STORE_PRIVATE_KEY or ""
+            if "\\n" in raw:
+                raw = raw.replace("\\n", "\n")
+            return raw.encode("utf-8")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="App Store private key file not found (APP_STORE_PRIVATE_KEY_PATH)",
+        )
     pem = settings.APP_STORE_PRIVATE_KEY or ""
     if not pem.strip():
         raise HTTPException(
