@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 from fastapi import Request, status
 import logging
 
+from app.core.billing_correlation import BillingCorrelationFilter, BillingCorrelationMiddleware
 from app.core.config import settings, get_cors_origins
 from app.core.logging_config import setup_logging
 from app.db.mongodb import connect_to_mongodb, close_mongodb_connection
@@ -38,15 +39,25 @@ setup_logging()
 
 logger = logging.getLogger(__name__)
 
+# Attach billing correlation filter to the root logger so every log record emitted
+# during a billing request automatically carries billing_correlation_id.
+logging.getLogger().addFilter(BillingCorrelationFilter())
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan event handler for startup and shutdown"""
     # Startup
     connect_to_mongodb()
-    
+
+    try:
+        from app.services.apple_subscription_service import _ensure_apple_indexes
+        _ensure_apple_indexes()
+    except Exception as _idx_exc:
+        logger.warning("Could not ensure Apple DB indexes at startup: %s", _idx_exc)
+
     yield
-    
+
     # Shutdown
     close_mongodb_connection()
 
@@ -73,6 +84,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Billing correlation id — echo X-Billing-Correlation-Id on all subscription and webhook routes.
+app.add_middleware(BillingCorrelationMiddleware)
 
 # Add exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -104,6 +118,7 @@ try:
         llm_config,
         personality,
         config,
+        version,
         cover_letter,
         files,
         cover_letters,
@@ -112,11 +127,13 @@ try:
         email,
         integration,
         letter_templates,
+        subscriptions,
     )
     app.include_router(job_url.router)
     app.include_router(llm_config.router)
     app.include_router(personality.router)
     app.include_router(config.router)
+    app.include_router(version.router)
     app.include_router(cover_letter.router)
     app.include_router(files.router)
     app.include_router(cover_letters.router)
@@ -125,6 +142,7 @@ try:
     app.include_router(email.router)
     app.include_router(integration.router)
     app.include_router(letter_templates.router)
+    app.include_router(subscriptions.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 

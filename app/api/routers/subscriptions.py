@@ -5,11 +5,17 @@ Subscription management API routes
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request, status, Depends
+from fastapi.responses import JSONResponse
 from app.core.auth import get_current_user, get_optional_current_user
 from app.core.config import settings
 from app.models.user import UserResponse
 
 from app.models.subscription import (
+    AppleCatalogProductItem,
+    AppleCatalogResponse,
+    AppleSubscriptionVerifyRequest,
+    AppleSubscriptionVerifyResponse,
+    PurchaseEligibilityResponse,
     SubscriptionResponse,
     SubscribeRequest,
     UpgradeRequest,
@@ -34,6 +40,12 @@ from app.services.subscription_service import (
     get_raw_stripe_products,
     handle_stripe_webhook_event,
 )
+from app.services.apple_subscription_service import (
+    AppleBillingError,
+    apple_subscription_configured,
+    process_apple_server_notification_v2,
+    verify_apple_transaction_and_grant_entitlement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +54,18 @@ router = APIRouter(
     tags=["subscriptions"],
     # No router-level dependencies - protect endpoints individually
 )
+
+
+def _billing_http_error(code: str, detail: str, status_code: int) -> JSONResponse:
+    """Return a JSONResponse with a stable machine-readable ``code`` alongside ``detail``.
+
+    Mobile clients log the ``code`` field for structured error tracking; the ``detail`` field
+    is human-readable.  Example: ``{"detail": "...", "code": "apple_validation_failed"}``.
+    """
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": detail, "code": code},
+    )
 
 
 @router.get(
@@ -449,35 +473,258 @@ async def get_raw_products(
         )
 
 
-@router.get("/subscriptions/{user_id}", response_model=SubscriptionResponse)
-def list_subscription(user_id: str, current_user: UserResponse = Depends(get_current_user)):
-    """
-    Get user's subscription information
+@router.get(
+    "/subscriptions/purchase-eligibility",
+    response_model=PurchaseEligibilityResponse,
+)
+def purchase_eligibility(
+    request: Request,
+    platform: str = "",
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Return whether the authenticated user can start a new paid subscription.
 
-    Args:
-        user_id: User ID
-
-    Returns:
-        SubscriptionResponse with subscription details
+    Query param ``?platform=ios`` or ``?platform=android`` is optional; if provided it is used
+    to compute ``cross_platform_billing``.  Mobile may also rely on
+    ``GET /api/subscriptions/{user_id}`` which exposes the same fields.
     """
-    logger.info(f"Subscription request received for user_id: {user_id}")
+    from app.db.mongodb import get_collection, is_connected
+    from app.services.entitlement_service import compute_eligibility
+    from app.utils.user_helpers import USERS_COLLECTION
+    from bson import ObjectId
+
+    platform_str = platform or request.headers.get("X-Client-Platform") or None
+
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
     try:
-        subscription = get_user_subscription(user_id)
+        user_id_obj = ObjectId(str(current_user.id))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        )
+
+    user_doc = collection.find_one({"_id": user_id_obj})
+    if not user_doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    eligibility = compute_eligibility(user_doc, platform=platform_str)
+    return PurchaseEligibilityResponse(**eligibility)
+
+
+@router.get("/subscriptions/apple/catalog", response_model=AppleCatalogResponse)
+def apple_subscription_product_catalog(
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """
+    iOS / Apple subscription product tiers from MongoDB ``subscription_product_catalog``
+    (``planKey``, ``rank``, labels). Same source as ``applePlanKey`` / ``applePlanRank`` on
+    ``GET /api/subscriptions/{user_id}`` when ``billingProvider`` is Apple.
+    """
+    from app.services.subscription_product_catalog_service import (
+        ios_apple_catalog_environment_label,
+        list_ios_apple_catalog_products,
+    )
+
+    rows = list_ios_apple_catalog_products()
+    products = [
+        AppleCatalogProductItem(
+            productId=p.get("productId"),
+            planKey=p.get("planKey"),
+            rank=p.get("rank"),
+            enabled=bool(p.get("enabled", True)),
+            label=p.get("label"),
+        )
+        for p in rows
+    ]
+    return AppleCatalogResponse(
+        products=products,
+        environment=ios_apple_catalog_environment_label(),
+    )
+
+
+@router.get("/subscriptions/{user_id}", response_model=SubscriptionResponse)
+def list_subscription(
+    user_id: str,
+    request: Request,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """
+    Get user's subscription information.
+
+    Reads the optional ``X-Client-Platform`` header (``ios`` | ``android``) to compute
+    ``cross_platform_billing`` in the response.
+    """
+    client_platform = request.headers.get("X-Client-Platform") or None
+    logger.info(
+        "Subscription request received for user_id=%s platform=%s", user_id, client_platform
+    )
+    try:
+        subscription = get_user_subscription(user_id, client_platform=client_platform)
         logger.info(
-            f"Successfully retrieved subscription for user {user_id}: status={subscription.subscriptionStatus}"
+            "Successfully retrieved subscription for user %s: status=%s entitlement_active=%s",
+            user_id,
+            subscription.subscriptionStatus,
+            subscription.entitlement_active,
         )
         return subscription
     except HTTPException as e:
         logger.warning(
-            f"HTTP error retrieving subscription for user {user_id}: {e.status_code} - {e.detail}"
+            "HTTP error retrieving subscription for user %s: %s - %s",
+            user_id, e.status_code, e.detail,
         )
         raise
     except Exception as e:
-        logger.error(f"Error retrieving subscription for user {user_id}: {e}", exc_info=True)
+        logger.error("Error retrieving subscription for user %s: %s", user_id, e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving subscription: {str(e)}",
         )
+
+
+@router.post("/subscriptions/apple/verify", response_model=AppleSubscriptionVerifyResponse)
+def apple_subscription_verify(
+    body: AppleSubscriptionVerifyRequest,
+    request: Request,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """
+    Verify a StoreKit 2 `signedTransaction` JWS via the App Store Server API, validate Apple's
+    `signedTransactionInfo`, and grant or refresh subscription entitlement idempotently.
+
+    Renewals and cancellations are reflected via App Store Server Notifications V2
+    (`POST /api/webhooks/apple/subscriptions`, legacy: `POST /api/subscriptions/apple/notifications`).
+
+    Configure: APP_STORE_ISSUER_ID, APP_STORE_KEY_ID, APP_STORE_PRIVATE_KEY or
+    APP_STORE_PRIVATE_KEY_PATH, APP_STORE_BUNDLE_ID, APP_STORE_ROOT_CERTIFICATES_DIR,
+    APP_APPLE_ID (production verification), APP_STORE_USE_SANDBOX.
+    """
+    if str(current_user.id) != body.user_id:
+        return _billing_http_error(
+            code="user_mismatch",
+            detail="user_id does not match authenticated user",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+    correlation_id = request.headers.get("X-Billing-Correlation-Id")
+    client_platform = request.headers.get("X-Client-Platform") or None
+    try:
+        verify_apple_transaction_and_grant_entitlement(
+            body.user_id,
+            body.signed_transaction,
+            client_product_id=body.product_id,
+            client_transaction_id=body.transaction_id,
+            client_original_transaction_id=body.original_transaction_id,
+            correlation_id=correlation_id,
+        )
+        subscription = get_user_subscription(
+            body.user_id, client_platform=client_platform
+        )
+        return AppleSubscriptionVerifyResponse(subscription=subscription)
+    except AppleBillingError as e:
+        logger.warning(
+            "Apple billing error for user %s: code=%s detail=%s",
+            body.user_id, e.code, e.detail,
+        )
+        return _billing_http_error(code=e.code, detail=e.detail, status_code=e.status_code)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Apple subscription verify error for user %s: %s", body.user_id, e, exc_info=True)
+        return _billing_http_error(
+            code="apple_validation_failed",
+            detail=f"Apple subscription verification failed: {str(e)}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+async def _handle_apple_store_server_notification_v2(request: Request):
+    """
+    App Store Server Notifications v2 — shared implementation.
+
+    Apple POSTs JSON: ``{ "signedPayload": "<JWS>" }``. The outer payload is verified with the
+    same root certificates as ``/subscriptions/apple/verify``; inner signed transaction and
+    renewal JWS update the user matched by ``appleOriginalTransactionId`` or ``appAccountToken``.
+
+    Deduplicates by ``notificationUUID`` in collection ``MONGODB_APPLE_NOTIFICATIONS_COLLECTION``.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid JSON body")
+    signed_payload = body.get("signedPayload") if isinstance(body, dict) else None
+    if not signed_payload or not isinstance(signed_payload, str):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "signedPayload is required")
+
+    if not apple_subscription_configured():
+        logger.error("Apple ASN received but App Store signing is not configured")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Apple subscription signing is not configured",
+        )
+
+    try:
+        result = process_apple_server_notification_v2(signed_payload.strip())
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Apple ASN v2 processing error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Apple notification processing failed",
+        ) from e
+
+    if not result.get("handled", True):
+        err = result.get("error", "")
+        if err == "invalid_signed_payload":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid signedPayload",
+            )
+        err_l = err.lower()
+        if any(x in err_l for x in ("not configured", "not installed", "unavailable")):
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                result.get("error", "error"),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("error", "notification processing failed"),
+        )
+
+    return {"received": True, **{k: v for k, v in result.items() if k != "handled"}}
+
+
+@router.post("/webhooks/apple/subscriptions", include_in_schema=False)
+async def apple_subscription_webhook(request: Request):
+    """
+    **Canonical webhook URL** for App Store Server Notifications v2 (subscription lifecycle).
+
+    Register this URL in App Store Connect for both Production and Sandbox, matching
+    ``APP_STORE_USE_SANDBOX`` and your deployment environment.
+
+    Request body: ``{ "signedPayload": "<JWS>" }`` (Apple-assigned format; no auth header).
+    """
+    return await _handle_apple_store_server_notification_v2(request)
+
+
+@router.post("/subscriptions/apple/notifications", include_in_schema=False)
+async def apple_server_notifications_v2(request: Request):
+    """
+    Legacy alias for App Store Server Notifications v2.
+
+    Prefer ``POST /api/webhooks/apple/subscriptions`` for new App Store Connect configuration.
+    """
+    return await _handle_apple_store_server_notification_v2(request)
 
 
 @router.post("/subscriptions/create-payment-intent", response_model=CreatePaymentIntentResponse)

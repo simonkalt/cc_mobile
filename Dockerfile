@@ -43,6 +43,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Copy the rest of the application
 COPY . /app
 
+# Optional: baked semver fallback when Atlas fields are absent (see API_APP_UPDATE_AND_VERSION.md)
+ENV VERSION_JSON_PATH=/app/version.json
+
 # Expose FastAPI port
 EXPOSE 8675
 

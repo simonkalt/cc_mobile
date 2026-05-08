@@ -168,15 +168,20 @@ else:
     logger.warning("Stripe library not available - subscription features will not work")
 
 
-def get_user_subscription(user_id: str) -> SubscriptionResponse:
+def get_user_subscription(
+    user_id: str,
+    client_platform: Optional[str] = None,
+) -> SubscriptionResponse:
     """
-    Get user's subscription information from database
-    
+    Get user's subscription information from database.
+
     Args:
-        user_id: User ID
-        
+        user_id: User ID.
+        client_platform: ``"ios"`` or ``"android"`` — used to compute
+            ``cross_platform_billing`` in the response.
+
     Returns:
-        SubscriptionResponse with subscription details
+        SubscriptionResponse with subscription details.
     """
     if not is_connected():
         raise HTTPException(
@@ -203,6 +208,7 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
     # Start with values from MongoDB
+    billing_provider = user.get("billingProvider")
     subscription_id = user.get("subscriptionId")
     subscription_status = user.get("subscriptionStatus", "free")
     subscription_plan = user.get("subscriptionPlan", "free")
@@ -212,8 +218,15 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     cancel_at_period_end = bool(user.get("cancelAtPeriodEnd", False))
     canceled_at = user.get("canceledAt")
 
+    def _infer_billing_provider() -> Optional[str]:
+        if billing_provider:
+            return billing_provider
+        if subscription_id and isinstance(subscription_id, str) and subscription_id.startswith("sub_"):
+            return "stripe"
+        return None
+
     # Sync with Stripe when we have a subscription ID to avoid stale "expired" dates in DB
-    if subscription_id and STRIPE_AVAILABLE:
+    if subscription_id and STRIPE_AVAILABLE and billing_provider != "apple":
         try:
             stripe_to_use = _get_stripe_module()
             if stripe_to_use:
@@ -297,6 +310,8 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                                 stripeCustomerId=stripe_customer_id,
                                 generation_credits=user.get("generation_credits", 10),
                                 max_credits=user.get("max_credits", 10),
+                                applePlanKey=None,
+                                applePlanRank=None,
                             )
                     except Exception as choose_exc:
                         logger.warning(
@@ -333,6 +348,8 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                         stripeCustomerId=stripe_customer_id,
                         generation_credits=user.get("generation_credits", 10),
                         max_credits=user.get("max_credits", 10),
+                        applePlanKey=None,
+                        applePlanRank=None,
                     )
 
                 logger.info(
@@ -452,7 +469,12 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
                 )
     
     # If we still don't have product_id stored but have a subscription, try to get it from Stripe
-    if not product_id and subscription_id and STRIPE_AVAILABLE:
+    if (
+        not product_id
+        and subscription_id
+        and STRIPE_AVAILABLE
+        and billing_provider != "apple"
+    ):
         try:
             stripe_to_use = _get_stripe_module()
             if stripe_to_use:
@@ -509,6 +531,20 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
         except Exception as e:
             logger.error(f"Could not fetch product ID from Stripe: {e}", exc_info=True)
 
+    if billing_provider == "apple" and current_period_end:
+        try:
+            cpe = current_period_end
+            if isinstance(cpe, datetime):
+                if cpe.tzinfo is None:
+                    cpe = cpe.replace(tzinfo=timezone.utc)
+                now_utc = datetime.now(timezone.utc)
+                if cpe <= now_utc:
+                    subscription_status = "expired"
+                elif str(subscription_status).lower() not in ("expired", "revoked", "canceled"):
+                    subscription_status = "active"
+        except Exception:
+            pass
+
     # Ensure free-tier credit fields are always present in response.
     max_credits_raw = user.get("max_credits", 10)
     try:
@@ -534,7 +570,35 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
     if subscription_id and not subscription_status:
         subscription_status = "incomplete"
 
+    effective_billing = _infer_billing_provider()
+    apple_product_id = user.get("appleProductId") if effective_billing == "apple" else None
+
+    # Build a minimal projection doc for entitlement computation using current (possibly
+    # Stripe-refreshed) values rather than stale DB values.
+    _ent_doc = dict(user)
+    _ent_doc["billingProvider"] = effective_billing
+    _ent_doc["subscriptionStatus"] = subscription_status
+
+    from app.services.entitlement_service import compute_entitlement
+    _ent = compute_entitlement(_ent_doc, client_platform=client_platform)
+
+    apple_plan_key = None
+    apple_plan_rank = None
+    if effective_billing == "apple":
+        from app.services.subscription_product_catalog_service import (
+            resolve_ios_apple_product,
+        )
+
+        apple_sku = (
+            user.get("appleProductId")
+            or user.get("subscriptionProductId")
+            or product_id
+        )
+        apple_plan_key, apple_plan_rank = resolve_ios_apple_product(apple_sku)
+
     return SubscriptionResponse(
+        billingProvider=effective_billing,
+        appleProductId=apple_product_id,
         subscriptionId=subscription_id,
         subscriptionStatus=subscription_status,
         subscriptionPlan=subscription_plan,
@@ -547,6 +611,12 @@ def get_user_subscription(user_id: str) -> SubscriptionResponse:
         stripeCustomerId=user.get("stripeCustomerId"),
         generation_credits=generation_credits,
         max_credits=max_credits,
+        entitlement_active=_ent["entitlement_active"],
+        can_initiate_new_paid_subscription=_ent["can_initiate_new_paid_subscription"],
+        cross_platform_billing=_ent["cross_platform_billing"],
+        entitlement_source=_ent["entitlement_source"],
+        applePlanKey=apple_plan_key,
+        applePlanRank=apple_plan_rank,
     )
 
 
@@ -614,11 +684,18 @@ def update_user_subscription(
     update_data = {k: v for k, v in update_data.items() if v is not None}
     
     result = collection.update_one({"_id": user_id_obj}, {"$set": update_data})
-    
+
     if result.matched_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    
+
     logger.info(f"Updated subscription for user {user_id}")
+
+    # Persist unified entitlement fields after every subscription write.
+    try:
+        from app.services.entitlement_service import recompute_and_persist
+        recompute_and_persist(user_id)
+    except Exception as _ent_exc:
+        logger.warning("entitlement_recompute_fail after update_user_subscription user=%s: %s", user_id, _ent_exc)
 
 
 def create_stripe_customer(user_id: str, email: str, name: Optional[str] = None) -> str:
@@ -2345,8 +2422,11 @@ def handle_stripe_webhook_event(event: dict) -> dict:
         )
 
         logger.info(
-            "Webhook %s: updated user %s -> status=%s sub=%s",
-            event_type, user_id, stripe_status, sub_id,
+            "stripe_webhook_%s user=%s status=%s sub=%s",
+            event_type.replace("customer.subscription.", ""),
+            user_id,
+            stripe_status,
+            sub_id,
         )
         result["action"] = "updated"
         result["user_id"] = user_id
@@ -2381,7 +2461,14 @@ def handle_stripe_webhook_event(event: dict) -> dict:
                     "dateUpdated": datetime.utcnow(),
                 }},
             )
-        logger.info("Webhook customer.deleted: reset user %s (customer %s)", user_id, customer_id)
+        logger.info(
+            "stripe_webhook_customer_deleted user=%s customer=%s", user_id, customer_id
+        )
+        try:
+            from app.services.entitlement_service import recompute_and_persist
+            recompute_and_persist(user_id)
+        except Exception as _ent_exc:
+            logger.warning("entitlement_recompute_fail after customer.deleted user=%s: %s", user_id, _ent_exc)
         result["action"] = "reset_to_free"
         result["user_id"] = user_id
         return result

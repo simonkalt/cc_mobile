@@ -3,16 +3,26 @@ Configuration API routes
 """
 import logging
 import json
-from pathlib import Path
+from typing import Optional
+
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.utils.registration_notice import load_registration_data_use_notice
+from app.services.app_version_policy_service import build_layer_b_payload
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/config", tags=["config"])
+
+
+class AppUpdatePolicyResponse(BaseModel):
+    min_required_version: str
+    latest_version: str
+    update_message: Optional[str] = None
+    store_android_url: str
+    store_ios_url: Optional[str] = None
 
 
 @router.get("/client-settings")
@@ -33,6 +43,22 @@ def get_client_settings():
         "termsOfServiceUrl": settings.PUBLIC_TERMS_OF_SERVICE_URL,
         "registrationDataUseNotice": load_registration_data_use_notice(),
     }
+
+
+@router.get("/app-update-policy", response_model=AppUpdatePolicyResponse)
+def get_app_update_policy():
+    """
+    Layer B: optional vs required update gate for native clients. Public; no JWT.
+    Primary: MongoDB policy document; env overrides; version.json / APP_VERSION fallback.
+    """
+    payload = build_layer_b_payload()
+    return AppUpdatePolicyResponse(
+        min_required_version=payload["min_required_version"],
+        latest_version=payload["latest_version"],
+        update_message=payload["update_message"],
+        store_android_url=payload["store_android_url"],
+        store_ios_url=payload["store_ios_url"],
+    )
 
 
 @router.get("/google-places-key")

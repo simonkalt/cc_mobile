@@ -1,13 +1,15 @@
 """
 Subscription-related Pydantic models
 """
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from typing import Optional
 from datetime import datetime
 
 
 class SubscriptionResponse(BaseModel):
     """Subscription information response"""
+    billingProvider: Optional[str] = None  # "stripe" | "apple" when subscribed; null/omitted for free
+    appleProductId: Optional[str] = None
     subscriptionId: Optional[str] = None
     subscriptionStatus: str = "free"  # free or Stripe-native status (active, trialing, incomplete, ...)
     subscriptionPlan: str = "free"  # free, basic, premium, enterprise
@@ -20,6 +22,32 @@ class SubscriptionResponse(BaseModel):
     stripeCustomerId: Optional[str] = None
     generation_credits: int = Field(default=10, ge=0)
     max_credits: int = Field(default=10, ge=0)
+    # Unified entitlement fields (BILLING_API_CONTRACT.md).
+    # Optional so older mobile clients that don't read them stay compatible.
+    entitlement_active: Optional[bool] = None
+    can_initiate_new_paid_subscription: Optional[bool] = None
+    cross_platform_billing: Optional[bool] = None
+    entitlement_source: Optional[str] = None
+    # iOS / Apple — resolved from Mongo ``subscription_product_catalog`` (Phase 1 plan rank UX).
+    applePlanKey: Optional[str] = None
+    applePlanRank: Optional[int] = None
+
+
+class AppleCatalogProductItem(BaseModel):
+    """One row from Mongo iOS/Apple subscription_product_catalog.products."""
+
+    productId: Optional[str] = None
+    planKey: Optional[str] = None
+    rank: Optional[int] = None
+    enabled: bool = True
+    label: Optional[str] = None
+
+
+class AppleCatalogResponse(BaseModel):
+    """Response for GET /api/subscriptions/apple/catalog."""
+
+    products: list[AppleCatalogProductItem]
+    environment: Optional[str] = None  # catalog doc environment used (production | sandbox)
 
 
 class CreatePaymentIntentRequest(BaseModel):
@@ -131,3 +159,61 @@ class PaymentIntentStatusResponse(BaseModel):
     client_secret: Optional[str] = None
     next_action: Optional[dict] = None  # For 3DS authentication
     message: str  # Human-readable status message
+
+
+class PurchaseEligibilityResponse(BaseModel):
+    """Response for GET /api/subscriptions/purchase-eligibility."""
+
+    can_initiate_new_paid_subscription: bool
+    reason: str  # "free" | "already_entitled" | "lapsed"
+    billing_provider: Optional[str] = None
+
+
+class AppleSubscriptionVerifyRequest(BaseModel):
+    """Verify a StoreKit 2 transaction JWS and grant subscription entitlement.
+
+    Mobile may send snake_case (contract) or camelCase; both are accepted for interoperability.
+    Optional ``product_id`` / ``transaction_id`` / ``original_transaction_id`` are cross-checked
+    against Apple's verified transaction payload when provided.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str
+    signed_transaction: str = Field(
+        ...,
+        validation_alias=AliasChoices("signed_transaction", "signedTransaction"),
+        description="StoreKit JWS string (signedTransaction / purchaseToken from the client).",
+    )
+    product_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("product_id", "productId"),
+    )
+    transaction_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("transaction_id", "transactionId"),
+    )
+    original_transaction_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices(
+            "original_transaction_id", "originalTransactionId"
+        ),
+    )
+
+
+class AppleSubscriptionVerifyResponse(BaseModel):
+    """Response after successful Apple subscription verification.
+
+    ``data`` mirrors ``subscription`` when omitted so clients that unwrap ``data``
+    (BILLING_API_CONTRACT.md) work without change.
+    """
+
+    ok: bool = True
+    subscription: SubscriptionResponse
+    data: Optional[SubscriptionResponse] = None
+
+    @model_validator(mode="after")
+    def _data_defaults_to_subscription(self):
+        if self.data is None:
+            object.__setattr__(self, "data", self.subscription)
+        return self

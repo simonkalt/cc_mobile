@@ -12,6 +12,31 @@ load_dotenv(_ROOT / ".env")
 load_dotenv(_ROOT / ".secrets", override=True)
 
 
+def _env_int_optional(name: str) -> Optional[int]:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+def _default_docx_service_base_url(debug_enabled: bool) -> str:
+    deploy_env = (
+        os.getenv("DEPLOYMENT_ENV")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("APP_ENV")
+        or os.getenv("EXPO_PUBLIC_BUILD_TYPE")
+        or ("development" if debug_enabled else "production")
+    ).strip().lower()
+
+    if deploy_env in {"production", "prod", "live"}:
+        return "https://api.saimonsoft.com"
+    if deploy_env in {"uat", "staging", "stage", "preview"}:
+        return "https://syncfusion-uat.onrender.com"
+    return "http://192.168.0.8:5000"
+
+
 class Settings:
     """Application settings loaded from environment variables"""
     
@@ -35,6 +60,10 @@ class Settings:
     PUBLIC_TERMS_OF_SERVICE_URL: str = (
         (os.getenv("PUBLIC_TERMS_OF_SERVICE_URL") or "").strip()
         or "https://www.saimonsoft.com/website/docs/terms-of-service.html"
+    )
+    DOCX_SERVICE_BASE_URL: str = (
+        (os.getenv("DOCX_SERVICE_BASE_URL") or "").strip()
+        or _default_docx_service_base_url(DEBUG)
     )
 
     # Registration: Data Use & Sharing Notice copy (editable JSON in repo root by default)
@@ -68,6 +97,24 @@ class Settings:
     MONGODB_URI: Optional[str] = os.getenv("MONGODB_URI")
     MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "CoverLetter")
     MONGODB_COLLECTION_NAME: str = os.getenv("MONGODB_COLLECTION_NAME", "users")
+
+    # Mobile app version / update policy doc (see documentation/API_APP_UPDATE_AND_VERSION.md).
+    # Default DB: same as the active connection (URI/MONGODB_DB_NAME). Override if policy lives elsewhere.
+    APP_UPDATE_POLICY_DB_NAME: Optional[str] = (
+        (os.getenv("APP_UPDATE_POLICY_DB_NAME") or "").strip() or None
+    )
+    APP_UPDATE_POLICY_COLLECTION: str = (
+        (os.getenv("APP_UPDATE_POLICY_COLLECTION") or "").strip() or "version"
+    )
+    APP_UPDATE_POLICY_DOC_ID: Optional[str] = (
+        (os.getenv("APP_UPDATE_POLICY_DOC_ID") or "").strip() or None
+    )
+    APP_UPDATE_POLICY_DOC_FILTER_JSON: Optional[str] = (
+        (os.getenv("APP_UPDATE_POLICY_DOC_FILTER_JSON") or "").strip() or None
+    )
+    APP_UPDATE_POLICY_CACHE_TTL_SECONDS: int = int(
+        os.getenv("APP_UPDATE_POLICY_CACHE_TTL_SECONDS", "60")
+    )
     
     # API Keys
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
@@ -140,6 +187,40 @@ class Settings:
     STRIPE_PRICE_ID_ANNUAL: Optional[str] = os.getenv("STRIPE_PRICE_ID_ANNUAL")
     STRIPE_PRODUCT_CAMPAIGN: Optional[str] = os.getenv("STRIPE_PRODUCT_CAMPAIGN")
 
+    # App Store Server API (StoreKit 2 / in-app purchase verification)
+    # Root certs: download Apple Root CA – G3 (and intermediates per Apple docs) into a directory,
+    # then set APP_STORE_ROOT_CERTIFICATES_DIR to that path.
+    APP_STORE_ISSUER_ID: Optional[str] = (os.getenv("APP_STORE_ISSUER_ID") or "").strip() or None
+    APP_STORE_KEY_ID: Optional[str] = (os.getenv("APP_STORE_KEY_ID") or "").strip() or None
+    APP_STORE_PRIVATE_KEY: Optional[str] = os.getenv("APP_STORE_PRIVATE_KEY")  # PEM, optional if PATH set
+    APP_STORE_PRIVATE_KEY_PATH: Optional[str] = (
+        (os.getenv("APP_STORE_PRIVATE_KEY_PATH") or "").strip() or None
+    )
+    APP_STORE_BUNDLE_ID: Optional[str] = (os.getenv("APP_STORE_BUNDLE_ID") or "").strip() or None
+    # Numeric App Store Connect app id; required for Production JWS verification (SignedDataVerifier).
+    APP_APPLE_ID: Optional[int] = _env_int_optional("APP_APPLE_ID")
+    APP_STORE_USE_SANDBOX: bool = os.getenv("APP_STORE_USE_SANDBOX", "true").lower() == "true"
+    # If the transaction is not found in the primary environment, try the other (sandbox ↔ production).
+    APP_STORE_RETRY_ALTERNATE_ENVIRONMENT: bool = (
+        os.getenv("APP_STORE_RETRY_ALTERNATE_ENVIRONMENT", "true").lower() == "true"
+    )
+    APP_STORE_ROOT_CERTIFICATES_DIR: Optional[str] = (
+        (os.getenv("APP_STORE_ROOT_CERTIFICATES_DIR") or "").strip() or None
+    )
+    # JSON object: { "com.myapp.sub.premium": "premium" }; values become subscriptionPlan in DB.
+    APP_STORE_PRODUCT_PLAN_MAP_JSON: Optional[str] = os.getenv("APP_STORE_PRODUCT_PLAN_MAP_JSON")
+    # Comma-separated product ids; if set, rejects verify for unknown products.
+    APP_STORE_ALLOWED_PRODUCT_IDS: Optional[str] = os.getenv("APP_STORE_ALLOWED_PRODUCT_IDS")
+    # Dedup collection for App Store Server Notifications V2 (same DB as MONGODB_URI).
+    MONGODB_APPLE_NOTIFICATIONS_COLLECTION: str = os.getenv(
+        "MONGODB_APPLE_NOTIFICATIONS_COLLECTION", "apple_store_notifications"
+    )
+    # Remote config: iOS/Android subscription product ids, planKey, rank (see BILLING_MONGODB_SCHEMA.md).
+    MONGODB_SUBSCRIPTION_PRODUCT_CATALOG_COLLECTION: str = os.getenv(
+        "MONGODB_SUBSCRIPTION_PRODUCT_CATALOG_COLLECTION",
+        "subscription_product_catalog",
+    )
+
     # JWT Configuration
     JWT_ENABLED: bool = os.getenv("JWT_ENABLED", "true").lower() == "true"
     JWT_SECRET: str = os.getenv(
@@ -167,6 +248,16 @@ class Settings:
         os.getenv("PRINT_PREVIEW_RAW_HTML", "false").lower() == "true"
     )
     
+    # Shipped mobile app semver (version.json); see documentation/API_APP_UPDATE_AND_VERSION.md
+    VERSION_JSON_PATH: Path = Path(
+        os.getenv("VERSION_JSON_PATH", str(_ROOT / "version.json"))
+    )
+    APP_UPDATE_MIN_REQUIRED_VERSION: Optional[str] = os.getenv("APP_UPDATE_MIN_REQUIRED_VERSION")
+    APP_UPDATE_LATEST_VERSION: Optional[str] = os.getenv("APP_UPDATE_LATEST_VERSION")
+    APP_UPDATE_MESSAGE: Optional[str] = os.getenv("APP_UPDATE_MESSAGE")
+    APP_UPDATE_STORE_ANDROID_URL: Optional[str] = os.getenv("APP_UPDATE_STORE_ANDROID_URL")
+    APP_UPDATE_STORE_IOS_URL: Optional[str] = os.getenv("APP_UPDATE_STORE_IOS_URL")
+
     # File paths
     SYSTEM_PROMPT_PATH: Path = Path(__file__).parent.parent.parent / "system_prompt.json"
     USE_SYSTEM_PROMPT_FILE: bool = (

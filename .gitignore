@@ -26,5 +26,8 @@ dist/
 *.egg-info/
 
 *.pem
+keys/
 
 .cursor/mcp.json
+
+# Expo web bundle is intentionally tracked for deployment

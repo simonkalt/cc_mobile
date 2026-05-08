@@ -29,6 +29,7 @@ from app.utils.user_helpers import (
     normalize_personality_profiles,
     USERS_COLLECTION,
 )
+from app.utils.resume_files_list import list_user_resume_files_for_login
 from app.utils.registration_notice import (
     assert_data_use_sharing_notice_accepted,
 )
@@ -43,6 +44,75 @@ from app.utils.letter_template_selection import (
 from app.utils.llm_models_registry import get_default_model_name_from_registry
 
 logger = logging.getLogger(__name__)
+
+_FORM_DEFAULTS_PUT_KEY_RE = re.compile(r"^[_a-zA-Z][_a-zA-Z0-9]*$")
+_MAX_FORM_DEFAULTS_ADDRESS_LEN = 2048
+_MAX_FORM_DEFAULTS_PHONE_LEN = 64
+
+
+def _apply_form_defaults_partial_update(
+    update_doc: Dict[str, Any],
+    form_defaults: Any,
+    *,
+    user_id: str,
+) -> None:
+    """
+    Merge preferences.formDefaults via dotted $set paths so keys not sent are preserved.
+    See documentation/FORM_DEFAULTS_ADDRESS_PHONE_BACKEND.md.
+    """
+    if form_defaults is None:
+        return
+    if not isinstance(form_defaults, dict):
+        logger.warning(
+            "PUT user %s: preferences.formDefaults must be a dict (got %s); skipping",
+            user_id,
+            type(form_defaults).__name__,
+        )
+        return
+    for key, raw in form_defaults.items():
+        if not isinstance(key, str) or not key:
+            continue
+        if not _FORM_DEFAULTS_PUT_KEY_RE.match(key) or key.startswith("$"):
+            logger.warning("PUT user %s: skipping invalid formDefaults key %r", user_id, key)
+            continue
+
+        if key in ("address", "phoneNumber"):
+            if raw is None:
+                val: Any = ""
+            elif isinstance(raw, str):
+                val = raw.strip()
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"preferences.formDefaults.{key} must be a string or null",
+                )
+            max_len = (
+                _MAX_FORM_DEFAULTS_ADDRESS_LEN
+                if key == "address"
+                else _MAX_FORM_DEFAULTS_PHONE_LEN
+            )
+            if len(val) > max_len:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"preferences.formDefaults.{key} exceeds maximum length {max_len}",
+                )
+        else:
+            if raw is None:
+                val = None
+            elif isinstance(raw, str):
+                val = raw
+            elif isinstance(raw, (bool, int, float)):
+                val = raw
+            else:
+                logger.warning(
+                    "PUT user %s: skipping formDefaults key %r (unsupported type %s)",
+                    user_id,
+                    key,
+                    type(raw).__name__,
+                )
+                continue
+
+        update_doc[f"preferences.formDefaults.{key}"] = val
 
 
 def _built_in_default_personality_profiles() -> list[dict]:
@@ -736,6 +806,12 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
                         user_id,
                         type(app_settings).__name__,
                     )
+            if "formDefaults" in updates.preferences:
+                _apply_form_defaults_partial_update(
+                    update_doc,
+                    updates.preferences.get("formDefaults"),
+                    user_id=user_id,
+                )
             # Update top-level preferences fields
             if "newsletterOptIn" in updates.preferences:
                 update_doc["preferences.newsletterOptIn"] = updates.preferences["newsletterOptIn"]
@@ -904,6 +980,8 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
     access_token = _make_signed_token(access_payload, jwt_secret)
     refresh_token = _make_signed_token(refresh_payload, jwt_secret)
 
+    files_list = list_user_resume_files_for_login(user_id)
+
     return UserLoginResponse(
         success=True,
         user=user_doc_to_response(user),
@@ -912,6 +990,7 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
         refresh_token=refresh_token,
         token_type="bearer",
         expires_in=access_ttl_seconds,
+        files=files_list,
     )
 
 
