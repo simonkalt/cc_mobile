@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 import {
   StyleSheet,
@@ -9,6 +9,9 @@ import {
   Alert,
   ActivityIndicator,
   TouchableOpacity,
+  Modal,
+  Platform,
+  Pressable,
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,6 +21,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 // Find it with 'ifconfig' (Mac/Linux) or 'ipconfig' (Windows)
 const BACKEND_URL = "https://cc-mobile.onrender.com"; // <-- CHANGE THIS
 
+/** iOS Simulator often shows system alerts with a translucent sheet; use an opaque modal in dev. */
+const useOpaqueDevAlerts = __DEV__ && Platform.OS === "ios";
+
 export default function App() {
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState("");
@@ -25,6 +31,19 @@ export default function App() {
   const [llms, setLlms] = useState([]);
   const [selectedModel, setSelectedModel] = useState(null);
   const [loadingLlms, setLoadingLlms] = useState(true);
+  const [devAlert, setDevAlert] = useState(null);
+
+  const showAlert = useCallback((title, message, buttons, options) => {
+    if (useOpaqueDevAlerts) {
+      const normalized =
+        buttons && buttons.length > 0
+          ? buttons
+          : [{ text: "OK", style: "default" }];
+      setDevAlert({ title, message, buttons: normalized, options });
+      return;
+    }
+    Alert.alert(title, message, buttons, options);
+  }, []);
 
   // Fetch available LLMs on component mount
   useEffect(() => {
@@ -41,14 +60,14 @@ export default function App() {
         // Set the first available LLM as default
         setSelectedModel(data.llms[0].value);
       } else {
-        Alert.alert(
+        showAlert(
           "No LLMs Available",
           "No language models are configured on the server."
         );
       }
     } catch (error) {
       console.error(error);
-      Alert.alert("Error", "Could not fetch available LLMs from the backend.");
+      showAlert("Error", "Could not fetch available LLMs from the backend.");
     } finally {
       setLoadingLlms(false);
     }
@@ -56,12 +75,12 @@ export default function App() {
 
   const handleSendPrompt = async () => {
     if (!prompt) {
-      Alert.alert("Error", "Please enter a prompt.");
+      showAlert("Error", "Please enter a prompt.");
       return;
     }
 
     if (!selectedModel) {
-      Alert.alert("Error", "Please select a language model.");
+      showAlert("Error", "Please select a language model.");
       return;
     }
 
@@ -90,7 +109,7 @@ export default function App() {
       }
     } catch (error) {
       console.error(error);
-      Alert.alert("Request Failed", "Could not connect to the backend.");
+      showAlert("Request Failed", "Could not connect to the backend.");
     } finally {
       setLoading(false);
     }
@@ -98,6 +117,51 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {useOpaqueDevAlerts && devAlert ? (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setDevAlert(null)}
+        >
+          <Pressable
+            style={styles.alertOverlay}
+            onPress={() => setDevAlert(null)}
+          >
+            <Pressable
+              style={styles.alertCard}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <Text style={styles.alertTitle}>{devAlert.title}</Text>
+              {devAlert.message ? (
+                <Text style={styles.alertMessage}>{devAlert.message}</Text>
+              ) : null}
+              <View style={styles.alertActions}>
+                {devAlert.buttons.map((btn, i) => (
+                  <TouchableOpacity
+                    key={`${btn.text}-${i}`}
+                    style={styles.alertButton}
+                    onPress={() => {
+                      const fn = btn.onPress;
+                      setDevAlert(null);
+                      fn?.();
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.alertButtonLabel,
+                        btn.style === "destructive" && styles.alertDestructive,
+                      ]}
+                    >
+                      {btn.text}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
       <Text style={styles.title}>LLM Chat App</Text>
 
       {/* LLM Selection Radio Buttons */}
@@ -232,5 +296,57 @@ const styles = StyleSheet.create({
   },
   responseText: {
     fontSize: 16,
+  },
+  alertOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  alertCard: {
+    width: "100%",
+    maxWidth: 320,
+    backgroundColor: "#f2f2f7",
+    borderRadius: 14,
+    paddingTop: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#c6c6c8",
+  },
+  alertTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    textAlign: "center",
+    color: "#000",
+    marginBottom: 8,
+  },
+  alertMessage: {
+    fontSize: 13,
+    textAlign: "center",
+    color: "#000",
+    marginBottom: 16,
+  },
+  alertActions: {
+    flexDirection: "row",
+    justifyContent: "center",
+    flexWrap: "wrap",
+    marginTop: 4,
+  },
+  alertButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    minWidth: 72,
+    marginHorizontal: 6,
+    alignItems: "center",
+  },
+  alertButtonLabel: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#007AFF",
+  },
+  alertDestructive: {
+    color: "#FF3B30",
   },
 });

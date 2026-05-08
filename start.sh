@@ -7,7 +7,7 @@ VENV_DIR="$PROJECT_DIR/.venv"
 # Check if venv exists
 if [ ! -d "$VENV_DIR" ]; then
     echo "❌ Virtual environment not found!"
-    echo "Run: bash setup_and_run_wsl.sh"
+    echo "Run: bash setup_and_run.sh"
     exit 1
 fi
 

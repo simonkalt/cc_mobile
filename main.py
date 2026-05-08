@@ -271,6 +271,8 @@ except Exception as e:
 
 
 # Configure CORS for React app
+# Same-origin loads (e.g. UI at /app on this host calling /api/...) do not rely on CORS.
+# Add origins to CORS_ORIGINS when the web UI is served from another host or port.
 # Get allowed origins from environment variable or use defaults
 cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
 # Add default localhost origins for development
@@ -313,9 +315,11 @@ try:
         llm_config,
         personality,
         config,
+        version,
         cover_letter,
         files,
         cover_letters,
+        docx_proxy,
         pdf,
         sms,
         email,
@@ -328,9 +332,11 @@ try:
     app.include_router(llm_config.router)
     app.include_router(personality.router)
     app.include_router(config.router)
+    app.include_router(version.router)
     app.include_router(cover_letter.router)
     app.include_router(files.router)
     app.include_router(cover_letters.router)
+    app.include_router(docx_proxy.router)
     app.include_router(pdf.router)
     app.include_router(sms.router)
     app.include_router(email.router)
@@ -452,7 +458,7 @@ xai_model = "grok-4-fast-reasoning"
 
 # we need to move this to the server side and make it dynamic
 LLM_ENVIRONMENT_MAPPING = [
-    ("ChatGPT", "gpt-4.1", openai_api_key),
+    ("ChatGPT", "gpt-5.5", openai_api_key),
     ("Claude", "claude-sonnet-4-6", anthropic_api_key),
     ("Claude Haiku", "claude-haiku-4-5", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
@@ -476,7 +482,7 @@ def get_available_llms():
 # This ensures the 'prompt' is a string
 class ChatRequest(BaseModel):
     prompt: str
-    active_model: str = "gpt-4.1"  # Default model
+    active_model: str = "claude-haiku-4-5"  # Default model (matches llms-config / registry)
 
     class Config:
         # Allow extra fields to be ignored
@@ -549,12 +555,12 @@ class JobURLAnalysisRequest(BaseModel):
     user_email: Optional[str] = None
 
 
-def post_to_llm(prompt: str, model: str = "gpt-4.1"):
+def post_to_llm(prompt: str, model: str = "gpt-5.5"):
     return_response = None
-    if model == "gpt-4.1" or model == "gpt-5.2" or model.startswith("gpt-"):
+    if model == "gpt-4.1" or model == "gpt-5.2" or model == "gpt-5.5" or model.startswith("gpt-"):
         client = OpenAI(api_key=openai_api_key)
-        # Use high max_completion_tokens for GPT-5.2 (supports 128,000 max completion tokens)
-        if model == "gpt-5.2":
+        # Use high max_completion_tokens for GPT-5.2 / GPT-5.5 (supports 128,000 max completion tokens)
+        if model in ("gpt-5.2", "gpt-5.5"):
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -866,8 +872,14 @@ def normalize_llm_name(llm: str) -> str:
     # Map display names and aliases to canonical model names
     if "gemini" in llm_lower or llm == "gemini-2.5-flash":
         return "gemini-2.5-flash"
-    elif "gpt" in llm_lower or llm == "gpt-4.1" or llm == "ChatGPT":
+    elif llm == "gpt-5.2" or llm_lower == "gpt-5.2":
+        return "gpt-5.2"
+    elif llm == "gpt-5.5" or llm_lower == "gpt-5.5":
+        return "gpt-5.5"
+    elif llm == "gpt-4.1" or llm_lower == "gpt-4.1":
         return "gpt-4.1"
+    elif "gpt" in llm_lower or llm == "ChatGPT":
+        return "gpt-5.5"
     elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
         return "grok-4-fast-reasoning"
     elif "haiku" in llm_lower or llm == "claude-haiku-4-5" or llm == "Claude Haiku":
@@ -1036,6 +1048,91 @@ def admin_portal():
     if os.path.exists(path):
         return FileResponse(path, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Admin portal not found"})
+
+
+def _cc_mobile_web_paths():
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.join(project_root, "website", "cc_mobile_web")
+    index_path = os.path.join(root, "index.html")
+    return root, index_path
+
+
+# If these are missing but we return index.html anyway, the browser tries to execute HTML as JS/CSS → blank page.
+_CC_MOBILE_WEB_ASSET_SUFFIXES = (
+    ".js",
+    ".css",
+    ".map",
+    ".json",
+    ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".otf",
+)
+
+
+def _cc_mobile_web_requested_asset_filename(resource_path: str) -> str:
+    if not resource_path:
+        return ""
+    return resource_path.rsplit("/", 1)[-1].lower()
+
+
+def _cc_mobile_web_path_looks_like_static_asset(resource_path: str) -> bool:
+    name = _cc_mobile_web_requested_asset_filename(resource_path)
+    return bool(name) and any(name.endswith(s) for s in _CC_MOBILE_WEB_ASSET_SUFFIXES)
+
+
+@app.get("/app", include_in_schema=False)
+@app.get("/app/", include_in_schema=False)
+def cc_mobile_web_app_root():
+    """Serve Expo web SPA (cc_mobile_ui) exported to website/cc_mobile_web/."""
+    _root, index_path = _cc_mobile_web_paths()
+    if os.path.isfile(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    return JSONResponse(
+        status_code=404,
+        content={
+            "detail": "Mobile web app not deployed. Export cc_mobile_ui with "
+            "`npx expo export --platform web`, copy dist/* into website/cc_mobile_web/."
+        },
+    )
+
+
+@app.get("/app/{resource_path:path}", include_in_schema=False)
+def cc_mobile_web_app_path(resource_path: str):
+    """Static files under /app; unknown paths fall back to index.html for client-side routes."""
+    root, index_path = _cc_mobile_web_paths()
+    if not os.path.isfile(index_path):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Mobile web app not deployed."},
+        )
+    root_abs = os.path.abspath(root)
+    joined = os.path.abspath(os.path.normpath(os.path.join(root, resource_path)))
+    if joined != root_abs and not joined.startswith(root_abs + os.sep):
+        return FileResponse(index_path, media_type="text/html")
+    if os.path.isfile(joined):
+        return FileResponse(joined)
+    if _cc_mobile_web_path_looks_like_static_asset(resource_path):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": (
+                    "Web bundle asset missing on server. Copy the full Expo export "
+                    "(entire cc_mobile_ui/dist/, including the _expo directory) into "
+                    "website/cc_mobile_web/ and restart."
+                ),
+                "missing": resource_path,
+            },
+        )
+    return FileResponse(index_path, media_type="text/html")
 
 
 @app.get("/api/health")

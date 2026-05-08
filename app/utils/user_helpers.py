@@ -90,19 +90,32 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
     # Normalize preferences to ensure personalityProfiles have correct structure
     # Create a copy to avoid mutating the original document
     preferences = user_doc.get("preferences")
-    if preferences and isinstance(preferences, dict):
-        # Deep copy preferences to avoid mutating original
-        preferences = copy.deepcopy(preferences)
-        app_settings = preferences.get("appSettings", {})
-        if isinstance(app_settings, dict) and "personalityProfiles" in app_settings:
-            # Normalize personalityProfiles to ensure structure is {"id", "name", "description"} only
-            app_settings["personalityProfiles"] = normalize_personality_profiles(
-                app_settings.get("personalityProfiles", [])
-            )
-        # Backward compatibility: normalize legacy snake_case last resume key for clients.
-        if isinstance(app_settings, dict):
-            if "lastResumeUsed" not in app_settings and "last_resume_used" in app_settings:
-                app_settings["lastResumeUsed"] = app_settings.get("last_resume_used")
+    if not isinstance(preferences, dict):
+        preferences = {}
+    # Deep copy preferences to avoid mutating original
+    preferences = copy.deepcopy(preferences)
+    app_settings = preferences.get("appSettings")
+    if not isinstance(app_settings, dict):
+        app_settings = {}
+        preferences["appSettings"] = app_settings
+    if "personalityProfiles" in app_settings:
+        # Normalize personalityProfiles to ensure structure is {"id", "name", "description"} only
+        app_settings["personalityProfiles"] = normalize_personality_profiles(
+            app_settings.get("personalityProfiles", [])
+        )
+    # Backward compatibility: normalize legacy last-resume keys; then always emit
+    # camelCase lastResumeUsed (string or explicit null) for login/GET parity — see
+    # documentation/API_LOGIN_RESPONSE_LAST_RESUME_USED.md
+    if "lastResumeUsed" not in app_settings:
+        if "last_resume_used" in app_settings:
+            app_settings["lastResumeUsed"] = app_settings.get("last_resume_used")
+        elif "last_resume" in app_settings:
+            app_settings["lastResumeUsed"] = app_settings.get("last_resume")
+        else:
+            app_settings["lastResumeUsed"] = None
+    # Runtime-configured DOCX service base URL injected by backend.
+    # This should not be persisted from client; server remains source of truth.
+    app_settings["docxServiceBaseUrl"] = settings.DOCX_SERVICE_BASE_URL
     
     subscription_status = str(user_doc.get("subscriptionStatus", "free") or "free").lower()
     max_credits_raw = user_doc.get("max_credits", DEFAULT_MAX_CREDITS)
