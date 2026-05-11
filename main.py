@@ -965,7 +965,7 @@ def _inject_store_urls_into_index_html(html: str) -> str:
         ios_attrs = f'href="{safe_ios}" target="_blank" rel="noopener noreferrer"'
     else:
         ios_attrs = (
-            "href=\"#\" onclick=\"alert('iOS support is days away. Stay tuned!'); return false;\" role=\"button\" "
+            'href="#" onclick="openIosModal(); return false;" role="button" '
             'aria-disabled="true"'
         )
 

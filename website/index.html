@@ -51,6 +51,22 @@
           </div>
         </div>
 
+        <!-- Modal for iOS coming soon -->
+        <div class="ios-modal-overlay" id="iosModal">
+          <div class="ios-modal">
+            <button class="ios-modal-close" id="iosModalCloseBtn" aria-label="Close">&times;</button>
+            <div class="ios-modal-icon">
+              <img src="/website/images/footer-app-store.png" alt="App Store" />
+            </div>
+            <h3 class="ios-modal-title">Coming Soon to iOS</h3>
+            <p class="ios-modal-text">
+              We're putting the finishing touches on the iPhone &amp; iPad version.
+              It will be available on the App Store shortly&mdash;stay tuned!
+            </p>
+            <button class="ios-modal-btn" id="iosModalOkBtn">Got it</button>
+          </div>
+        </div>
+
         <!-- Modal for zoomed image -->
         <div class="carousel-modal" id="carouselModal">
           <button
@@ -383,6 +399,32 @@
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && carouselModal.classList.contains("active")) {
           closeModal();
+        }
+      });
+
+      // iOS coming-soon modal
+      const iosModal = document.getElementById("iosModal");
+      const iosModalCloseBtn = document.getElementById("iosModalCloseBtn");
+      const iosModalOkBtn = document.getElementById("iosModalOkBtn");
+
+      function openIosModal() {
+        iosModal.classList.add("active");
+        document.body.style.overflow = "hidden";
+      }
+
+      function closeIosModal() {
+        iosModal.classList.remove("active");
+        document.body.style.overflow = "";
+      }
+
+      iosModalCloseBtn.addEventListener("click", closeIosModal);
+      iosModalOkBtn.addEventListener("click", closeIosModal);
+      iosModal.addEventListener("click", (e) => {
+        if (e.target === iosModal) closeIosModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && iosModal.classList.contains("active")) {
+          closeIosModal();
         }
       });
 
