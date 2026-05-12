@@ -55,23 +55,45 @@ See [BILLING_UNIFIED_ENTITLEMENT_AND_ELIGIBILITY.md](./BILLING_UNIFIED_ENTITLEME
 
 Configuration only — **not** per-user subscription state. Default collection name; override with env `MONGODB_SUBSCRIPTION_PRODUCT_CATALOG_COLLECTION`.
 
-**Phase 1 (iOS / Apple):** one document per `(platform, billingProvider, environment)`, e.g. `_id: "apple_ios_production"`:
+One document per `(platform, billingProvider, environment)`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `platform` | `"ios"` \| `"android"` | |
+| `platform` | `"ios"` \| `"android"` \| `"all"` | `"all"` for platform-agnostic providers (Stripe) |
 | `billingProvider` | `"apple"` \| `"stripe"` | |
-| `environment` | `"production"` \| `"sandbox"` | Catalog doc matched using `APP_STORE_USE_SANDBOX` (sandbox vs production); falls back to production doc if sandbox doc missing |
+| `environment` | `"production"` \| `"sandbox"` | Apple: matched using `APP_STORE_USE_SANDBOX`; falls back to production if sandbox doc missing |
 | `products` | array | Embedded product rows |
 
-Each element of `products` (Apple):
+Each element of `products`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `productId` | string | App Store SKU |
-| `planKey` | string | Logical plan persisted as `subscriptionPlan` / used in API `applePlanKey` |
-| `rank` | integer | Relative tier for UX (higher = higher tier); exposed as `applePlanRank` on `GET /api/subscriptions/{user_id}` |
+| `productId` | string | Apple: App Store SKU. Stripe: Stripe price ID (`price_xxx`). |
+| `planKey` | string | Logical plan name — **same namespace across providers** (e.g. `"monthly"`, `"annual"`). Exposed as unified `planKey` on `GET /api/subscriptions/{user_id}` |
+| `rank` | integer | Relative tier for UX (higher = higher tier); exposed as `planRank` |
 | `enabled` | boolean | Optional; default treat as true |
 | `label` | string | Optional display string for clients |
 
-The API merges SKU → `planKey` from this catalog with `APP_STORE_PRODUCT_PLAN_MAP_JSON` (**Mongo wins** on duplicate SKUs). Client UX patterns: [IOS_APPLE_SUBSCRIPTION_TIER_UX.md](./IOS_APPLE_SUBSCRIPTION_TIER_UX.md).
+### Apple catalog (iOS)
+
+Example document `_id: "apple_ios_production"` with `platform: "ios"`, `billingProvider: "apple"`.
+
+The API merges SKU → `planKey` from this catalog with `APP_STORE_PRODUCT_PLAN_MAP_JSON` (**Mongo wins** on duplicate SKUs). Apple-specific fields `applePlanKey` / `applePlanRank` are also set on the response for backward compatibility.
+
+Client UX patterns: [IOS_APPLE_SUBSCRIPTION_TIER_UX.md](./IOS_APPLE_SUBSCRIPTION_TIER_UX.md).
+
+### Stripe catalog
+
+Example document `_id: "stripe_all_production"` with `platform: "all"`, `billingProvider: "stripe"`.
+
+Maps Stripe price IDs to the same `planKey` namespace as Apple. The API merges price ID → `planKey` from this catalog with `STRIPE_PRICE_PLAN_MAP_JSON` env var (**Mongo wins** on duplicate price IDs).
+
+### Unified `planKey` / `planRank` on `GET /api/subscriptions/{user_id}`
+
+The response includes `planKey` and `planRank` regardless of billing provider:
+
+- `billingProvider === "apple"` → resolved from Apple catalog via `appleProductId`
+- `billingProvider === "stripe"` → resolved from Stripe catalog via `priceId`
+- Free / null → `planKey: null`, `planRank: null`
+
+The client uses `planKey` to identify the user's current plan tier across platforms (e.g. highlight "Monthly" as active whether purchased via Apple or Stripe).

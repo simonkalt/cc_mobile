@@ -1,5 +1,6 @@
 """
-Mongo-backed subscription_product_catalog: merged Apple plan map, GET snapshot fields, catalog route.
+Mongo-backed subscription_product_catalog: merged Apple plan map, Stripe plan map,
+GET snapshot fields, catalog route.
 """
 
 from __future__ import annotations
@@ -10,6 +11,30 @@ import mongomock
 import pytest
 
 from tests.billing.conftest import FAKE_USER_ID, FAKE_USER_OBJ_ID
+
+
+STRIPE_CATALOG_DOC = {
+    "_id": "stripe_all_production",
+    "platform": "all",
+    "billingProvider": "stripe",
+    "environment": "production",
+    "products": [
+        {
+            "productId": "price_monthly",
+            "planKey": "monthly",
+            "rank": 1,
+            "enabled": True,
+            "label": "Monthly Pro",
+        },
+        {
+            "productId": "price_annual",
+            "planKey": "annual",
+            "rank": 3,
+            "enabled": True,
+            "label": "Annual Pro",
+        },
+    ],
+}
 
 
 @pytest.fixture
@@ -42,6 +67,7 @@ def catalog_doc_apple_ios_production():
 def catalog_collection(catalog_doc_apple_ios_production):
     col = mongomock.MongoClient()["test"]["subscription_product_catalog"]
     col.insert_one(catalog_doc_apple_ios_production)
+    col.insert_one(dict(STRIPE_CATALOG_DOC))
     return col
 
 
@@ -56,11 +82,11 @@ def _collection_router(users_col, catalog_col):
 
 @pytest.fixture(autouse=True)
 def clear_catalog_cache():
-    from app.services.subscription_product_catalog_service import invalidate_ios_apple_catalog_cache
+    from app.services.subscription_product_catalog_service import invalidate_all_catalog_caches
 
-    invalidate_ios_apple_catalog_cache()
+    invalidate_all_catalog_caches()
     yield
-    invalidate_ios_apple_catalog_cache()
+    invalidate_all_catalog_caches()
 
 
 @pytest.fixture
@@ -179,3 +205,209 @@ class TestSubscriptionApplePlanFields:
         assert body.get("billingProvider") == "apple"
         assert body.get("applePlanKey") == "monthly"
         assert body.get("applePlanRank") == 1
+
+
+# ---------------------------------------------------------------------------
+# Stripe catalog
+# ---------------------------------------------------------------------------
+
+
+class TestMergedStripePlanMap:
+    def test_mongo_overrides_env_for_same_price(
+        self, mongomock_users, catalog_collection, monkeypatch
+    ):
+        from app.core.config import settings
+        from app.services.subscription_product_catalog_service import (
+            invalidate_stripe_catalog_cache,
+            merged_stripe_price_plan_map,
+        )
+
+        monkeypatch.setattr(
+            settings,
+            "STRIPE_PRICE_PLAN_MAP_JSON",
+            '{"price_monthly": "legacy_monthly"}',
+        )
+        invalidate_stripe_catalog_cache()
+
+        router = _collection_router(mongomock_users, catalog_collection)
+        with patch(
+            "app.services.subscription_product_catalog_service.get_collection",
+            side_effect=router,
+        ), patch(
+            "app.services.subscription_product_catalog_service.is_connected",
+            return_value=True,
+        ):
+            m = merged_stripe_price_plan_map()
+        assert m.get("price_monthly") == "monthly"
+
+    def test_env_fallback_when_no_mongo_doc(self, monkeypatch):
+        from app.core.config import settings
+        from app.services.subscription_product_catalog_service import (
+            invalidate_stripe_catalog_cache,
+            resolve_stripe_product,
+        )
+
+        monkeypatch.setattr(
+            settings,
+            "STRIPE_PRICE_PLAN_MAP_JSON",
+            '{"price_env_only": "semiannual"}',
+        )
+        invalidate_stripe_catalog_cache()
+
+        with patch(
+            "app.services.subscription_product_catalog_service.is_connected",
+            return_value=False,
+        ):
+            pk, rk = resolve_stripe_product("price_env_only")
+        assert pk == "semiannual"
+        assert rk is None
+
+
+class TestResolveStripeProduct:
+    def test_known_price_returns_plan_key_and_rank(
+        self, mongomock_users, catalog_collection
+    ):
+        from app.services.subscription_product_catalog_service import resolve_stripe_product
+
+        router = _collection_router(mongomock_users, catalog_collection)
+        with patch(
+            "app.services.subscription_product_catalog_service.get_collection",
+            side_effect=router,
+        ), patch(
+            "app.services.subscription_product_catalog_service.is_connected",
+            return_value=True,
+        ):
+            pk, rk = resolve_stripe_product("price_annual")
+        assert pk == "annual"
+        assert rk == 3
+
+    def test_unknown_price_returns_none(
+        self, mongomock_users, catalog_collection
+    ):
+        from app.services.subscription_product_catalog_service import resolve_stripe_product
+
+        router = _collection_router(mongomock_users, catalog_collection)
+        with patch(
+            "app.services.subscription_product_catalog_service.get_collection",
+            side_effect=router,
+        ), patch(
+            "app.services.subscription_product_catalog_service.is_connected",
+            return_value=True,
+        ):
+            pk, rk = resolve_stripe_product("price_unknown")
+        assert pk is None
+        assert rk is None
+
+
+# ---------------------------------------------------------------------------
+# Unified planKey / planRank on GET /api/subscriptions/{user_id}
+# ---------------------------------------------------------------------------
+
+
+class TestUnifiedPlanKeyFields:
+    def test_apple_user_gets_unified_plan_key(
+        self, client_with_catalog, mongomock_users, monkeypatch
+    ):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "APP_STORE_USE_SANDBOX", False)
+
+        mongomock_users.update_one(
+            {"_id": FAKE_USER_OBJ_ID},
+            {
+                "$set": {
+                    "billingProvider": "apple",
+                    "subscriptionStatus": "active",
+                    "subscriptionPlan": "monthly",
+                    "subscriptionProductId": "MONTHLY001",
+                    "appleProductId": "MONTHLY001",
+                    "subscriptionId": "ORIG-TX",
+                }
+            },
+        )
+
+        resp = client_with_catalog.get(f"/api/subscriptions/{FAKE_USER_ID}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["planKey"] == "monthly"
+        assert body["planRank"] == 1
+        assert body["applePlanKey"] == "monthly"
+
+    def test_stripe_user_gets_unified_plan_key(
+        self, client_with_catalog, mongomock_users, monkeypatch
+    ):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "APP_STORE_USE_SANDBOX", False)
+
+        mongomock_users.update_one(
+            {"_id": FAKE_USER_OBJ_ID},
+            {
+                "$set": {
+                    "billingProvider": "stripe",
+                    "subscriptionStatus": "active",
+                    "subscriptionPlan": "price_annual",
+                    "priceId": "price_annual",
+                    "subscriptionId": "sub_test_123",
+                }
+            },
+        )
+
+        with patch("app.services.subscription_service._get_stripe_module", return_value=None):
+            resp = client_with_catalog.get(f"/api/subscriptions/{FAKE_USER_ID}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["planKey"] == "annual"
+        assert body["planRank"] == 3
+        assert body["applePlanKey"] is None
+
+    def test_free_user_has_null_plan_key(self, client_with_catalog, mongomock_users):
+        resp = client_with_catalog.get(f"/api/subscriptions/{FAKE_USER_ID}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["planKey"] is None
+        assert body["planRank"] is None
+
+    def test_same_plan_key_across_providers(
+        self, client_with_catalog, mongomock_users, monkeypatch
+    ):
+        """Monthly on Apple and monthly on Stripe both resolve to planKey='monthly'."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "APP_STORE_USE_SANDBOX", False)
+
+        # Apple monthly
+        mongomock_users.update_one(
+            {"_id": FAKE_USER_OBJ_ID},
+            {
+                "$set": {
+                    "billingProvider": "apple",
+                    "subscriptionStatus": "active",
+                    "appleProductId": "MONTHLY001",
+                    "subscriptionId": "ORIG-TX",
+                }
+            },
+        )
+        resp = client_with_catalog.get(f"/api/subscriptions/{FAKE_USER_ID}")
+        apple_plan_key = resp.json()["planKey"]
+
+        # Switch to Stripe monthly
+        mongomock_users.update_one(
+            {"_id": FAKE_USER_OBJ_ID},
+            {
+                "$set": {
+                    "billingProvider": "stripe",
+                    "subscriptionStatus": "active",
+                    "priceId": "price_monthly",
+                    "subscriptionId": "sub_stripe",
+                    "appleProductId": None,
+                }
+            },
+        )
+        with patch("app.services.subscription_service._get_stripe_module", return_value=None):
+            resp = client_with_catalog.get(f"/api/subscriptions/{FAKE_USER_ID}")
+        stripe_plan_key = resp.json()["planKey"]
+
+        assert apple_plan_key == "monthly"
+        assert stripe_plan_key == "monthly"
+        assert apple_plan_key == stripe_plan_key

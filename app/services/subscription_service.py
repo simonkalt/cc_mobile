@@ -584,6 +584,9 @@ def get_user_subscription(
 
     apple_plan_key = None
     apple_plan_rank = None
+    plan_key: Optional[str] = None
+    plan_rank: Optional[int] = None
+
     if effective_billing == "apple":
         from app.services.subscription_product_catalog_service import (
             resolve_ios_apple_product,
@@ -595,6 +598,15 @@ def get_user_subscription(
             or product_id
         )
         apple_plan_key, apple_plan_rank = resolve_ios_apple_product(apple_sku)
+        plan_key, plan_rank = apple_plan_key, apple_plan_rank
+
+    elif effective_billing == "stripe":
+        from app.services.subscription_product_catalog_service import (
+            resolve_stripe_product,
+        )
+
+        stripe_price = price_id or user.get("priceId")
+        plan_key, plan_rank = resolve_stripe_product(stripe_price)
 
     return SubscriptionResponse(
         billingProvider=effective_billing,
@@ -615,6 +627,8 @@ def get_user_subscription(
         can_initiate_new_paid_subscription=_ent["can_initiate_new_paid_subscription"],
         cross_platform_billing=_ent["cross_platform_billing"],
         entitlement_source=_ent["entitlement_source"],
+        planKey=plan_key,
+        planRank=plan_rank,
         applePlanKey=apple_plan_key,
         applePlanRank=apple_plan_rank,
     )

@@ -209,6 +209,8 @@ class Settings:
     )
     # JSON object: { "com.myapp.sub.premium": "premium" }; values become subscriptionPlan in DB.
     APP_STORE_PRODUCT_PLAN_MAP_JSON: Optional[str] = os.getenv("APP_STORE_PRODUCT_PLAN_MAP_JSON")
+    # JSON object: { "price_1Abc...": "monthly" }; maps Stripe price IDs to logical plan keys.
+    STRIPE_PRICE_PLAN_MAP_JSON: Optional[str] = os.getenv("STRIPE_PRICE_PLAN_MAP_JSON")
     # Comma-separated product ids; if set, rejects verify for unknown products.
     APP_STORE_ALLOWED_PRODUCT_IDS: Optional[str] = os.getenv("APP_STORE_ALLOWED_PRODUCT_IDS")
     # Dedup collection for App Store Server Notifications V2 (same DB as MONGODB_URI).
