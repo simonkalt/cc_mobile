@@ -110,6 +110,7 @@ class UserResponse(BaseModel):
     dateUpdated: datetime
     lastLogin: Optional[datetime] = None
     llm_counts: Optional[dict] = None
+    total_generations: int = 0
     last_llm_used: Optional[str] = None
 
     class Config:
@@ -132,6 +133,17 @@ class UserLoginResponse(BaseModel):
 
 
 # Helper Functions
+def _compute_total_generations(llm_counts) -> int:
+    """Sum all integer values in llm_counts to get total letter generations."""
+    if not isinstance(llm_counts, dict):
+        return 0
+    total = 0
+    for v in llm_counts.values():
+        if isinstance(v, (int, float)):
+            total += int(v)
+    return total
+
+
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt"""
     salt = bcrypt.gensalt()
@@ -207,6 +219,7 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         dateUpdated=user_doc.get("dateUpdated"),
         lastLogin=user_doc.get("lastLogin"),
         llm_counts=user_doc.get("llm_counts"),
+        total_generations=_compute_total_generations(user_doc.get("llm_counts")),
         last_llm_used=user_doc.get("last_llm_used")
     )
 
@@ -664,20 +677,20 @@ def increment_llm_usage_count(
         return False
     
     try:
-        # First, ensure llm_counts field exists
         user = collection.find_one({"_id": user_id_obj})
         if not user:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
             return False
         
-        # Initialize llm_counts if it doesn't exist
-        if "llm_counts" not in user:
-            collection.update_one(
-                {"_id": user_id_obj},
-                {"$set": {"llm_counts": {}}}
-            )
+        # Read-modify-write llm_counts as a whole dict to avoid MongoDB dot-notation
+        # interpreting dots in model names (e.g. "gpt-4.1") as nested paths.
+        current_counts = user.get("llm_counts", {})
+        if not isinstance(current_counts, dict):
+            current_counts = {}
+        current_counts[llm_name] = current_counts.get(llm_name, 0) + 1
         
         set_fields: Dict[str, Any] = {
+            "llm_counts": current_counts,
             "last_llm_used": llm_name,
             "dateUpdated": datetime.utcnow(),
         }
@@ -688,29 +701,17 @@ def increment_llm_usage_count(
             if tone_disp:
                 set_fields["preferences.formDefaults.tone"] = tone_disp
 
-        # Use MongoDB's $inc operator to increment the count
-        # If the field doesn't exist, MongoDB will create it with value 1
-        # Also update last_llm_used field to track the most recently used LLM
         result = collection.update_one(
             {"_id": user_id_obj},
-            {
-                "$inc": {f"llm_counts.{llm_name}": 1},
-                "$set": set_fields,
-            },
+            {"$set": set_fields},
         )
         
         if result.matched_count > 0:
-            # Verify the increment worked (check if field was created or incremented)
-            updated_user = collection.find_one({"_id": user_id_obj})
-            if updated_user and "llm_counts" in updated_user:
-                count = updated_user["llm_counts"].get(llm_name, 0)
-                if count == 1:
-                    logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
-                else:
-                    logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
-                # Log last_llm_used update
-                if updated_user.get("last_llm_used") == llm_name:
-                    logger.debug(f"Updated last_llm_used to {llm_name} for user {user_id}")
+            count = current_counts[llm_name]
+            if count == 1:
+                logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
+            else:
+                logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
             return True
         else:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
