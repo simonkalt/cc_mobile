@@ -9,9 +9,7 @@ class ChatRequest(BaseModel):
     prompt: str
     active_model: str = "claude-haiku-4-5"  # Default model (matches llms-config / registry)
 
-    class Config:
-        # Allow extra fields to be ignored
-        extra = "ignore"
+    model_config = ConfigDict(extra="ignore")
 
 
 class JobInfoRequest(BaseModel):

@@ -3,9 +3,9 @@ User API endpoints for registration and CRUD operations
 """
 import bcrypt
 from fastapi import HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import UTC, datetime
 from bson import ObjectId
 from app.db.mongodb import get_collection, is_connected
 from app.utils.llm_models_registry import get_default_model_name_from_registry
@@ -113,8 +113,7 @@ class UserResponse(BaseModel):
     total_generations: int = 0
     last_llm_used: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserLoginRequest(BaseModel):
@@ -275,8 +274,8 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             "zip": None,
             "country": None
         },
-        "dateCreated": datetime.utcnow(),
-        "dateUpdated": datetime.utcnow(),
+        "dateCreated": datetime.now(UTC),
+        "dateUpdated": datetime.now(UTC),
         "llm_counts": {},  # Initialize empty LLM usage counts object
         "last_llm_used": None,  # Initialize last LLM used field
         "preferences": user_data.preferences or {
@@ -416,7 +415,7 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         )
     
     # Build update document (only include fields that are provided)
-    update_doc = {"dateUpdated": datetime.utcnow()}
+    update_doc = {"dateUpdated": datetime.now(UTC)}
     
     if updates.name is not None:
         update_doc["name"] = updates.name
@@ -692,7 +691,7 @@ def increment_llm_usage_count(
         set_fields: Dict[str, Any] = {
             "llm_counts": current_counts,
             "last_llm_used": llm_name,
-            "dateUpdated": datetime.utcnow(),
+            "dateUpdated": datetime.now(UTC),
         }
         pid = (last_personality_profile_id or "").strip()
         if pid:
@@ -804,7 +803,7 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
         {"_id": user["_id"]},
         {
             "$set": {
-                "lastLogin": datetime.utcnow(),
+                "lastLogin": datetime.now(UTC),
                 "failedLoginAttempts": 0
             }
         }

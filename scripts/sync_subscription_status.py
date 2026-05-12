@@ -16,7 +16,7 @@ import argparse
 import importlib
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path so app.* imports work
@@ -191,7 +191,7 @@ def main():
                             "subscriptionId": None,
                             "cancelAtPeriodEnd": False,
                             "canceledAt": None,
-                            "dateUpdated": datetime.utcnow(),
+                            "dateUpdated": datetime.now(UTC),
                         }},
                     )
                     synced += 1
@@ -215,7 +215,7 @@ def main():
 
         if args.apply:
             update_doc = {k: v["new"] for k, v in changes.items()}
-            update_doc["dateUpdated"] = datetime.utcnow()
+            update_doc["dateUpdated"] = datetime.now(UTC)
             collection.update_one({"_id": user_doc["_id"]}, {"$set": update_doc})
             synced += 1
         else:

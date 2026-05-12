@@ -4,7 +4,7 @@ Run this script to test your MongoDB Atlas connection and add a test document.
 """
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from dotenv import load_dotenv
 
 # Load environment variables with error handling
@@ -57,7 +57,7 @@ def test_add_document():
     print("\n4. Creating test document...")
     test_document = {
         "test": True,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(UTC),
         "message": "This is a test document from the MongoDB connection test script",
         "metadata": {
             "created_by": "test_mongodb.py",
