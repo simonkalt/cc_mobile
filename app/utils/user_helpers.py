@@ -17,6 +17,17 @@ ACCOUNT_DELETION_REQUESTS_COLLECTION = "account_deletion_requests"
 DEFAULT_MAX_CREDITS = 10
 
 
+def compute_total_generations(llm_counts) -> int:
+    """Sum all integer values in llm_counts to get total letter generations."""
+    if not isinstance(llm_counts, dict):
+        return 0
+    total = 0
+    for v in llm_counts.values():
+        if isinstance(v, (int, float)):
+            total += int(v)
+    return total
+
+
 def normalize_personality_profile(profile: dict) -> Optional[dict]:
     """
     Normalize a personality profile to ensure it only contains id, name, description.
@@ -149,6 +160,7 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         dateUpdated=user_doc.get("dateUpdated"),
         lastLogin=user_doc.get("lastLogin"),
         llm_counts=user_doc.get("llm_counts"),
+        total_generations=compute_total_generations(user_doc.get("llm_counts")),
         last_llm_used=user_doc.get("last_llm_used"),
         generation_credits=generation_credits,
         max_credits=max_credits,
