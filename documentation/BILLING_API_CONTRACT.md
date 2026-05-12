@@ -35,10 +35,12 @@ In addition to existing fields (`subscription_status`, `subscription_plan`, `sub
 | `can_initiate_new_paid_subscription` | boolean | `false` when already entitled via Stripe **or** Apple |
 | `cross_platform_billing` | boolean | Management on another surface (see unified entitlement doc) |
 | `entitlement_source` | `"stripe"` \| `"apple"` \| null | Optional |
-| `applePlanKey` | string \| null | When `billingProvider === "apple"` and SKU maps in `subscription_product_catalog`: logical plan (`monthly`, `semiannual`, `annual`, …) |
-| `applePlanRank` | integer \| null | Same condition: integer rank for upgrade/disable UX (higher = higher tier in catalog) |
+| `planKey` | string \| null | Unified logical plan name across providers (`monthly`, `annual`, …). Resolved from `subscription_product_catalog` for both Apple and Stripe. |
+| `planRank` | integer \| null | Unified tier rank (higher = higher tier). Use for upgrade/downgrade/highlight UX. |
+| `applePlanKey` | string \| null | (Legacy) Same as `planKey` when `billingProvider === "apple"` |
+| `applePlanRank` | integer \| null | (Legacy) Same as `planRank` when `billingProvider === "apple"` |
 
-Apple-specific fields when `billing_provider === "apple"`: see [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md). Catalog document layout: **subscription_product_catalog** collection.
+Plan identity is resolved from the `subscription_product_catalog` collection. See [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md) for catalog document layout.
 
 ---
 

@@ -28,7 +28,10 @@ class SubscriptionResponse(BaseModel):
     can_initiate_new_paid_subscription: Optional[bool] = None
     cross_platform_billing: Optional[bool] = None
     entitlement_source: Optional[str] = None
-    # iOS / Apple — resolved from Mongo ``subscription_product_catalog`` (Phase 1 plan rank UX).
+    # Unified plan identity — works across Apple and Stripe.
+    planKey: Optional[str] = None
+    planRank: Optional[int] = None
+    # iOS / Apple — resolved from Mongo ``subscription_product_catalog``.
     applePlanKey: Optional[str] = None
     applePlanRank: Optional[int] = None
 
