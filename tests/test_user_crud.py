@@ -4,7 +4,7 @@ Tests: Create, Read, Update, Delete operations for user records
 """
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from dotenv import load_dotenv
 from bson import ObjectId
 
@@ -90,8 +90,8 @@ def create_user(name: str, email: str, hashed_password: str, **kwargs):
             "zip": kwargs.get("address", {}).get("zip", None),
             "country": kwargs.get("address", {}).get("country", None)
         },
-        "dateCreated": datetime.utcnow(),
-        "dateUpdated": datetime.utcnow(),
+        "dateCreated": datetime.now(UTC),
+        "dateUpdated": datetime.now(UTC),
         "preferences": {
             "newsletterOptIn": kwargs.get("preferences", {}).get("newsletterOptIn", False),
             "theme": kwargs.get("preferences", {}).get("theme", "light")
@@ -188,7 +188,7 @@ def update_user(user_id, updates: dict):
                 return False
         
         # Add dateUpdated timestamp
-        updates["dateUpdated"] = datetime.utcnow()
+        updates["dateUpdated"] = datetime.now(UTC)
         
         # Build the $set operation - MongoDB supports dot notation directly
         set_operation = {"$set": updates}
@@ -407,7 +407,7 @@ def run_test_suite():
             "phone": "555-9999",
             "preferences.theme": "light",
             "preferences.newsletterOptIn": False,
-            "lastLogin": datetime.utcnow()
+            "lastLogin": datetime.now(UTC)
         }
     )
     

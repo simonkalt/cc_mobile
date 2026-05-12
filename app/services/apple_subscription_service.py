@@ -16,7 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -266,7 +266,7 @@ def _free_tier_apple_clear_set() -> Dict[str, Any]:
         "subscriptionCurrentPeriodEnd": None,
         "cancelAtPeriodEnd": False,
         "canceledAt": None,
-        "dateUpdated": datetime.utcnow(),
+        "dateUpdated": datetime.now(UTC),
     }
 
 
@@ -364,7 +364,7 @@ def _subscription_fields_from_verified_apple_tx(
         "appleSubscriptionGroupId": str(subscription_group_id) if subscription_group_id else None,
         "appleEnvironment": env_str,
         "appleAutoRenewStatus": auto_renew_status,
-        "appleLastVerifiedAt": datetime.utcnow(),
+        "appleLastVerifiedAt": datetime.now(UTC),
         "subscriptionId": str(original_tx_id),
         "subscriptionStatus": subscription_status,
         "subscriptionPlan": subscription_plan,
@@ -373,7 +373,7 @@ def _subscription_fields_from_verified_apple_tx(
         "subscriptionCurrentPeriodEnd": period_end,
         "cancelAtPeriodEnd": cap,
         "canceledAt": canceled_at,
-        "dateUpdated": datetime.utcnow(),
+        "dateUpdated": datetime.now(UTC),
     }
 
 
@@ -495,7 +495,7 @@ def process_apple_server_notification_v2(signed_payload: str) -> Dict[str, Any]:
             dedupe.insert_one(
                 {
                     "_id": n_uuid,
-                    "receivedAt": datetime.utcnow(),
+                    "receivedAt": datetime.now(UTC),
                     "notificationType": raw_ntype,
                     "subtype": raw_subtype,
                 }
@@ -578,7 +578,7 @@ def process_apple_server_notification_v2(signed_payload: str) -> Dict[str, Any]:
         return {"handled": True, "updated": "free", "user_id": str(user_doc["_id"])}
 
     if not tx and renewal:
-        partial: Dict[str, Any] = {"dateUpdated": datetime.utcnow()}
+        partial: Dict[str, Any] = {"dateUpdated": datetime.now(UTC)}
         ars = getattr(renewal, "autoRenewStatus", None)
         if ars is not None and AutoRenewStatus is not None:
             partial["cancelAtPeriodEnd"] = ars == AutoRenewStatus.OFF

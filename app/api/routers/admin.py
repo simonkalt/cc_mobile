@@ -8,7 +8,7 @@ CRUD endpoints require a JWT carrying the admin_verified claim.
 import logging
 import math
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from bson import ObjectId
@@ -358,7 +358,7 @@ def update_user(
     if not update_fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No fields to update")
 
-    update_fields["dateUpdated"] = datetime.utcnow()
+    update_fields["dateUpdated"] = datetime.now(UTC)
 
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
@@ -379,7 +379,7 @@ def archive_user(
 ):
     collection = _require_db()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
         {
@@ -406,7 +406,7 @@ def unarchive_user(
 ):
     collection = _require_db()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
         {

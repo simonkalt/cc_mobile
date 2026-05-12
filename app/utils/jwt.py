@@ -3,7 +3,7 @@ JWT token generation and verification utilities
 """
 
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from fastapi import HTTPException, status
@@ -42,11 +42,11 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     to_encode = data.copy()
 
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(UTC) + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "access"})
+    to_encode.update({"exp": expire, "iat": datetime.now(UTC), "type": "access"})
     if settings.JWT_ISSUER:
         to_encode["iss"] = settings.JWT_ISSUER
     if settings.JWT_AUDIENCE:
@@ -88,9 +88,9 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
         raise ValueError(error_msg)
 
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
 
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "refresh"})
+    to_encode.update({"exp": expire, "iat": datetime.now(UTC), "type": "refresh"})
     if settings.JWT_ISSUER:
         to_encode["iss"] = settings.JWT_ISSUER
     if settings.JWT_AUDIENCE:

@@ -123,8 +123,7 @@ class UserResponse(BaseModel):
     account_deletion_pending: Optional[bool] = False
     account_deletion_requested_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserLoginResponse(BaseModel):

@@ -4,7 +4,7 @@ Subscription service - Stripe integration for subscription management
 
 import logging
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from bson import ObjectId
 from fastapi import HTTPException, status
 
@@ -291,7 +291,7 @@ def get_user_subscription(
                                 "subscriptionCurrentPeriodEnd": None,
                                 "cancelAtPeriodEnd": False,
                                 "canceledAt": None,
-                                "dateUpdated": datetime.utcnow(),
+                                "dateUpdated": datetime.now(UTC),
                             }
                             collection.update_one({"_id": user_id_obj}, {"$set": reset_doc})
                             subscription_status = "free"
@@ -337,7 +337,7 @@ def get_user_subscription(
                         "subscriptionCurrentPeriodEnd": None,
                         "cancelAtPeriodEnd": False,
                         "canceledAt": None,
-                        "dateUpdated": datetime.utcnow(),
+                        "dateUpdated": datetime.now(UTC),
                     }
                     collection.update_one({"_id": user_id_obj}, {"$set": reset_doc})
                     stripe_customer_id = user.get("stripeCustomerId")
@@ -450,7 +450,7 @@ def get_user_subscription(
                     "subscriptionCurrentPeriodEnd": None,
                     "cancelAtPeriodEnd": False,
                     "canceledAt": None,
-                    "dateUpdated": datetime.utcnow(),
+                    "dateUpdated": datetime.now(UTC),
                 }
                 collection.update_one({"_id": user_id_obj}, {"$set": reset_doc})
                 subscription_status = "free"
@@ -677,7 +677,7 @@ def update_user_subscription(
         "canceledAt": canceled_at,
         "lastPaymentDate": last_payment_date,
         "stripeCustomerId": stripe_customer_id,
-        "dateUpdated": datetime.utcnow(),
+        "dateUpdated": datetime.now(UTC),
     }
     
     # Remove None values
@@ -2458,7 +2458,7 @@ def handle_stripe_webhook_event(event: dict) -> dict:
                     "cancelAtPeriodEnd": False,
                     "canceledAt": None,
                     "stripeCustomerId": None,
-                    "dateUpdated": datetime.utcnow(),
+                    "dateUpdated": datetime.now(UTC),
                 }},
             )
         logger.info(

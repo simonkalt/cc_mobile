@@ -2,7 +2,7 @@
 Verification code service - handles storage and validation of SMS verification codes
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional, Dict, Any
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -69,12 +69,12 @@ def store_verification_code(
         )
     
     try:
-        expires_at = datetime.utcnow() + timedelta(minutes=VERIFICATION_CODE_EXPIRY_MINUTES)
+        expires_at = datetime.now(UTC) + timedelta(minutes=VERIFICATION_CODE_EXPIRY_MINUTES)
         
         verification_data = {
             "code": code,
             "purpose": purpose,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(UTC),
             "expires_at": expires_at,
             "verified": False
         }
@@ -151,7 +151,7 @@ def verify_code(user_id: str, code: str, purpose: str) -> bool:
         
         # Check if expired
         expires_at = verification_data.get("expires_at")
-        if expires_at and datetime.utcnow() > expires_at:
+        if expires_at and datetime.now(UTC) > expires_at:
             logger.warning(f"Verification code expired for user {user_id}")
             return False
         
