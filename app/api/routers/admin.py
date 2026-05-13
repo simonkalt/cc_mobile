@@ -8,7 +8,7 @@ CRUD endpoints require a JWT carrying the admin_verified claim.
 import logging
 import math
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from bson import ObjectId
@@ -35,7 +35,7 @@ from app.services.verification_service import (
     clear_verification_code,
 )
 from app.utils.password import verify_password
-from app.utils.user_helpers import USERS_COLLECTION
+from app.utils.user_helpers import USERS_COLLECTION, compute_total_generations as _compute_total_generations
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +136,7 @@ def _user_doc_to_detail(doc: dict) -> AdminUserDetail:
         dateUpdated=doc.get("dateUpdated"),
         lastLogin=doc.get("lastLogin"),
         llm_counts=doc.get("llm_counts"),
+        total_generations=_compute_total_generations(doc.get("llm_counts")),
         last_llm_used=doc.get("last_llm_used"),
         generation_credits=_mongo_int_credit_field(doc, "generation_credits", 10),
         max_credits=_mongo_int_credit_field(doc, "max_credits", 10),
@@ -357,7 +358,7 @@ def update_user(
     if not update_fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No fields to update")
 
-    update_fields["dateUpdated"] = datetime.utcnow()
+    update_fields["dateUpdated"] = datetime.now(UTC)
 
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
@@ -378,7 +379,7 @@ def archive_user(
 ):
     collection = _require_db()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
         {
@@ -405,7 +406,7 @@ def unarchive_user(
 ):
     collection = _require_db()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     result = collection.update_one(
         {"_id": ObjectId(user_id)},
         {

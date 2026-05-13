@@ -74,6 +74,7 @@ class AdminUserDetail(BaseModel):
     dateUpdated: Optional[datetime] = None
     lastLogin: Optional[datetime] = None
     llm_counts: Optional[dict] = None
+    total_generations: int = 0
     last_llm_used: Optional[str] = None
     generation_credits: int = Field(default=10, ge=0)
     max_credits: int = Field(default=10, ge=0)

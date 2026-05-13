@@ -276,7 +276,7 @@ async def reset_password_endpoint(request: ResetPasswordRequest):
         )
     
     # Update password and mark code as verified/used
-    from datetime import datetime
+    from datetime import UTC, datetime
     
     hashed_password = hash_password(request.new_password)
     
@@ -285,7 +285,7 @@ async def reset_password_endpoint(request: ResetPasswordRequest):
         {
             "$set": {
                 "hashedPassword": hashed_password,
-                "passwordChangedAt": datetime.utcnow(),
+                "passwordChangedAt": datetime.now(UTC),
                 "verification_code.verified": True  # Mark as used
             }
         }
@@ -329,7 +329,7 @@ async def change_password_endpoint(request: ChangePasswordRequest):
     _enforce_strong_password_or_raise(request.new_password)
     
     # Update password
-    from datetime import datetime
+    from datetime import UTC, datetime
     
     hashed_password = hash_password(request.new_password)
     
@@ -338,7 +338,7 @@ async def change_password_endpoint(request: ChangePasswordRequest):
         {
             "$set": {
                 "hashedPassword": hashed_password,
-                "passwordChangedAt": datetime.utcnow()
+                "passwordChangedAt": datetime.now(UTC)
             },
             "$unset": {"verification_code": ""}
         }

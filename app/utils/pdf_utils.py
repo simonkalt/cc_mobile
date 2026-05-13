@@ -8,13 +8,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Try to import PyPDF2
 try:
-    import PyPDF2
+    import pypdf
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
-    logger.warning("PyPDF2 not available. PDF reading will not work.")
+    logger.warning("pypdf not available. PDF reading will not work.")
 
 # Try to import PyMuPDF (fitz) for markdown/layout-aware extraction.
 _fitz_module = None
@@ -39,12 +38,12 @@ def read_pdf_from_bytes(pdf_bytes: bytes) -> str:
         Extracted text content as string
     """
     if not PDF_AVAILABLE:
-        raise ImportError("PyPDF2 is not installed. Cannot read PDF files.")
+        raise ImportError("pypdf is not installed. Cannot read PDF files.")
 
     try:
         text_content = ""
         pdf_file = BytesIO(pdf_bytes)
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        pdf_reader = pypdf.PdfReader(pdf_file)
         num_pages = len(pdf_reader.pages)
 
         for page_num in range(num_pages):
@@ -106,7 +105,7 @@ def read_pdf_file(file_path: str) -> str:
         Extracted text content as string
     """
     if not PDF_AVAILABLE:
-        raise ImportError("PyPDF2 is not installed. Cannot read PDF files.")
+        raise ImportError("pypdf is not installed. Cannot read PDF files.")
 
     if not os.path.exists(file_path):
         logger.warning(f"PDF file not found: {file_path}")

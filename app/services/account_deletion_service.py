@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional
 
 from bson import ObjectId
@@ -24,7 +24,7 @@ SUPPORT_EMAIL = "support@saimonsoft.com"
 
 
 def _scheduled_completion_utc() -> datetime:
-    return datetime.utcnow() + timedelta(days=DELETION_GRACE_DAYS)
+    return datetime.now(UTC) + timedelta(days=DELETION_GRACE_DAYS)
 
 
 def _format_scheduled_iso(dt: datetime) -> str:
@@ -157,7 +157,7 @@ def create_account_deletion_request(
             scheduled_iso = _format_scheduled_iso(_scheduled_completion_utc())
         logger.info("Duplicate account deletion request for user %s; returning pending %s", user_id, req_id)
         _sync_user_document_for_pending_deletion(
-            users_col, oid, datetime.utcnow(), auth_invalidated_before=None
+            users_col, oid, datetime.now(UTC), auth_invalidated_before=None
         )
         return {
             "message": "Account deletion is already scheduled.",
@@ -165,7 +165,7 @@ def create_account_deletion_request(
             "scheduled_completion_by": scheduled_iso,
         }
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     scheduled = _scheduled_completion_utc()
     inv_boundary = int(time.time())
 

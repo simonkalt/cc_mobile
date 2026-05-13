@@ -8,7 +8,7 @@ import re
 import base64
 import hmac
 import hashlib
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, Optional
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -344,7 +344,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "lastLogin": None,
         "passwordChangedAt": None,
         "avatarUrl": None,
-        "dataUseSharingNoticeAcceptedAt": datetime.utcnow(),
+        "dataUseSharingNoticeAcceptedAt": datetime.now(UTC),
         "phone": user_data.phone,
         "address": user_data.address or {
             "street": None,
@@ -353,8 +353,8 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
             "zip": None,
             "country": None
         },
-        "dateCreated": datetime.utcnow(),
-        "dateUpdated": datetime.utcnow(),
+        "dateCreated": datetime.now(UTC),
+        "dateUpdated": datetime.now(UTC),
         "llm_counts": {},  # Initialize empty LLM usage counts object
         "last_llm_used": None,  # Initialize last LLM used field
         "preferences": final_preferences,
@@ -367,7 +367,7 @@ def register_user(user_data: UserRegisterRequest) -> UserResponse:
         "generation_credits": 10,
         "max_credits": 10,
         "SMSOpt": "IN",
-        "SMSOptDate": datetime.utcnow(),
+        "SMSOptDate": datetime.now(UTC),
     }
     
     try:
@@ -562,12 +562,12 @@ def create_user_from_registration_data(
         "lastLogin": None,
         "passwordChangedAt": None,
         "avatarUrl": None,
-        "dataUseSharingNoticeAcceptedAt": datetime.utcnow(),
+        "dataUseSharingNoticeAcceptedAt": datetime.now(UTC),
         "phone": registration_data.get("phone"),
         "address": registration_data.get("address")
         or {"street": None, "city": None, "state": None, "zip": None, "country": None},
-        "dateCreated": datetime.utcnow(),
-        "dateUpdated": datetime.utcnow(),
+        "dateCreated": datetime.now(UTC),
+        "dateUpdated": datetime.now(UTC),
         "llm_counts": {},
         "last_llm_used": None,
         "preferences": preferences,
@@ -580,7 +580,7 @@ def create_user_from_registration_data(
         "generation_credits": 10,
         "max_credits": 10,
         "SMSOpt": sms_opt_value,
-        "SMSOptDate": datetime.utcnow(),
+        "SMSOptDate": datetime.now(UTC),
     }
 
     try:
@@ -626,7 +626,7 @@ def update_user(user_id: str, updates: UserUpdateRequest) -> UserResponse:
         logger.debug(f"Current user has {len(existing_profiles) if isinstance(existing_profiles, list) else 0} existing personality profile(s)")
     
     # Build update document (only include fields that are provided)
-    update_doc = {"dateUpdated": datetime.utcnow()}
+    update_doc = {"dateUpdated": datetime.now(UTC)}
     
     if updates.name is not None:
         update_doc["name"] = updates.name
@@ -946,7 +946,7 @@ def login_user(login_data: UserLoginRequest) -> UserLoginResponse:
         {"_id": user["_id"]},
         {
             "$set": {
-                "lastLogin": datetime.utcnow(),
+                "lastLogin": datetime.now(UTC),
                 "failedLoginAttempts": 0
             }
         }
@@ -1032,22 +1032,22 @@ def increment_llm_usage_count(
         return False
     
     try:
-        # First, ensure llm_counts field exists
         user = collection.find_one({"_id": user_id_obj})
         if not user:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
             return False
         
-        # Initialize llm_counts if it doesn't exist
-        if "llm_counts" not in user:
-            collection.update_one(
-                {"_id": user_id_obj},
-                {"$set": {"llm_counts": {}}}
-            )
+        # Read-modify-write llm_counts as a whole dict to avoid MongoDB dot-notation
+        # interpreting dots in model names (e.g. "gpt-4.1") as nested paths.
+        current_counts = user.get("llm_counts", {})
+        if not isinstance(current_counts, dict):
+            current_counts = {}
+        current_counts[llm_name] = current_counts.get(llm_name, 0) + 1
         
         set_fields: Dict[str, Any] = {
+            "llm_counts": current_counts,
             "last_llm_used": llm_name,
-            "dateUpdated": datetime.utcnow(),
+            "dateUpdated": datetime.now(UTC),
         }
         pid = (last_personality_profile_id or "").strip()
         if pid:
@@ -1062,23 +1062,17 @@ def increment_llm_usage_count(
                 tone_disp or "(id only)",
             )
 
-        # Use MongoDB's $inc operator to increment the count
         result = collection.update_one(
             {"_id": user_id_obj},
-            {
-                "$inc": {f"llm_counts.{llm_name}": 1},
-                "$set": set_fields,
-            },
+            {"$set": set_fields},
         )
         
         if result.matched_count > 0:
-            updated_user = collection.find_one({"_id": user_id_obj})
-            if updated_user and "llm_counts" in updated_user:
-                count = updated_user["llm_counts"].get(llm_name, 0)
-                if count == 1:
-                    logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
-                else:
-                    logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
+            count = current_counts[llm_name]
+            if count == 1:
+                logger.info(f"Initialized LLM count for {llm_name} to 1 for user {user_id}")
+            else:
+                logger.debug(f"Incremented LLM count for {llm_name} to {count} for user {user_id}")
             return True
         else:
             logger.warning(f"User {user_id} not found. Cannot update LLM usage count.")
@@ -1132,7 +1126,7 @@ def decrement_generation_credits(user_id: str) -> bool:
 
         result = collection.update_one(
             {"_id": user_id_obj, "generation_credits": {"$gt": 0}},
-            {"$inc": {"generation_credits": -1}, "$set": {"dateUpdated": datetime.utcnow()}},
+            {"$inc": {"generation_credits": -1}, "$set": {"dateUpdated": datetime.now(UTC)}},
         )
         if result.matched_count == 0:
             logger.info(f"No generation credit decrement applied for user {user_id}.")
@@ -1175,7 +1169,7 @@ def set_linkedin_token(user_id: str, token_data: Dict) -> bool:
 
     result = collection.update_one(
         {"_id": user_id_obj},
-        {"$set": {"preferences": preferences, "dateUpdated": datetime.utcnow()}},
+        {"$set": {"preferences": preferences, "dateUpdated": datetime.now(UTC)}},
     )
     return result.matched_count > 0
 

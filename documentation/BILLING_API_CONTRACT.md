@@ -6,6 +6,10 @@ Mobile callers live in [`src/services/subscriptionService.js`](../src/services/s
 
 **Header:** Clients SHOULD send `X-Billing-Correlation-Id` on every subscription request; servers SHOULD echo it. See [BILLING_OBSERVABILITY.md](./BILLING_OBSERVABILITY.md).
 
+**Wire format:** JSON responses commonly use **`snake_case`**. Clients also accept **`camelCase`** duplicates for compatibility (mobile normalizes in `useSubscription`).
+
+Clients MAY send **`X-Client-Platform: ios`** (or `android`) on billing routes when the backend branches on OS (e.g. Apple catalog vs future Android catalog).
+
 ---
 
 ## Endpoints (existing)
@@ -35,10 +39,12 @@ In addition to existing fields (`subscription_status`, `subscription_plan`, `sub
 | `can_initiate_new_paid_subscription` | boolean | `false` when already entitled via Stripe **or** Apple |
 | `cross_platform_billing` | boolean | Management on another surface (see unified entitlement doc) |
 | `entitlement_source` | `"stripe"` \| `"apple"` \| null | Optional |
-| `applePlanKey` | string \| null | When `billingProvider === "apple"` and SKU maps in `subscription_product_catalog`: logical plan (`monthly`, `semiannual`, `annual`, …) |
-| `applePlanRank` | integer \| null | Same condition: integer rank for upgrade/disable UX (higher = higher tier in catalog) |
+| `apple_plan_key` | string \| null | When `billing_provider === "apple"` and SKU maps in `subscription_product_catalog`: logical plan (`monthly`, `semiannual`, `annual`, …). **Alias (optional):** `applePlanKey` |
+| `apple_plan_rank` | integer \| null | Same condition: rank for upgrade/disable UX (higher = higher tier in catalog). **Alias (optional):** `applePlanRank` |
 
-Apple-specific fields when `billing_provider === "apple"`: see [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md). Catalog document layout: **subscription_product_catalog** collection.
+**Current Apple SKU** on this snapshot SHOULD come from **`apple_product_id`** and/or **`product_id`** (= App Store SKU) when `billing_provider === "apple"`. Clients do not require a separate `subscription_product_id`.
+
+Apple-specific persisted fields when `billing_provider === "apple"`: see [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md). Catalog document layout: **`subscription_product_catalog`** collection.
 
 ---
 
@@ -46,9 +52,9 @@ Apple-specific fields when `billing_provider === "apple"`: see [BILLING_MONGODB_
 
 **Auth:** Bearer JWT (same as other subscription reads).
 
-**Response (JSON):** `environment` (`sandbox` \| `production`, aligned with `APP_STORE_USE_SANDBOX`) and `products[]` with `productId`, `planKey`, `rank`, `enabled`, optional `label` — sorted by `rank` then `productId`. Used to render StoreKit offering rows without hard-coding SKUs; combine with `applePlanKey` / `applePlanRank` on `GET /api/subscriptions/{user_id}` for Manage vs Subscribe vs disabled states.
+**Response (JSON):** `environment` (`sandbox` \| `production`, aligned with `APP_STORE_USE_SANDBOX`) and `products[]` with `product_id` / **`productId`**, **`plan_key` / `planKey`**, **`rank`**, **`enabled`**, optional **`label`** — sorted by `rank` then product id.
 
-See also [IOS_APPLE_SUBSCRIPTION_TIER_UX.md](./IOS_APPLE_SUBSCRIPTION_TIER_UX.md) for client-side rank rules.
+Used to render StoreKit rows without hard-coding SKUs; combine with **`apple_plan_rank` / `apple_plan_key`** (or camelCase aliases) on `GET /api/subscriptions/{user_id}` for **Manage Subscription**, **Subscribe**, and disabled lower-tier rows per [IOS_APPLE_SUBSCRIPTION_TIER_UX.md](./IOS_APPLE_SUBSCRIPTION_TIER_UX.md).
 
 ---
 
@@ -82,17 +88,17 @@ The iOS client **must** persist entitlement on your side; Apple’s “purchase 
    - `subscription_current_period_end` (ISO string from decoded renewal / expiry)
    - `subscription_status`: use a value the client treats as active (see below)
 
-3. **`GET /api/subscriptions/{user_id}` must reflect the new state immediately** (same read model the app already calls via `getUserSubscription`). The mobile app deduces “active Apple subscription” and switches from **Subscribe with Apple** to **App Store subscription / Manage subscription** using:
+3. **`GET /api/subscriptions/{user_id}` must reflect the new state immediately** (same read model the app already calls via `getUserSubscription`). The mobile app deduces “active Apple subscription” and uses the **tier storefront** (**Manage Subscription** / Subscribe / disabled rows per catalog rank) vs free tier using:
 
    - `subscription_status` / `subscriptionStatus`: **`active`** or **`trialing`** (preferred), **or**
    - `entitlement_active` / `entitlementActive`: **`true`**, **or**
    - a future `subscription_current_period_end` later than “now” together with a stable subscription id / plan.
 
 4. **Expose Apple SKU on the snapshot** — at least one of:
-   - `apple_product_id` / `appleProductId`: e.g. `MONTHLY001`, `SIXMONTH001`, `ANNUAL001` (aligned with [`src/utils/constants.js`](../src/utils/constants.js)), **or**
+   - `apple_product_id` / `appleProductId`: App Store SKU (also listed under [`APPLE_SUBSCRIPTION_PRODUCT_IDS` defaults](../src/utils/constants.js) until catalog-only rollout), **or**
    - `product_id` / `productId` set to that **App Store SKU** when `billing_provider === "apple"`.
 
-If `billing_provider` is missing, all Apple SKUs missing, and status stays `free`, the UX will **never leave the storefront** despite a finished StoreKit transaction.
+If `billing_provider` is missing, all Apple SKUs missing, and status stays `free`, the UX will **never unlock tier logic** correctly despite a finished StoreKit transaction.
 
 See also [STOREKIT_LOCAL_TESTING.md](./STOREKIT_LOCAL_TESTING.md) (local `.storekit` JWS ≠ production receipts).
 
@@ -119,6 +125,7 @@ Mobile may use this **or** only the extended `GET /api/subscriptions/{user_id}` 
 ## Related specs
 
 - [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md)
+- [IOS_APPLE_SUBSCRIPTION_TIER_UX.md](./IOS_APPLE_SUBSCRIPTION_TIER_UX.md)
 - [BILLING_APPLE_VERIFY_AND_ASSN.md](./BILLING_APPLE_VERIFY_AND_ASSN.md)
 - [BILLING_UNIFIED_ENTITLEMENT_AND_ELIGIBILITY.md](./BILLING_UNIFIED_ENTITLEMENT_AND_ELIGIBILITY.md)
 - [STOREKIT_LOCAL_TESTING.md](./STOREKIT_LOCAL_TESTING.md)

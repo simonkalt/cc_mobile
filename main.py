@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ValidationError, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, ValidationError, EmailStr, Field
 from contextlib import asynccontextmanager
 from typing import Optional
 from bson import ObjectId
@@ -120,14 +120,14 @@ XAI_SDK_AVAILABLE = False
 
 # MongoDB client already imported above - using app.db.mongodb
 
-# Try to import PyPDF2 for PDF reading (after logger is defined)
+# Try to import pypdf for PDF reading (after logger is defined)
 try:
-    import PyPDF2
+    import pypdf
 
     PDF_AVAILABLE = True
 except ImportError:
     PDF_AVAILABLE = False
-    logger.warning("PyPDF2 not available. PDF reading will not work.")
+    logger.warning("pypdf not available. PDF reading will not work.")
 
 # Try to import boto3 for AWS S3 access
 try:
@@ -484,9 +484,7 @@ class ChatRequest(BaseModel):
     prompt: str
     active_model: str = "claude-haiku-4-5"  # Default model (matches llms-config / registry)
 
-    class Config:
-        # Allow extra fields to be ignored
-        extra = "ignore"
+    model_config = ConfigDict(extra="ignore")
 
 
 # Define the data model for job info request
@@ -635,14 +633,14 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5"):
 def read_pdf_from_bytes(pdf_bytes: bytes) -> str:
     """Extract text content from PDF bytes"""
     if not PDF_AVAILABLE:
-        raise ImportError("PyPDF2 is not installed. Cannot read PDF files.")
+        raise ImportError("pypdf is not installed. Cannot read PDF files.")
 
     try:
         text_content = ""
         from io import BytesIO
 
         pdf_file = BytesIO(pdf_bytes)
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        pdf_reader = pypdf.PdfReader(pdf_file)
         num_pages = len(pdf_reader.pages)
 
         for page_num in range(num_pages):
@@ -847,7 +845,7 @@ def download_pdf_from_s3(s3_path: str) -> bytes:
 def read_pdf_file(file_path: str) -> str:
     """Read PDF file from local filesystem and extract text content"""
     if not PDF_AVAILABLE:
-        raise ImportError("PyPDF2 is not installed. Cannot read PDF files.")
+        raise ImportError("pypdf is not installed. Cannot read PDF files.")
 
     if not os.path.exists(file_path):
         logger.warning(f"PDF file not found: {file_path}")

@@ -108,6 +108,7 @@ class UserResponse(BaseModel):
     dateUpdated: datetime
     lastLogin: Optional[datetime] = None
     llm_counts: Optional[dict] = None
+    total_generations: int = 0
     last_llm_used: Optional[str] = None
     generation_credits: int = Field(default=10, ge=0)
     max_credits: int = Field(default=10, ge=0)
@@ -122,8 +123,7 @@ class UserResponse(BaseModel):
     account_deletion_pending: Optional[bool] = False
     account_deletion_requested_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserLoginResponse(BaseModel):

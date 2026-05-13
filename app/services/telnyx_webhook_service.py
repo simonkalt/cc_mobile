@@ -2,7 +2,7 @@
 Service for storing Telnyx webhook payloads in the MongoDB sms collection.
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, Optional
 
 from app.db.mongodb import get_collection, is_connected
@@ -55,7 +55,7 @@ def store_telnyx_message(webhook_body: Dict[str, Any]) -> Optional[str]:
         "errors": payload.get("errors") or [],
         "payload": payload,
         "meta": meta,
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(UTC),
     }
 
     try:

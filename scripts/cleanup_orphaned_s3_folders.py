@@ -3,12 +3,12 @@
 S3 Orphaned Folders Cleanup Utility
 
 This script scans S3 for user folders and compares them with MongoDB user records.
-It identifies orphaned folders (S3 folders without corresponding users) and allows
-you to delete them after confirmation.
+It identifies orphaned folders (S3 folders without corresponding users).
+By default it runs in dry-run mode (report only); pass --apply to delete.
 
 Usage:
-    python scripts/cleanup_orphaned_s3_folders.py
-    python scripts/cleanup_orphaned_s3_folders.py --silent
+    python scripts/cleanup_orphaned_s3_folders.py              # dry-run (default)
+    python scripts/cleanup_orphaned_s3_folders.py --apply      # delete orphaned folders
 """
 
 import sys
@@ -226,19 +226,18 @@ def parse_args() -> argparse.Namespace:
         description="Clean up orphaned S3 user folders that have no matching MongoDB user."
     )
     parser.add_argument(
-        "--silent",
-        "--yes",
+        "--apply",
         action="store_true",
-        dest="silent",
-        help="Run without confirmation prompt and proceed with deletion automatically.",
+        help="Actually delete orphaned folders. Without this flag, only a dry-run report is shown.",
     )
     return parser.parse_args()
 
 
-def main(silent: bool = False):
+def main(apply: bool = False):
     """Main cleanup workflow"""
+    mode = "APPLY" if apply else "DRY-RUN"
     print("=" * 80)
-    print("S3 Orphaned Folders Cleanup Utility")
+    print(f"S3 Orphaned Folders Cleanup Utility  [{mode}]")
     print("=" * 80)
     print()
     
@@ -322,23 +321,13 @@ def main(silent: bool = False):
     print(f"{'TOTAL':<30} {total_files:<10} {format_size(total_size):<15}")
     print("=" * 80)
     
-    # Step 7: Confirmation prompt
-    print("\n⚠️  WARNING: This will permanently delete the orphaned folders and all their contents!")
-    print(f"You are about to delete {len(orphaned_folders)} folder(s) containing {total_files} file(s)")
-    print(f"Total size: {format_size(total_size)}")
-    print()
-    
-    if silent:
-        print("Silent mode enabled: skipping confirmation prompt.")
-    else:
-        response = input("Do you want to proceed with deletion? (yes/no): ").strip().lower()
-        if response not in ['yes', 'y']:
-            print("❌ Deletion cancelled.")
-            close_mongodb_connection()
-            return 0
-    
-    # Step 8: Delete folders
-    print("\nStep 6: Deleting orphaned folders...")
+    if not apply:
+        print("\n🔍 DRY-RUN mode — no changes made. Re-run with --apply to delete.")
+        close_mongodb_connection()
+        return 0
+
+    # Step 7: Delete folders
+    print("\nStep 7: Deleting orphaned folders...")
     print("-" * 80)
     
     success_count = 0
@@ -372,7 +361,7 @@ def main(silent: bool = False):
 if __name__ == "__main__":
     try:
         args = parse_args()
-        exit_code = main(silent=args.silent)
+        exit_code = main(apply=args.apply)
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print("\n\n❌ Interrupted by user")

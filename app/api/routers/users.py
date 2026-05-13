@@ -2,7 +2,7 @@
 User API routes
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 import time
 from typing import Any, Dict
 
@@ -208,7 +208,7 @@ async def set_sms_opt_endpoint(
 
     collection.update_one(
         {"_id": ObjectId(current_user.id)},
-        {"$set": {"SMSOpt": sms_opt, "SMSOptDate": datetime.utcnow()}},
+        {"$set": {"SMSOpt": sms_opt, "SMSOptDate": datetime.now(UTC)}},
     )
     return get_user_by_id(current_user.id)
 
