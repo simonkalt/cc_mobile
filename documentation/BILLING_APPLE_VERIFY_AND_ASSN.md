@@ -1,5 +1,9 @@
 # Apple IAP: verify endpoint + App Store Server Notifications
 
+Authoritative **route shapes, persistence checklist, and environment expectations** for `POST /api/subscriptions/apple/verify` also appear in **[BILLING_API_CONTRACT.md](./BILLING_API_CONTRACT.md)** (keep both files aligned when editing).
+
+---
+
 ## `POST /api/subscriptions/apple/verify`
 
 Mobile sends (snake_case):
@@ -10,6 +14,8 @@ Mobile sends (snake_case):
 - `transaction_id`
 - `original_transaction_id` (optional but recommended)
 
+Clients send **`X-Billing-Correlation-Id`** (see [BILLING_OBSERVABILITY.md](./BILLING_OBSERVABILITY.md)). The server SHOULD log it on verify start/success/failure and SHOULD echo it on error responses so ops can correlate with mobile `[BILLING]` logs.
+
 ### Server responsibilities
 
 1. Validate JWS with **App Store Server API** (or equivalent) for the correct bundle ID and environment (**production**, **App Store sandbox**, and **Xcode StoreKit local testing** each require the matching validation path / keys).
@@ -19,15 +25,14 @@ Mobile sends (snake_case):
 5. **Recompute unified entitlement** (Stripe + Apple → `entitlement_active`, `can_initiate_new_paid_subscription`, etc.).
 6. Return updated subscription JSON (same shape as `GET /api/subscriptions/:userId`) or `{ data: {...} }` / `{ subscription: {...} }`.
 
-Implementation details required for Settings → Billing to update after Xcode StoreKit Testing or Sandbox are summarized in **[BILLING_API_CONTRACT.md](./BILLING_API_CONTRACT.md)** under `POST /api/subscriptions/apple/verify` (server checklist).
-
 ### Error codes (suggested)
 
-Return stable `detail` / `code` for client logging:
+Return stable `detail` / `code` for client logging. Prefer HTTP status codes that distinguish client vs server issues (e.g. 502 or 503 only when your gateway wraps an upstream Apple failure).
 
 | Code / detail | Meaning |
 |---------------|---------|
 | `apple_validation_failed` | JWS invalid or wrong environment |
+| `apple_transaction_fetch_failed` | Valid-looking JWS but App Store Server API could not return transaction / history (wrong environment, revoked key, Apple outage, etc.) |
 | `user_mismatch` | Transaction not eligible for this `user_id` |
 | `transaction_already_consumed` | Already applied to another account (policy-dependent) |
 
@@ -39,6 +44,8 @@ Return stable `detail` / `code` for client logging:
 
 ## Observability
 
-Log structured events: `apple_verify_start`, `apple_verify_ok`, `apple_verify_fail`, `apple_assn_received` with `user_id`, `X-Billing-Correlation-Id`, `product_id`, `transaction_id`, `original_transaction_id`, **not** full JWS.
+Log structured events: `apple_verify_start`, `apple_verify_ok`, `apple_verify_fail`, `apple_assn_received` with `user_id`, **`X-Billing-Correlation-Id`**, `product_id`, `transaction_id`, `original_transaction_id`, **not** full JWS.
+
+On `apple_verify_fail`, include the correlation id in the JSON error payload (and optionally duplicate as a response header) so device logs and server logs align.
 
 See [BILLING_OBSERVABILITY.md](./BILLING_OBSERVABILITY.md).
