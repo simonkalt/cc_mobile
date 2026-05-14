@@ -1,10 +1,12 @@
 # Billing API contract (mobile ↔ backend)
 
-Mobile callers live in [`src/services/subscriptionService.js`](../src/services/subscriptionService.js). All routes below are under the configured `BACKEND_URL`.
+**Mobile client:** The React Native app in **`cc_mobile_ui`** implements subscription HTTP calls in `src/services/subscriptionService.js` (same shapes as below). **Backend:** Implement these routes in **`cc_mobile`** (this contract is mirrored under `documentation/` in both repos).
+
+All routes below are relative to the app’s configured `BACKEND_URL`.
 
 **Auth:** Bearer token for user-specific and mutating routes. Validate that JWT user matches `user_id` in path/body.
 
-**Header:** Clients SHOULD send `X-Billing-Correlation-Id` on every subscription request; servers SHOULD echo it. See [BILLING_OBSERVABILITY.md](./BILLING_OBSERVABILITY.md).
+**Header:** Clients SHOULD send `X-Billing-Correlation-Id` on every subscription request; servers SHOULD echo it on success and **especially on error responses** (JSON body and/or response header) so mobile `[BILLING]` logs can be joined to server logs. See [BILLING_OBSERVABILITY.md](./BILLING_OBSERVABILITY.md).
 
 **Wire format:** JSON responses commonly use **`snake_case`**. Clients also accept **`camelCase`** duplicates for compatibility (mobile normalizes in `useSubscription`).
 
@@ -74,7 +76,21 @@ Used to render StoreKit rows without hard-coding SKUs; combine with **`apple_pla
 
 **Success:** Body equals updated subscription object, or `{ "data": { ... } }` or `{ "subscription": { ... } }` (mobile unwraps in `useSubscription`).
 
-**Errors:** JSON with `detail` and preferably `code`: `apple_validation_failed`, `user_mismatch`, `transaction_already_consumed`, etc.
+**Errors:** JSON with `detail` and preferably `code`: `apple_validation_failed`, `user_mismatch`, `transaction_already_consumed`, `apple_transaction_fetch_failed` (or similar) when the server cannot load or validate the transaction via App Store Server API. Include the same **`X-Billing-Correlation-Id`** the client sent when possible.
+
+### Apple purchase UI vs MongoDB
+
+StoreKit may show success (e.g. “You’re all set”) **before** your server runs. That UI **does not** write to MongoDB. The user document stays on the free tier until **`POST /api/subscriptions/apple/verify`** returns **success** and the backend persists fields per [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md). If verify fails (4xx/5xx, gateway 502 wrapping an Apple API error), the app shows an error toast and **`GET /api/subscriptions/{user_id}`** remains unchanged.
+
+### Environment matrix (App Store Server API)
+
+| Client / build context | Typical JWS / transaction source | Server must validate against |
+|------------------------|-----------------------------------|-------------------------------|
+| App Store production | Production StoreKit | Production App Store Server API + production signing |
+| TestFlight or device + **sandbox** Apple ID | Sandbox | Sandbox host / sandbox-aware client |
+| **Xcode** run with **StoreKit Configuration** (`.storekit`) | Local / test transaction | Apple’s **StoreKit test** / local validation path — **not** the same as hitting production transaction history only |
+
+If the backend validates only **production** while the client sends **sandbox** or **StoreKit test** JWS, verify fails while the user still saw Apple’s success sheet. Implement environment detection (decoded JWS / Apple recommendations) and the matching API base + credentials.
 
 ### Server checklist (needed for Settings → Billing UI after Apple purchase)
 
@@ -95,7 +111,7 @@ The iOS client **must** persist entitlement on your side; Apple’s “purchase 
    - a future `subscription_current_period_end` later than “now” together with a stable subscription id / plan.
 
 4. **Expose Apple SKU on the snapshot** — at least one of:
-   - `apple_product_id` / `appleProductId`: App Store SKU (also listed under [`APPLE_SUBSCRIPTION_PRODUCT_IDS` defaults](../src/utils/constants.js) until catalog-only rollout), **or**
+   - `apple_product_id` / `appleProductId`: App Store SKU (also listed under `APPLE_SUBSCRIPTION_PRODUCT_IDS` in `cc_mobile_ui` `src/utils/constants.js` until catalog-only rollout), **or**
    - `product_id` / `productId` set to that **App Store SKU** when `billing_provider === "apple"`.
 
 If `billing_provider` is missing, all Apple SKUs missing, and status stays `free`, the UX will **never unlock tier logic** correctly despite a finished StoreKit transaction.
