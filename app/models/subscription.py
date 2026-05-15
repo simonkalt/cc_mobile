@@ -1,13 +1,16 @@
 """
 Subscription-related Pydantic models
 """
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, model_validator
 from typing import Optional
 from datetime import datetime
 
 
 class SubscriptionResponse(BaseModel):
     """Subscription information response"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
     billingProvider: Optional[str] = None  # "stripe" | "apple" when subscribed; null/omitted for free
     appleProductId: Optional[str] = None
     subscriptionId: Optional[str] = None
@@ -34,6 +37,28 @@ class SubscriptionResponse(BaseModel):
     # iOS / Apple — resolved from Mongo ``subscription_product_catalog``.
     applePlanKey: Optional[str] = None
     applePlanRank: Optional[int] = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def billing_provider(self) -> Optional[str]:
+        """Snake_case duplicate of ``billingProvider`` (BILLING_API_CONTRACT)."""
+        return self.billingProvider
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def apple_plan_key(self) -> Optional[str]:
+        return self.applePlanKey
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def apple_plan_rank(self) -> Optional[int]:
+        return self.applePlanRank
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def product_id(self) -> Optional[str]:
+        """Snake_case duplicate of ``productId`` (BILLING_API_CONTRACT)."""
+        return self.productId
 
 
 class AppleCatalogProductItem(BaseModel):

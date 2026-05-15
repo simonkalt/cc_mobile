@@ -164,6 +164,9 @@ def resolve_ios_apple_product(
     Return (planKey, rank) for an App Store product id using the Mongo catalog.
 
     Unknown SKU or missing catalog returns (None, None).
+
+    Prefer **enabled** products; if the SKU is present only on a disabled row, still resolve
+    rank/key so existing subscribers keep tier UX consistent with the catalog document.
     """
     if not sku or not str(sku).strip():
         return None, None
@@ -171,22 +174,28 @@ def resolve_ios_apple_product(
     if not doc:
         return None, None
     sku_norm = str(sku).strip()
-    for p in doc.get("products") or []:
-        if not isinstance(p, dict):
-            continue
-        if p.get("enabled") is False:
-            continue
-        if str(p.get("productId") or "").strip() != sku_norm:
-            continue
-        pk = p.get("planKey")
-        rk = p.get("rank")
-        rank_int: Optional[int]
-        try:
-            rank_int = int(rk) if rk is not None else None
-        except (TypeError, ValueError):
-            rank_int = None
-        return (str(pk) if pk is not None else None, rank_int)
-    return None, None
+    products = [p for p in (doc.get("products") or []) if isinstance(p, dict)]
+
+    def _row_match(enabled_only: bool) -> Tuple[Optional[str], Optional[int]]:
+        for p in products:
+            if enabled_only and p.get("enabled") is False:
+                continue
+            if str(p.get("productId") or "").strip() != sku_norm:
+                continue
+            pk = p.get("planKey")
+            rk = p.get("rank")
+            rank_int: Optional[int]
+            try:
+                rank_int = int(rk) if rk is not None else None
+            except (TypeError, ValueError):
+                rank_int = None
+            return (str(pk) if pk is not None else None, rank_int)
+        return None, None
+
+    plan_key, rank = _row_match(True)
+    if plan_key is not None or rank is not None:
+        return plan_key, rank
+    return _row_match(False)
 
 
 # ---------------------------------------------------------------------------

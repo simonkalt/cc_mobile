@@ -5,6 +5,7 @@ GET snapshot fields, catalog route.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import mongomock
@@ -205,6 +206,44 @@ class TestSubscriptionApplePlanFields:
         assert body.get("billingProvider") == "apple"
         assert body.get("applePlanKey") == "monthly"
         assert body.get("applePlanRank") == 1
+
+    def test_apple_legacy_null_billing_provider_heals_tier(
+        self, client_with_catalog, mongomock_users, monkeypatch
+    ):
+        """Rows with Apple IDs but missing billingProvider still infer apple + catalog rank."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "APP_STORE_USE_SANDBOX", False)
+
+        future = datetime.now(timezone.utc) + timedelta(days=30)
+        mongomock_users.update_one(
+            {"_id": FAKE_USER_OBJ_ID},
+            {
+                "$set": {
+                    "billingProvider": None,
+                    "subscriptionStatus": "free",
+                    "subscriptionPlan": "free",
+                    "subscriptionProductId": "MONTHLY001",
+                    "appleProductId": "MONTHLY001",
+                    "appleOriginalTransactionId": "ORIG-LEGACY",
+                    "subscriptionId": "ORIG-LEGACY",
+                    "subscriptionCurrentPeriodEnd": future,
+                }
+            },
+        )
+
+        resp = client_with_catalog.get(f"/api/subscriptions/{FAKE_USER_ID}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body.get("billingProvider") == "apple"
+        assert body.get("billing_provider") == "apple"
+        assert body.get("subscriptionStatus") == "active"
+        assert body.get("applePlanRank") == 1
+        assert body.get("apple_plan_rank") == 1
+        assert body.get("productId") == "MONTHLY001"
+        assert body.get("product_id") == "MONTHLY001"
+        healed = mongomock_users.find_one({"_id": FAKE_USER_OBJ_ID})
+        assert healed.get("billingProvider") == "apple"
 
 
 # ---------------------------------------------------------------------------
