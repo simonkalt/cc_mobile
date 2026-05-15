@@ -48,6 +48,8 @@ In addition to existing fields (`subscription_status`, `subscription_plan`, `sub
 
 Apple-specific persisted fields when `billing_provider === "apple"`: see [BILLING_MONGODB_SCHEMA.md](./BILLING_MONGODB_SCHEMA.md). Catalog document layout: **`subscription_product_catalog`** collection.
 
+**Backend gap checklist** (Apple snapshot returning `free` / null ranks while StoreKit shows active): see [BACKEND_REQUEST_APPLE_SUBSCRIPTION_GET_SNAPSHOT.md](./BACKEND_REQUEST_APPLE_SUBSCRIPTION_GET_SNAPSHOT.md).
+
 ---
 
 ## GET `/api/subscriptions/apple/catalog`
@@ -111,7 +113,7 @@ The iOS client **must** persist entitlement on your side; Apple’s “purchase 
    - a future `subscription_current_period_end` later than “now” together with a stable subscription id / plan.
 
 4. **Expose Apple SKU on the snapshot** — at least one of:
-   - `apple_product_id` / `appleProductId`: App Store SKU (also listed under `APPLE_SUBSCRIPTION_PRODUCT_IDS` in `cc_mobile_ui` `src/utils/constants.js` until catalog-only rollout), **or**
+   - `apple_product_id` / `appleProductId`: App Store SKU from **`GET /api/subscriptions/{user_id}`**, **or**
    - `product_id` / `productId` set to that **App Store SKU** when `billing_provider === "apple"`.
 
 If `billing_provider` is missing, all Apple SKUs missing, and status stays `free`, the UX will **never unlock tier logic** correctly despite a finished StoreKit transaction.
