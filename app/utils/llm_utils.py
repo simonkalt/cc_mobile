@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Optional
 
 from app.core.config import settings
+from app.utils.grok_client import (
+    GROK_MODEL_ID,
+    grok_chat_completions,
+    is_grok_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,31 +171,20 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
         )
         return_response = response.text
         
-    elif model == "grok-4-fast-reasoning":
-        if not REQUESTS_AVAILABLE or not settings.XAI_API_KEY:
-            logger.error("XAI API not available or API key not set")
+    elif is_grok_model(model):
+        if not REQUESTS_AVAILABLE:
+            logger.error("requests not available for Grok/OCI calls")
             return None
-            
-        headers = {
-            "Authorization": f"Bearer {settings.XAI_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        data = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt},
-            ],
-        }
-        response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            json=data,
-            headers=headers,
-            timeout=3600,
-        )
-        response.raise_for_status()
-        result = response.json()
-        return_response = result["choices"][0]["message"]["content"]
+        try:
+            return_response = grok_chat_completions(
+                [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+        except Exception as exc:
+            logger.error("Grok/OCI chat completion failed: %s", exc)
+            return None
 
     return return_response
 
@@ -213,8 +207,8 @@ def normalize_llm_name(llm: str) -> str:
         return "gpt-4.1"
     elif "gpt" in llm_lower or llm == "ChatGPT":
         return "gpt-5.5"
-    elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
-        return "grok-4-fast-reasoning"
+    elif is_grok_model(llm) or llm == "Grok":
+        return GROK_MODEL_ID
     elif "haiku" in llm_lower or llm == "claude-haiku-4-5" or llm == "Claude Haiku":
         return "claude-haiku-4-5"
     elif (

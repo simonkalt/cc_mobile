@@ -1047,6 +1047,8 @@ def increment_llm_usage_count(
         set_fields: Dict[str, Any] = {
             "llm_counts": current_counts,
             "last_llm_used": llm_name,
+            # Keep settings default in sync so login restores the model that was actually used
+            "preferences.appSettings.selectedModel": llm_name,
             "dateUpdated": datetime.now(UTC),
         }
         pid = (last_personality_profile_id or "").strip()

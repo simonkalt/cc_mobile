@@ -218,15 +218,37 @@ def get_user_subscription(
     cancel_at_period_end = bool(user.get("cancelAtPeriodEnd", False))
     canceled_at = user.get("canceledAt")
 
+    def _stripe_subscription_id() -> bool:
+        return bool(
+            subscription_id
+            and isinstance(subscription_id, str)
+            and subscription_id.startswith("sub_")
+        )
+
     def _infer_billing_provider() -> Optional[str]:
         if billing_provider:
             return billing_provider
-        if subscription_id and isinstance(subscription_id, str) and subscription_id.startswith("sub_"):
+        if _stripe_subscription_id():
             return "stripe"
+        if user.get("appleOriginalTransactionId") or user.get("appleProductId"):
+            return "apple"
         return None
 
-    # Sync with Stripe when we have a subscription ID to avoid stale "expired" dates in DB
-    if subscription_id and STRIPE_AVAILABLE and billing_provider != "apple":
+    def _apple_period_relevant() -> bool:
+        """True when period-end normalization should follow Apple rules (see BILLING_API_CONTRACT)."""
+        if billing_provider == "apple":
+            return True
+        if billing_provider == "stripe":
+            return False
+        if _stripe_subscription_id():
+            return False
+        return bool(
+            user.get("appleOriginalTransactionId") or user.get("appleProductId")
+        )
+
+    # Sync with Stripe only for real Stripe subscription IDs — Apple persists original tx id in
+    # subscriptionId, which must not be passed to Subscription.retrieve.
+    if subscription_id and STRIPE_AVAILABLE and billing_provider != "apple" and _stripe_subscription_id():
         try:
             stripe_to_use = _get_stripe_module()
             if stripe_to_use:
@@ -474,6 +496,7 @@ def get_user_subscription(
         and subscription_id
         and STRIPE_AVAILABLE
         and billing_provider != "apple"
+        and _stripe_subscription_id()
     ):
         try:
             stripe_to_use = _get_stripe_module()
@@ -531,7 +554,7 @@ def get_user_subscription(
         except Exception as e:
             logger.error(f"Could not fetch product ID from Stripe: {e}", exc_info=True)
 
-    if billing_provider == "apple" and current_period_end:
+    if _apple_period_relevant() and current_period_end:
         try:
             cpe = current_period_end
             if isinstance(cpe, datetime):
@@ -571,7 +594,30 @@ def get_user_subscription(
         subscription_status = "incomplete"
 
     effective_billing = _infer_billing_provider()
-    apple_product_id = user.get("appleProductId") if effective_billing == "apple" else None
+
+    if effective_billing == "apple" and not billing_provider:
+        try:
+            collection.update_one(
+                {"_id": user_id_obj},
+                {"$set": {"billingProvider": "apple", "dateUpdated": datetime.now(UTC)}},
+            )
+        except Exception:
+            logger.debug(
+                "Optional billingProvider=apple heal skipped for user %s",
+                user_id,
+                exc_info=True,
+            )
+
+    apple_product_id: Optional[str] = None
+    response_product_id = product_id
+    if effective_billing == "apple":
+        apple_product_id = (
+            user.get("appleProductId")
+            or user.get("subscriptionProductId")
+            or product_id
+        )
+        if apple_product_id:
+            response_product_id = apple_product_id
 
     # Build a minimal projection doc for entitlement computation using current (possibly
     # Stripe-refreshed) values rather than stale DB values.
@@ -614,7 +660,7 @@ def get_user_subscription(
         subscriptionId=subscription_id,
         subscriptionStatus=subscription_status,
         subscriptionPlan=subscription_plan,
-        productId=product_id,
+        productId=response_product_id,
         priceId=price_id,
         subscriptionCurrentPeriodEnd=current_period_end,
         cancelAtPeriodEnd=cancel_at_period_end,
