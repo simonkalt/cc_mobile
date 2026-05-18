@@ -68,6 +68,12 @@ except ImportError:
     MONGODB_AVAILABLE = False
     logger.warning("MongoDB module not available. Some features will be disabled.")
 
+from app.utils.grok_client import (
+    GROK_MODEL_ID,
+    grok_chat_completions,
+    is_grok_model,
+)
+
 # Try to import ollama, make it optional
 try:
     import ollama
@@ -454,7 +460,7 @@ claude_model = "claude-sonnet-4-6"
 claude_haiku_model = "claude-haiku-4-5"
 ollama_model = "llama3.2"
 OLLAMA_API = "http://localhost:11434/api/chat"
-xai_model = "grok-4-fast-reasoning"
+xai_model = GROK_MODEL_ID
 
 # we need to move this to the server side and make it dynamic
 LLM_ENVIRONMENT_MAPPING = [
@@ -462,7 +468,7 @@ LLM_ENVIRONMENT_MAPPING = [
     ("Claude", "claude-sonnet-4-6", anthropic_api_key),
     ("Claude Haiku", "claude-haiku-4-5", anthropic_api_key),
     ("Gemini", "gemini-2.5-flash", gemini_api_key),
-    ("Grok", "grok-4-fast-reasoning", xai_api_key),
+    ("Grok", GROK_MODEL_ID, xai_api_key),
 ]
 
 
@@ -604,28 +610,13 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5"):
             contents=prompt,
         )
         return_response = response.text
-    elif model == "grok-4-fast-reasoning":
-        # Fallback to direct HTTP requests (no SDK needed)
-        headers = {
-            "Authorization": f"Bearer {xai_api_key}",
-            "Content-Type": "application/json",
-        }
-        data = {
-            "model": model,
-            "messages": [
+    elif is_grok_model(model):
+        return_response = grok_chat_completions(
+            [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": prompt},
             ],
-        }
-        response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            json=data,
-            headers=headers,
-            timeout=3600,
         )
-        response.raise_for_status()
-        result = response.json()
-        return_response = result["choices"][0]["message"]["content"]
 
     return return_response
 
@@ -878,8 +869,8 @@ def normalize_llm_name(llm: str) -> str:
         return "gpt-4.1"
     elif "gpt" in llm_lower or llm == "ChatGPT":
         return "gpt-5.5"
-    elif "grok" in llm_lower or llm == "grok-4-fast-reasoning":
-        return "grok-4-fast-reasoning"
+    elif is_grok_model(llm) or llm == "Grok":
+        return GROK_MODEL_ID
     elif "haiku" in llm_lower or llm == "claude-haiku-4-5" or llm == "Claude Haiku":
         return "claude-haiku-4-5"
     elif (
@@ -2702,33 +2693,18 @@ Important:
 - If any information is not found, use "Not specified" as the value
 """
 
-        # Call Grok API
         logger.info("Calling Grok API to extract job information")
-        headers = {
-            "Authorization": f"Bearer {xai_api_key}",
-            "Content-Type": "application/json",
-        }
-        data = {
-            "model": xai_model,
-            "messages": [
+        grok_response = grok_chat_completions(
+            [
                 {
                     "role": "system",
                     "content": "You are an expert at extracting structured information from job postings. Always return valid JSON only.",
                 },
                 {"role": "user", "content": prompt},
             ],
-            "temperature": 0.3,  # Lower temperature for more consistent extraction
-        }
-
-        response = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            json=data,
-            headers=headers,
+            temperature=0.3,
             timeout=120,
         )
-        response.raise_for_status()
-        result = response.json()
-        grok_response = result["choices"][0]["message"]["content"]
 
         logger.info(f"Grok response received ({len(grok_response)} characters)")
 

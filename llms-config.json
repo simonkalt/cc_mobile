@@ -21,9 +21,9 @@
       "description": "Google's Gemini 2.5 Flash model"
     },
     {
-      "value": "grok-4-fast-reasoning",
-      "label": "Grok 4 Fast Reasoning",
-      "description": "xAI's Grok 4 Fast Reasoning model"
+      "value": "grok-4.3",
+      "label": "Grok 4.3",
+      "description": "xAI Grok 4.3 reasoning model (short and concise)"
     }
   ],
   "defaultModel": "claude-haiku-4-5",
