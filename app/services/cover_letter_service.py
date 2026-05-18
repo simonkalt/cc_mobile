@@ -50,6 +50,12 @@ from app.utils.llm_utils import (
     load_system_prompt,
     normalize_llm_name,
 )
+from app.utils.grok_client import (
+    GROK_MODEL_ID,
+    grok_chat_completions,
+    is_grok_model,
+    resolve_grok_api_key_from_dotenv,
+)
 from app.services.user_service import (
     get_user_by_id,
     get_user_by_email,
@@ -482,12 +488,19 @@ def _record_generation_usage(
     except Exception as e:
         logger.warning(f"Failed to increment LLM usage count: {e}")
 
-    if ok and pid and isinstance(user_ctx, dict):
-        _merge_last_personality_into_user_ctx(
-            user_ctx,
-            profile_id=pid,
-            tone_display=disp,
-        )
+    if ok and isinstance(user_ctx, dict):
+        prefs = user_ctx.setdefault("preferences", {})
+        if isinstance(prefs, dict):
+            app = prefs.setdefault("appSettings", {})
+            if isinstance(app, dict):
+                app["selectedModel"] = normalized_llm
+        user_ctx["last_llm_used"] = normalized_llm
+        if pid:
+            _merge_last_personality_into_user_ctx(
+                user_ctx,
+                profile_id=pid,
+                tone_display=disp,
+            )
         _set_cached_user_profile(
             user_id=user_id,
             user_email=user_email,
@@ -505,18 +518,7 @@ def _resolve_xai_api_key() -> Optional[str]:
     key = (settings.XAI_API_KEY or "").strip()
     if key:
         return key
-    try:
-        service_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.normpath(os.path.join(service_dir, "..", ".."))
-        env_path = os.path.join(project_root, ".env")
-        env_map = dotenv_values(env_path)
-        fallback = str(env_map.get("XAI_API_KEY") or "").strip()
-        if fallback:
-            logger.warning("Using XAI_API_KEY fallback from .env file")
-            return fallback
-    except Exception as e:
-        logger.debug("Could not load XAI_API_KEY from .env fallback: %s", e)
-    return None
+    return resolve_grok_api_key_from_dotenv()
 
 
 def _write_llm_prompt_log(
@@ -746,7 +748,7 @@ gpt_model = "gpt-5.2"
 claude_model = "claude-sonnet-4-6"
 claude_haiku_model = "claude-haiku-4-5"
 ollama_model = "llama3.2"
-xai_model = "grok-4-fast-reasoning"
+xai_model = GROK_MODEL_ID
 
 # Try to load GPT model from LLM config
 try:
@@ -1496,7 +1498,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 )
             r = response.choices[0].message.content
 
-        elif llm == "Grok" or llm == xai_model or llm == "grok-4-fast-reasoning":
+        elif llm == "Grok" or is_grok_model(llm):
             xai_api_key = _resolve_xai_api_key()
             if not REQUESTS_AVAILABLE or not xai_api_key:
                 logger.error(
@@ -1505,11 +1507,6 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                     bool(xai_api_key),
                 )
                 raise ValueError("XAI API not available or API key not set")
-            # Use HTTP API (xai SDK has different API structure)
-            headers = {
-                "Authorization": f"Bearer {xai_api_key}",
-                "Content-Type": "application/json",
-            }
             messages_list = [
                 {"role": "system", "content": system_message},
                 {
@@ -1533,16 +1530,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 logger.debug("Additional instructions appended to Grok messages")
             _log_prompt_length(llm, messages=messages_list)
             _write_llm_prompt_log(llm, messages=messages_list)
-            data = {"model": xai_model, "messages": messages_list}
-            response = requests.post(
-                "https://api.x.ai/v1/chat/completions",
-                json=data,
-                headers=headers,
-                timeout=3600,
-            )
-            response.raise_for_status()
-            result = response.json()
-            r = result["choices"][0]["message"]["content"]
+            r = grok_chat_completions(messages_list)
 
         elif llm == "Llama" or llm == ollama_model or llm == "llama3.2":
             if not OLLAMA_AVAILABLE:
