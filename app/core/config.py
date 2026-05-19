@@ -12,8 +12,26 @@ load_dotenv(_ROOT / ".env")
 load_dotenv(_ROOT / ".secrets", override=True)
 
 
+def _strip_env_value(raw: str) -> str:
+    """Strip whitespace and trailing inline comments.
+
+    Docker ``--env-file`` passes values verbatim (unlike python-dotenv), so
+    ``KEY=value  # note`` can reach os.getenv with the comment included.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return s
+    if " #" in s:
+        s = s.split(" #", 1)[0].strip()
+    return s
+
+
+def _env_int(name: str, default: str) -> int:
+    return int(_strip_env_value(os.getenv(name) or default))
+
+
 def _env_int_optional(name: str) -> Optional[int]:
-    raw = (os.getenv(name) or "").strip()
+    raw = _strip_env_value(os.getenv(name) or "")
     if not raw:
         return None
     try:
@@ -83,7 +101,7 @@ class Settings:
     
     # Server
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
+    PORT: int = _env_int("PORT", "8000")
     
     # CORS - defaults
     _DEFAULT_CORS_ORIGINS: List[str] = [
@@ -151,10 +169,10 @@ class Settings:
 
     # Redis Configuration
     REDIS_HOST: Optional[str] = os.getenv("REDIS_HOST")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PORT: int = _env_int("REDIS_PORT", "6379")
     REDIS_USERNAME: Optional[str] = os.getenv("REDIS_USERNAME")
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_DB: int = _env_int("REDIS_DB", "0")
     REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
     REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")
 
@@ -166,7 +184,7 @@ class Settings:
     FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL", "no-reply@saimonsoft.com")
 
     SMTP_SERVER: Optional[str] = os.getenv("SMTP_SERVER")
-    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_PORT: int = _env_int("SMTP_PORT", "587")
     SMTP_USERNAME: Optional[str] = os.getenv("SMTP_USERNAME")
     SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
     SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
@@ -235,8 +253,8 @@ class Settings:
     JWT_AUDIENCE: Optional[str] = os.getenv("JWT_AUDIENCE")
     JWT_VALIDATE_ISSUER: bool = os.getenv("JWT_VALIDATE_ISSUER", "false").lower() == "true"
     JWT_VALIDATE_AUDIENCE: bool = os.getenv("JWT_VALIDATE_AUDIENCE", "false").lower() == "true"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = _env_int("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = _env_int("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")
 
     # Print-preview/PDF behavior flags
     NUTRIENT_API_KEY: Optional[str] = os.getenv("NUTRIENT_API_KEY")
@@ -272,7 +290,7 @@ class Settings:
     # Cover-letter generation feature flags (Word-integration compatibility)
     USE_TEMPLATE_IN_PROMPT: bool = os.getenv("USE_TEMPLATE_IN_PROMPT", "false").lower() == "true"
     USE_DOCX_COMPONENTS: bool = os.getenv("USE_DOCX_COMPONENTS", "false").lower() == "true"
-    LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8124"))
+    LLM_MAX_OUTPUT_TOKENS: int = _env_int("LLM_MAX_OUTPUT_TOKENS", "8124")
     ENFORCE_STRONG_PASSWORDS: bool = os.getenv("ENFORCE_STRONG_PASSWORDS", "false").lower() == "true"
     # ASCII timing chart in logs for cover-letter routes. Default off.
     # Only LOG_TIMING is honored (ENABLE_GENERATION_TIMING_CHART is ignored to avoid stale env turning logs on).
