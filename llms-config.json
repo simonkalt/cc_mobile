@@ -1,11 +1,6 @@
 {
   "llms": [
     {
-      "value": "gpt-5.2",
-      "label": "GPT-5.2",
-      "description": "Latest GPT model with enhanced capabilities"
-    },
-    {
       "value": "gpt-5.5",
       "label": "GPT-5.5",
       "description": "GPT-5.5 model"
@@ -27,5 +22,5 @@
     }
   ],
   "defaultModel": "claude-haiku-4-5",
-  "internalModel": "gpt-5.2"
+  "internalModel": "gpt-5.5"
 }

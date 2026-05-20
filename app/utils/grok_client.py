@@ -8,31 +8,11 @@ import os
 from typing import Any, Optional
 
 from app.core.config import settings
+from app.utils.grok_models import GROK_MODEL_ID, is_grok_model
 
 logger = logging.getLogger(__name__)
 
-GROK_MODEL_ID = "grok-4.3"
 XAI_CHAT_COMPLETIONS_URL = "https://api.x.ai/v1/chat/completions"
-
-LEGACY_GROK_MODEL_IDS = frozenset(
-    {
-        "grok-4-fast-reasoning",
-        "grok-4-fast-reasoning".lower(),
-        "xai.grok-4.3",
-        "xai.grok-4.3".lower(),
-    }
-)
-
-
-def is_grok_model(model: str) -> bool:
-    m = (model or "").strip()
-    if not m:
-        return False
-    if m == GROK_MODEL_ID or m.lower() == GROK_MODEL_ID.lower():
-        return True
-    if m in LEGACY_GROK_MODEL_IDS or m.lower() in LEGACY_GROK_MODEL_IDS:
-        return True
-    return "grok" in m.lower()
 
 
 def resolve_grok_api_key() -> Optional[str]:
@@ -58,10 +38,14 @@ def grok_chat_completions(
         raise ValueError("XAI_API_KEY is not set")
 
     model = (os.getenv("GROK_MODEL_ID") or GROK_MODEL_ID).strip()
+    if max_tokens is None:
+        from app.utils.llm_token_limits import max_output_tokens_for_model
+
+        max_tokens = max_output_tokens_for_model(model)
     payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "max_tokens": max_tokens if max_tokens is not None else settings.LLM_MAX_OUTPUT_TOKENS,
+        "max_tokens": max_tokens,
     }
     if temperature is not None:
         payload["temperature"] = temperature

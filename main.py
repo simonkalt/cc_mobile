@@ -73,6 +73,11 @@ from app.utils.grok_client import (
     grok_chat_completions,
     is_grok_model,
 )
+from app.utils.llm_token_limits import (
+    max_output_tokens_for_model,
+    resolve_openai_model,
+    uses_openai_max_completion_tokens,
+)
 
 # Try to import ollama, make it optional
 try:
@@ -447,11 +452,11 @@ system_message = load_system_prompt()
 
 # Model names mapping
 # Try to load GPT model from LLM config, fallback to default
-gpt_model = "gpt-5.2"  # Default fallback
+gpt_model = "gpt-5.5"  # Default fallback
 if LLM_CONFIG_AVAILABLE:
     try:
         config = load_llm_config()
-        gpt_model = config.get("internalModel", "gpt-5.2")
+        gpt_model = config.get("internalModel", "gpt-5.5")
         logger.info(f"Loaded GPT model from config: {gpt_model}")
     except Exception as e:
         logger.warning(f"Failed to load GPT model from config, using default: {e}")
@@ -561,26 +566,27 @@ class JobURLAnalysisRequest(BaseModel):
 
 def post_to_llm(prompt: str, model: str = "gpt-5.5"):
     return_response = None
-    if model == "gpt-4.1" or model == "gpt-5.2" or model == "gpt-5.5" or model.startswith("gpt-"):
+    if model == "gpt-4.1" or model == "gpt-5.5" or model.startswith("gpt-"):
+        openai_model = resolve_openai_model(model)
         client = OpenAI(api_key=openai_api_key)
-        # Use high max_completion_tokens for GPT-5.2 / GPT-5.5 (supports 128,000 max completion tokens)
-        if model in ("gpt-5.2", "gpt-5.5"):
+        openai_max_tokens = max_output_tokens_for_model(openai_model)
+        if uses_openai_max_completion_tokens(openai_model):
             response = client.chat.completions.create(
-                model=model,
+                model=openai_model,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
                     {"role": "user", "content": prompt},
                 ],
-                max_completion_tokens=128000,  # GPT-5.2 uses max_completion_tokens
+                max_completion_tokens=openai_max_tokens,
             )
         else:
             response = client.chat.completions.create(
-                model=model,
+                model=openai_model,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=16000,  # Older GPT models use max_tokens
+                max_tokens=openai_max_tokens,
             )
         return_response = response.choices[0].message.content
     elif model in ("claude-sonnet-4-6", "claude-sonnet-4-20250514"):
@@ -589,7 +595,7 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5"):
             model="claude-sonnet-4-6",
             system="You are a helpful assistant.",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=20000,
+            max_tokens=max_output_tokens_for_model("claude-sonnet-4-6"),
             temperature=1,
         )
         return_response = response.content[0].text.replace("```json", "").replace("```", "")
@@ -599,7 +605,7 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5"):
             model="claude-haiku-4-5",
             system="You are a helpful assistant.",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=20000,
+            max_tokens=max_output_tokens_for_model("claude-haiku-4-5"),
             temperature=1,
         )
         return_response = response.content[0].text.replace("```json", "").replace("```", "")
@@ -862,7 +868,7 @@ def normalize_llm_name(llm: str) -> str:
     if "gemini" in llm_lower or llm == "gemini-2.5-flash":
         return "gemini-2.5-flash"
     elif llm == "gpt-5.2" or llm_lower == "gpt-5.2":
-        return "gpt-5.2"
+        return "gpt-5.5"
     elif llm == "gpt-5.5" or llm_lower == "gpt-5.5":
         return "gpt-5.5"
     elif llm == "gpt-4.1" or llm_lower == "gpt-4.1":
