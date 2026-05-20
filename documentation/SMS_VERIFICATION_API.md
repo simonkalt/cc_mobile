@@ -67,7 +67,7 @@ Send a 6-digit verification code via SMS to the user's registered phone number.
 **Error Responses:**
 
 - `400 Bad Request`: Invalid purpose or missing email/phone
-- `404 Not Found`: User not found (all purposes including `forgot_password`)
+- `404 Not Found`: User not found (`change_password` only; `forgot_password` returns 200 with generic message)
 - `400 Bad Request`: User does not have a phone number registered
 - `500 Internal Server Error`: Failed to send SMS
 - `503 Service Unavailable`: Database connection unavailable
@@ -795,7 +795,7 @@ While not implemented in the API, consider implementing rate limiting on the fro
 
 ### Error Handling Best Practices
 
-- **Forgot Password**: Returns **404** if the user doesn't exist. The frontend uses this to keep the user on the send-code step and display a "not found" message. This is a deliberate UX-over-enumeration-protection decision.
+- **Forgot Password**: Returns **200** with a generic message if the user doesn't exist or has no phone (anti-enumeration; no SMS sent). Same response shape as a successful send.
 - **Other Flows**: Return specific error messages for debugging
 - Log all verification attempts for security auditing
 
@@ -807,7 +807,7 @@ While not implemented in the API, consider implementing rate limiting on the fro
 | ----------- | --------------------- | --------------------------------------------- |
 | 200         | Success               | Request completed successfully                |
 | 400         | Bad Request           | Invalid purpose, missing fields, invalid code |
-| 404         | Not Found             | User not found (except forgot_password)       |
+| 404         | Not Found             | User not found (`change_password` only)      |
 | 500         | Internal Server Error | Twilio API error, SMS sending failed          |
 | 503         | Service Unavailable   | Database connection unavailable               |
 

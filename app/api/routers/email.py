@@ -23,6 +23,8 @@ from app.services.verification_service import (
     verify_code_from_redis,
     complete_registration_from_redis,
     clear_verification_code,
+    ANTI_ENUM_SEND_CODE_MESSAGE,
+    ANTI_ENUM_SEND_CODE_EXPIRES_MINUTES,
 )
 from app.services.user_service import (
     get_user_by_email,
@@ -41,6 +43,15 @@ from app.utils.password import validate_strong_password
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/email", tags=["email"])
+
+
+def _anti_enum_send_code_response() -> SendVerificationCodeResponse:
+    """Generic success for forgot_password when user is unknown (no 404)."""
+    return SendVerificationCodeResponse(
+        success=True,
+        message=ANTI_ENUM_SEND_CODE_MESSAGE,
+        expires_in_minutes=ANTI_ENUM_SEND_CODE_EXPIRES_MINUTES,
+    )
 
 
 def _enforce_strong_password_or_raise(password: str) -> None:
@@ -143,11 +154,19 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             )
     
     # Handle existing user flows (forgot_password, change_password)
-    # Find user by email (case-insensitive so we find them even if casing differs).
-    # NOTE: forgot_password intentionally surfaces the 404 so the frontend can
-    # keep the user on the send-code step.  This trades anti-enumeration for UX.
-    user = get_user_by_email_ignore_case(request.email)
-    
+    if request.purpose == "forgot_password":
+        try:
+            user = get_user_by_email_ignore_case(request.email)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                logger.info(
+                    "forgot_password send-code: no user for email (anti-enumeration response)"
+                )
+                return _anti_enum_send_code_response()
+            raise
+    else:
+        user = get_user_by_email_ignore_case(request.email)
+
     # Send and store verification code.
     # Use the requested email after user lookup succeeds so stale DB email values do not misroute delivery.
     try:

@@ -23,9 +23,12 @@ from app.services.verification_service import (
     verify_code,
     verify_code_from_redis,
     complete_registration_from_redis,
+    ANTI_ENUM_SEND_CODE_MESSAGE,
+    ANTI_ENUM_SEND_CODE_EXPIRES_MINUTES,
 )
 from app.services.user_service import (
     get_user_by_email,
+    get_user_by_email_ignore_case,
     get_user_by_id,
     create_user_from_registration_data,
 )
@@ -41,6 +44,14 @@ from app.utils.registration_notice import assert_data_use_sharing_notice_accepte
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sms", tags=["sms"])
+
+
+def _anti_enum_send_code_response() -> SendVerificationCodeResponse:
+    return SendVerificationCodeResponse(
+        success=True,
+        message=ANTI_ENUM_SEND_CODE_MESSAGE,
+        expires_in_minutes=ANTI_ENUM_SEND_CODE_EXPIRES_MINUTES,
+    )
 
 
 def _enforce_strong_password_or_raise(password: str) -> None:
@@ -162,34 +173,64 @@ async def send_verification_code_endpoint(request: SendVerificationCodeRequest):
             expires_in_minutes=10,
         )
 
-    # Find user by email or phone.
-    # NOTE: forgot_password intentionally surfaces 404 so the frontend can
-    # keep the user on the send-code step.  This trades anti-enumeration for UX
-    # and matches the email endpoint's behaviour.
-    user = None
-    if request.email:
-        user = get_user_by_email(request.email)
-    elif request.phone:
-        normalized_phone = normalize_phone_number(request.phone)
-        user_doc = collection.find_one({"phone": normalized_phone})
-        if not user_doc:
+    if request.purpose == "forgot_password":
+        user = None
+        if request.email:
+            try:
+                user = get_user_by_email_ignore_case(request.email)
+            except HTTPException as exc:
+                if exc.status_code == status.HTTP_404_NOT_FOUND:
+                    logger.info(
+                        "forgot_password SMS send-code: no user for email (anti-enumeration)"
+                    )
+                    return _anti_enum_send_code_response()
+                raise
+        elif request.phone:
+            normalized_phone = normalize_phone_number(request.phone)
+            user_doc = collection.find_one({"phone": normalized_phone})
+            if not user_doc:
+                logger.info(
+                    "forgot_password SMS send-code: no user for phone (anti-enumeration)"
+                )
+                return _anti_enum_send_code_response()
+            user = get_user_by_id(str(user_doc["_id"]))
+        else:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either email or phone must be provided",
             )
-        user = get_user_by_id(str(user_doc["_id"]))
+
+        phone_number = user.phone
+        if not phone_number:
+            logger.info(
+                "forgot_password SMS send-code: user has no phone (anti-enumeration)"
+            )
+            return _anti_enum_send_code_response()
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either email or phone must be provided"
-        )
-    
-    phone_number = user.phone
-    if not phone_number:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User does not have a phone number registered"
-        )
+        user = None
+        if request.email:
+            user = get_user_by_email(request.email)
+        elif request.phone:
+            normalized_phone = normalize_phone_number(request.phone)
+            user_doc = collection.find_one({"phone": normalized_phone})
+            if not user_doc:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found",
+                )
+            user = get_user_by_id(str(user_doc["_id"]))
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either email or phone must be provided",
+            )
+
+        phone_number = user.phone
+        if not phone_number:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User does not have a phone number registered",
+            )
     
     # Send and store verification code
     try:

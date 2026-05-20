@@ -24,10 +24,12 @@ Every `send-code` endpoint enforces the following **before** any code is generat
 
 | Channel | Lookup identifier | Validation performed | `forgot_password` when not found |
 |---------|-------------------|----------------------|----------------------------------|
-| SMS (by email) | `email` | `get_user_by_email` — 404 if no match | Returns **404** |
-| SMS (by phone) | `phone` | MongoDB query on normalised phone — 404 if no match | Returns **404** |
-| SMS (any purpose) | — | Confirms `user.phone` is set after lookup | **400** "User does not have a phone number registered" |
-| Email (existing user) | `email` | `get_user_by_email_ignore_case` — 404 if no match | Returns **404** |
+| SMS (by email) | `email` | `get_user_by_email_ignore_case` | **200** generic message (no code sent) |
+| SMS (by phone) | `phone` | MongoDB query on normalised phone | **200** generic message (no code sent) |
+| SMS (`forgot_password`) | — | If user has no `phone` on file | **200** generic message (no code sent) |
+| SMS (`change_password`) | — | Confirms `user.phone` is set after lookup | **400** if no phone; **404** if user missing |
+| Email (`forgot_password`) | `email` | `get_user_by_email_ignore_case` | **200** generic message (no code sent) |
+| Email (`change_password`) | `email` | `get_user_by_email_ignore_case` — 404 if no match | **404** |
 | Email (registration) | `email` | `get_user_by_email` — **409** if user already exists | N/A (registration only) |
 | Admin login | `email` + `password` | Loads user by email; checks `isActive`, `super_user`, password | **401** / **403** |
 | Admin resend | `user_id` | Loads user by ObjectId; checks `super_user` | **403** |
@@ -73,7 +75,7 @@ Send a 6-digit verification code via SMS.
 | Status | Condition |
 |--------|-----------|
 | 400 | Invalid purpose, neither `email` nor `phone` provided, or user has no phone on file |
-| 404 | User not found (all purposes including `forgot_password`) |
+| 404 | User not found (`change_password` only; `forgot_password` returns 200 generic) |
 | 500 | SMS provider failure |
 | 503 | Database unavailable |
 
@@ -224,7 +226,7 @@ Send a 6-digit verification code via email.
 | Purpose | User must exist? | Extra validation |
 |---------|------------------|------------------|
 | `finish_registration` | Must **not** exist (409 if they do) | `registration_data` required; password strength enforced |
-| `forgot_password` | If not found → **404** | Frontend uses the 404 to hold the user on the send-code step (see note below) |
+| `forgot_password` | If not found → **200** generic message (anti-enumeration; no email sent) | Same response body as a successful send |
 | `change_password` | Must exist (404 if not) | — |
 
 **Success Response (200)**
@@ -242,12 +244,10 @@ Send a 6-digit verification code via email.
 | Status | Condition |
 |--------|-----------|
 | 400 | Invalid purpose, missing `registration_data`, weak password |
-| 404 | User not found (**all** non-registration purposes, including `forgot_password`) |
+| 404 | User not found (`change_password` only) |
 | 409 | User already exists (registration only) |
 | 500 | Email delivery failure |
 | 503 | Database unavailable |
-
-> **Design note:** Both SMS and email `send-code` endpoints return **404** for `forgot_password` with an unknown user. This is intentional — the frontend uses the 404 to keep the user on the send-code step. The trade-off is that account existence can be probed via these endpoints; this was a deliberate UX-over-enumeration-protection decision.
 
 ---
 
@@ -472,7 +472,9 @@ When `ENFORCE_STRONG_PASSWORDS` is enabled (production default), `new_password` 
 
 ### Anti-Enumeration
 
-Both SMS and Email `send-code` endpoints return **404** for `forgot_password` when the user is not found. This is a deliberate UX-over-enumeration-protection decision — the frontend uses the 404 to keep the user on the send-code step and display "No account found with this email address." Account existence can therefore be probed via these endpoints.
+For `forgot_password`, SMS and email `send-code` return **200** with the same generic message whether or not the account exists (and whether or not an SMS can be delivered). No verification code is generated or sent when the user is unknown or has no phone on file. The client should show a neutral message such as: *If an account exists, a verification code has been sent.*
+
+`change_password` still returns **404** when the user is not found.
 
 ---
 
@@ -484,7 +486,7 @@ Both SMS and Email `send-code` endpoints return **404** for `forgot_password` wh
 | 400 | Bad Request | Invalid purpose, missing required fields, invalid/expired code, weak password, no phone on file |
 | 401 | Unauthorized | Bad credentials (admin login), invalid 2FA code |
 | 403 | Forbidden | Account inactive, not an admin |
-| 404 | Not Found | User not found (all purposes including `forgot_password` — see [Anti-Enumeration](#anti-enumeration)) |
+| 404 | Not Found | User not found (`change_password` and other flows; not `forgot_password` send-code — see [Anti-Enumeration](#anti-enumeration)) |
 | 409 | Conflict | User already exists (email registration) |
 | 500 | Server Error | SMS/email provider failure |
 | 503 | Service Unavailable | Database connection down |

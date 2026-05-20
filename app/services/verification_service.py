@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 # Verification code expiration time (10 minutes)
 VERIFICATION_CODE_EXPIRY_MINUTES = 10
 
+# forgot_password send-code: identical response when the account is missing (anti-enumeration)
+ANTI_ENUM_SEND_CODE_MESSAGE = (
+    "If an account exists for this email or phone number, a verification code has been sent."
+)
+ANTI_ENUM_SEND_CODE_EXPIRES_MINUTES = VERIFICATION_CODE_EXPIRY_MINUTES
+
 
 def store_verification_code(
     user_id: str,
