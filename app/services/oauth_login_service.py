@@ -1,0 +1,341 @@
+"""
+OAuth login and account linking (Google / LinkedIn, Authorization Code + PKCE).
+See documentation/OAUTH_LOGIN_API.md.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from typing import Optional
+
+from bson import ObjectId
+from fastapi import HTTPException, status
+
+from app.constants.http_details import HTTP_DETAIL_PENDING_ACCOUNT_DELETION
+from app.constants.oauth_errors import oauth_error_detail
+from app.models.oauth import OAuthLinkResponse, OAuthLoginResponse, OAuthTokenExchangeRequest
+from app.models.user import UserResponse
+from app.services.oauth_providers import OAuthIdentity, OAuthProviderError, resolve_oauth_identity
+from app.services.user_service import (
+    USERS_COLLECTION,
+    build_login_response_from_user_doc,
+    create_oauth_user_document,
+    normalize_email_for_lookup,
+)
+from app.db.mongodb import get_collection, is_connected
+from app.utils.user_helpers import user_doc_to_response
+
+logger = logging.getLogger(__name__)
+
+OAUTH_PROVIDERS = frozenset({"google", "linkedin"})
+
+
+def _require_db_collection():
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
+    return collection
+
+
+def _oauth_http_error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail=oauth_error_detail(code, message))
+
+
+def _find_user_by_provider_sub(collection, provider: str, subject: str) -> Optional[dict]:
+    return collection.find_one(
+        {"authProviders": {"$elemMatch": {"provider": provider, "subject": subject}}}
+    )
+
+
+def _find_user_by_email_insensitive(collection, email: str) -> Optional[dict]:
+    import re
+
+    normalized = normalize_email_for_lookup(email)
+    if not normalized:
+        return None
+    pattern = f"^{re.escape(normalized)}$"
+    return collection.find_one({"email": {"$regex": pattern, "$options": "i"}})
+
+
+def _user_has_provider(user_doc: dict, provider: str) -> bool:
+    providers = user_doc.get("authProviders") or []
+    return any(
+        isinstance(p, dict) and p.get("provider") == provider for p in providers
+    )
+
+
+def _provider_sub_linked_to_other_user(
+    collection,
+    provider: str,
+    subject: str,
+    exclude_user_id: ObjectId,
+) -> bool:
+    other = collection.find_one(
+        {
+            "_id": {"$ne": exclude_user_id},
+            "authProviders": {"$elemMatch": {"provider": provider, "subject": subject}},
+        }
+    )
+    return other is not None
+
+
+def _assert_user_can_authenticate(user_doc: dict) -> None:
+    if user_doc.get("account_deletion_pending"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=HTTP_DETAIL_PENDING_ACCOUNT_DELETION,
+        )
+    if not user_doc.get("account_deletion_pending") and not user_doc.get("isActive", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=oauth_error_detail(
+                "inactive_account",
+                "User account is inactive",
+            ),
+        )
+
+
+def _append_auth_provider(
+    collection,
+    user_id: ObjectId,
+    identity: OAuthIdentity,
+) -> dict:
+    now = datetime.now(UTC)
+    provider_entry = {
+        "provider": identity.provider,
+        "subject": identity.sub,
+        "linkedAt": now,
+        "emailFromProvider": identity.email,
+    }
+    collection.update_one(
+        {"_id": user_id},
+        {
+            "$push": {"authProviders": provider_entry},
+            "$set": {"dateUpdated": now},
+        },
+    )
+    updated = collection.find_one({"_id": user_id})
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load user after linking provider",
+        )
+    return updated
+
+
+def _touch_last_login(collection, user_id: ObjectId) -> None:
+    collection.update_one(
+        {"_id": user_id},
+        {"$set": {"lastLogin": datetime.now(UTC), "failedLoginAttempts": 0}},
+    )
+
+
+def _resolve_identity(provider: str, body: OAuthTokenExchangeRequest) -> OAuthIdentity:
+    try:
+        return resolve_oauth_identity(
+            provider,
+            body.code.strip(),
+            body.redirect_uri.strip(),
+            body.code_verifier.strip(),
+        )
+    except OAuthProviderError as exc:
+        raise _oauth_http_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "invalid_code",
+            exc.message or "Authorization code is invalid or expired",
+        ) from exc
+
+
+def _maybe_set_avatar(collection, user_id: ObjectId, picture: Optional[str]) -> None:
+    if not picture:
+        return
+    collection.update_one(
+        {"_id": user_id, "$or": [{"avatarUrl": None}, {"avatarUrl": ""}]},
+        {"$set": {"avatarUrl": picture}},
+    )
+
+
+def _login_existing_user(
+    collection,
+    user_doc: dict,
+    identity: OAuthIdentity,
+    *,
+    linked_provider: Optional[str] = None,
+) -> OAuthLoginResponse:
+    _assert_user_can_authenticate(user_doc)
+    _touch_last_login(collection, user_doc["_id"])
+    _maybe_set_avatar(collection, user_doc["_id"], identity.picture)
+    refreshed = collection.find_one({"_id": user_doc["_id"]}) or user_doc
+    base = build_login_response_from_user_doc(refreshed)
+    return OAuthLoginResponse(
+        success=base.success,
+        user=base.user,
+        message=base.message,
+        access_token=base.access_token,
+        refresh_token=base.refresh_token,
+        token_type=base.token_type,
+        expires_in=base.expires_in,
+        files=base.files,
+        linkedProvider=linked_provider,
+    )
+
+
+def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginResponse:
+    if provider not in OAUTH_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown OAuth provider: {provider}",
+        )
+
+    identity = _resolve_identity(provider, body)
+    collection = _require_db_collection()
+
+    by_sub = _find_user_by_provider_sub(collection, provider, identity.sub)
+    if by_sub:
+        return _login_existing_user(collection, by_sub, identity)
+
+    intent = (body.intent or "login").strip().lower()
+    email = (identity.email or "").strip()
+    linked_provider: Optional[str] = None
+
+    if email:
+        by_email = _find_user_by_email_insensitive(collection, email)
+        if by_email:
+            if identity.email_verified:
+                if _user_has_provider(by_email, provider):
+                    return _login_existing_user(collection, by_email, identity)
+                updated = _append_auth_provider(collection, by_email["_id"], identity)
+                linked_provider = provider
+                return _login_existing_user(
+                    collection,
+                    updated,
+                    identity,
+                    linked_provider=linked_provider,
+                )
+            raise _oauth_http_error(
+                status.HTTP_409_CONFLICT,
+                "link_not_allowed",
+                "An account with this email already exists. Sign in with your password or link from Settings.",
+            )
+
+    if intent == "login":
+        raise _oauth_http_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "user_not_found",
+            "No account found for this sign-in. Register first or use a different method.",
+        )
+
+    if not body.data_use_sharing_notice_accepted:
+        raise _oauth_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "data_use_notice_required",
+            "You must accept the Data Use & Sharing Notice to create an account.",
+        )
+
+    if not email:
+        raise _oauth_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_code",
+            "Email is required from the identity provider to create an account.",
+        )
+
+    user_doc = create_oauth_user_document(
+        email=email,
+        name=identity.name or "",
+        avatar_url=identity.picture,
+        provider=provider,
+        subject=identity.sub,
+        email_from_provider=identity.email,
+    )
+    return _login_existing_user(collection, user_doc, identity)
+
+
+def oauth_link_provider(
+    current_user: UserResponse,
+    provider: str,
+    body: OAuthTokenExchangeRequest,
+) -> OAuthLinkResponse:
+    if provider not in OAUTH_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown OAuth provider: {provider}",
+        )
+
+    identity = _resolve_identity(provider, body)
+    collection = _require_db_collection()
+
+    try:
+        user_oid = ObjectId(current_user.id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        ) from exc
+
+    user_doc = collection.find_one({"_id": user_oid})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if _user_has_provider(user_doc, provider):
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "provider_already_linked",
+            f"This account already has {provider} linked.",
+        )
+
+    if _provider_sub_linked_to_other_user(collection, provider, identity.sub, user_oid):
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "provider_sub_conflict",
+            "This sign-in is already linked to another account.",
+        )
+
+    existing_by_sub = _find_user_by_provider_sub(collection, provider, identity.sub)
+    if existing_by_sub and existing_by_sub["_id"] != user_oid:
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "provider_sub_conflict",
+            "This sign-in is already linked to another account.",
+        )
+
+    account_email = normalize_email_for_lookup(user_doc.get("email", ""))
+    idp_email = normalize_email_for_lookup(identity.email or "")
+    if idp_email and account_email and idp_email != account_email:
+        if not identity.email_verified:
+            raise _oauth_http_error(
+                status.HTTP_409_CONFLICT,
+                "link_not_allowed",
+                "Provider email could not be verified for linking.",
+            )
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "link_not_allowed",
+            "Provider email does not match your account email.",
+        )
+
+    if identity.email and not identity.email_verified:
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "link_not_allowed",
+            "Provider email must be verified before linking.",
+        )
+
+    updated = _append_auth_provider(collection, user_oid, identity)
+    logger.info("Linked %s for user_id=%s", provider, current_user.id)
+    return OAuthLinkResponse(
+        success=True,
+        user=user_doc_to_response(updated),
+        linkedProvider=provider,
+    )

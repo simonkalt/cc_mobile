@@ -15,14 +15,12 @@ import datetime
 import base64
 import re
 import warnings
-from dotenv import load_dotenv
+from app.core.env_loader import load_project_env
 from __init__ import __version__
 print(f"Cover Letter API v{__version__}")
 
-# Load .env / .secrets early so os.getenv (e.g. GOOGLE_ANALYTICS_TAG) works for root routes
-_main_root = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(_main_root, ".env"))
-load_dotenv(os.path.join(_main_root, ".secrets"), override=True)
+# Load .env + secrets (/etc/secrets/.secrets on Render, else repo .secrets) before routes
+load_project_env()
 from openai import OpenAI
 import anthropic
 
@@ -319,6 +317,13 @@ try:
     app.include_router(users.router)
 except Exception as e:
     logger.error(f"Failed to register users router: {e}", exc_info=True)
+
+try:
+    from app.api.routers import auth
+
+    app.include_router(auth.router)
+except Exception as e:
+    logger.error(f"Failed to register auth router: {e}", exc_info=True)
 
 try:
     from app.api.routers import (

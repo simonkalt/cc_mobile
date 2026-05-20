@@ -4,12 +4,11 @@ Application configuration and settings
 import os
 from pathlib import Path
 from typing import List, Optional
-from dotenv import load_dotenv
+from app.core.env_loader import PROJECT_ROOT, load_project_env
 
-# Project root (repo root): load .env then .secrets so local overrides stay out of git
-_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(_ROOT / ".env")
-load_dotenv(_ROOT / ".secrets", override=True)
+# Project root: .env then secrets (.secrets locally or /etc/secrets/.secrets on Render)
+_ROOT = PROJECT_ROOT
+load_project_env(_ROOT)
 
 
 def _strip_env_value(raw: str) -> str:
@@ -38,6 +37,15 @@ def _env_int_optional(name: str) -> Optional[int]:
         return int(raw)
     except ValueError:
         return None
+
+
+def _env_first(*names: str) -> Optional[str]:
+    """Return the first non-empty env value among *names*."""
+    for name in names:
+        raw = _strip_env_value(os.getenv(name) or "")
+        if raw:
+            return raw
+    return None
 
 def _default_docx_service_base_url(debug_enabled: bool) -> str:
     deploy_env = (
@@ -156,9 +164,20 @@ class Settings:
     # Google Places API
     GOOGLE_PLACES_API_KEY: Optional[str] = os.getenv("GOOGLE_PLACES_API_KEY")
 
-    # LinkedIn API (3-legged OAuth + jobLibrary integration)
-    LINKEDIN_CLIENT_ID: Optional[str] = os.getenv("LINKEDIN_CLIENT_ID")
-    LINKEDIN_CLIENT_SECRET: Optional[str] = os.getenv("LINKEDIN_CLIENT_SECRET")
+    # Google OAuth (mobile/web login — Authorization Code + PKCE)
+    GOOGLE_CLIENT_ID: Optional[str] = os.getenv("GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET: Optional[str] = os.getenv("GOOGLE_CLIENT_SECRET")
+
+    # LinkedIn API (3-legged OAuth + jobLibrary integration; OIDC login reuses these)
+    # Falls back to EXPO_PUBLIC_* when LINKEDIN_* are unset (shared .env with mobile app).
+    LINKEDIN_CLIENT_ID: Optional[str] = _env_first(
+        "LINKEDIN_CLIENT_ID",
+        "EXPO_PUBLIC_LINKEDIN_CLIENT_ID",
+    )
+    LINKEDIN_CLIENT_SECRET: Optional[str] = _env_first(
+        "LINKEDIN_CLIENT_SECRET",
+        "EXPO_PUBLIC_LINKEDIN_CLIENT_SECRET",
+    )
     LINKEDIN_REDIRECT_URI: Optional[str] = os.getenv("LINKEDIN_REDIRECT_URI")
     LINKEDIN_SCOPE: Optional[str] = os.getenv("LINKEDIN_SCOPE")
     LINKEDIN_SUCCESS_REDIRECT: Optional[str] = os.getenv("LINKEDIN_SUCCESS_REDIRECT")
@@ -176,19 +195,12 @@ class Settings:
     REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
     REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")
 
-    # Zoho Mail API + legacy SMTP
+    # Zoho Mail API
     ZOHO_CLIENT_ID: Optional[str] = os.getenv("ZOHO_CLIENT_ID")
     ZOHO_CLIENT_SECRET: Optional[str] = os.getenv("ZOHO_CLIENT_SECRET")
     ZOHO_REFRESH_TOKEN: Optional[str] = os.getenv("ZOHO_REFRESH_TOKEN")
     ZOHO_ACCOUNT_ID: Optional[str] = os.getenv("ZOHO_ACCOUNT_ID")
     FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL", "no-reply@saimonsoft.com")
-
-    SMTP_SERVER: Optional[str] = os.getenv("SMTP_SERVER")
-    SMTP_PORT: int = _env_int("SMTP_PORT", "587")
-    SMTP_USERNAME: Optional[str] = os.getenv("SMTP_USERNAME")
-    SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
-    SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
-    SMTP_USE_SSL: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
 
     # Stripe Configuration (supports both legacy and newer env names)
     STRIPE_LIVE: bool = os.getenv("STRIPE_LIVE", "false").lower() == "true"

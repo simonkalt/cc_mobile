@@ -2,7 +2,7 @@
 """
 Fetch a signedTransaction JWS from the Apple App Store Server API.
 
-All credentials are read from .env (loaded automatically from the project root).
+Credentials are read from .env and .secrets (loaded from the project root).
 
 Usage:
     .venv/bin/python get_signed_jws_apple.sh <original_transaction_id>
@@ -27,12 +27,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / ".secrets", override=True)
-except ImportError:
-    pass  # fall through to whatever is already in os.environ
+from app.core.env_loader import load_project_env
+
+load_project_env(ROOT)
 
 # ---------------------------------------------------------------------------
 # Config — all from .env

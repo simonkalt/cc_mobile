@@ -58,12 +58,12 @@ def main():
     print("Checking Telnyx configuration...")
     if not settings.TELNYX_API_KEY:
         print("❌ ERROR: TELNYX_API_KEY not configured")
-        print("   Please set this environment variable or add it to your .env file")
+        print("   Set TELNYX_API_KEY in .secrets (see .secrets.example)")
         return 1
 
     if not settings.TELNYX_PHONE_NUMBER:
         print("❌ ERROR: TELNYX_PHONE_NUMBER not configured")
-        print("   Please set this environment variable or add it to your .env file")
+        print("   Set TELNYX_PHONE_NUMBER in .env or .secrets")
         return 1
 
     print("✓ Telnyx configuration found")

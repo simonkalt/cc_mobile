@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
 from app.utils.user_helpers import USERS_COLLECTION
 
+from app.models.oauth import OAuthLinkResponse, OAuthTokenExchangeRequest
 from app.models.user import (
     UserRegisterRequest,
     UserUpdateRequest,
@@ -31,6 +32,7 @@ from app.models.user import (
     RefreshTokenResponse,
     AccountDeletionRequestResponse,
 )
+from app.services.oauth_login_service import oauth_link_provider
 from app.services.account_deletion_service import create_account_deletion_request
 from app.services.user_service import (
     register_user,
@@ -145,6 +147,20 @@ async def get_user_by_email_endpoint(email: str):
 async def get_current_user_endpoint(current_user: UserResponse = Depends(get_current_user)):
     """Get current authenticated user"""
     return get_user_by_id(current_user.id)
+
+
+@router.post(
+    "/me/link-oauth/{provider}",
+    response_model=OAuthLinkResponse,
+)
+async def link_oauth_provider_endpoint(
+    provider: str,
+    body: OAuthTokenExchangeRequest,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Link Google or LinkedIn to the authenticated user (PKCE code exchange)."""
+    logger.info("OAuth link request provider=%s user_id=%s", provider, current_user.id)
+    return oauth_link_provider(current_user, provider, body)
 
 
 @router.post(

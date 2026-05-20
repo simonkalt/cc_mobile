@@ -12,13 +12,12 @@ import os
 import sys
 import argparse
 import logging
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
-
 # Add parent directory to path to import app modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.core.env_loader import load_project_env
+
+load_project_env()
 
 # Configure logging
 logging.basicConfig(

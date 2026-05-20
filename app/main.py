@@ -111,6 +111,14 @@ except Exception as e:
     logger.error(f"Failed to register users router: {e}", exc_info=True)
     raise
 
+try:
+    from app.api.routers import auth
+
+    app.include_router(auth.router)
+except Exception as e:
+    logger.error(f"Failed to register auth router: {e}", exc_info=True)
+    raise
+
 # Import and include other routers
 try:
     from app.api.routers import (

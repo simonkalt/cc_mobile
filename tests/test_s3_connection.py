@@ -10,10 +10,15 @@ import sys
 import logging
 import base64
 from datetime import datetime
-from dotenv import load_dotenv
+from pathlib import Path
 
-# Load environment variables from .env file
-load_dotenv()
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from app.core.env_loader import load_project_env
+
+load_project_env(_ROOT)
 
 # Configure detailed logging
 logging.basicConfig(

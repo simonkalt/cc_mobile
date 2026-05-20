@@ -14,6 +14,10 @@ fi
 # Navigate to project directory
 cd "$PROJECT_DIR"
 
+# shellcheck source=scripts/env-files.sh
+source "$PROJECT_DIR/scripts/env-files.sh"
+require_env_files "$PROJECT_DIR" || exit 1
+
 # Activate project-root virtual environment
 source "$VENV_DIR/bin/activate"
 

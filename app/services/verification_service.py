@@ -252,7 +252,7 @@ def send_and_store_verification_code_email(
     Returns:
         Generated verification code
     """
-    # Generate code - use real random code for email (SMTP is configured)
+    # Generate code - use real random code for email (Zoho Mail API)
     # SMS still uses hardcoded "000000" until Twilio is approved
     if delivery_method == "email":
         code = str(random.randint(100000, 999999))

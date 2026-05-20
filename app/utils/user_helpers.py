@@ -5,7 +5,9 @@ import copy
 import logging
 from typing import Optional, List, Dict
 
-from app.models.user import UserResponse
+from datetime import datetime
+
+from app.models.user import AuthProviderSummary, UserResponse
 from app.db.mongodb import get_collection
 from app.core.config import settings
 
@@ -86,6 +88,33 @@ def normalize_personality_profiles(profiles: list) -> List[dict]:
         logger.info(f"Filtered out {filtered_count} invalid profile(s) out of {len(profiles)} total")
     
     return normalized
+
+
+def sanitize_auth_providers_for_response(
+    auth_providers: Optional[list],
+) -> Optional[List[AuthProviderSummary]]:
+    """Return client-visible auth provider entries (no subject)."""
+    if not isinstance(auth_providers, list) or not auth_providers:
+        return None
+    sanitized: List[AuthProviderSummary] = []
+    for entry in auth_providers:
+        if not isinstance(entry, dict):
+            continue
+        provider = entry.get("provider")
+        linked_at = entry.get("linkedAt")
+        if not provider or not linked_at:
+            continue
+        if isinstance(linked_at, datetime):
+            linked_dt = linked_at
+        else:
+            try:
+                linked_dt = datetime.fromisoformat(str(linked_at).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+        sanitized.append(
+            AuthProviderSummary(provider=str(provider), linkedAt=linked_dt)
+        )
+    return sanitized or None
 
 
 def user_doc_to_response(user_doc: dict) -> UserResponse:
@@ -174,5 +203,8 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         archived_at=user_doc.get("archived_at"),
         account_deletion_pending=user_doc.get("account_deletion_pending", False),
         account_deletion_requested_at=user_doc.get("account_deletion_requested_at"),
+        authProviders=sanitize_auth_providers_for_response(
+            user_doc.get("authProviders")
+        ),
     )
 

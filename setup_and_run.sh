@@ -6,6 +6,11 @@ echo "🚀 Setting up WSL environment and starting server..."
 # Resolve project directory (directory containing this script)
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
+
+# shellcheck source=scripts/env-files.sh
+source "$PROJECT_DIR/scripts/env-files.sh"
+require_env_files "$PROJECT_DIR" || exit 1
+
 VENV_DIR="$PROJECT_DIR/.venv"
 # Step 1: Create project-root venv if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then

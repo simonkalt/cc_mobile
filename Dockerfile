@@ -49,5 +49,10 @@ ENV VERSION_JSON_PATH=/app/version.json
 # Expose FastAPI port
 EXPOSE 8675
 
+# Secrets are NOT copied into the image (.dockerignore excludes .env / .secrets).
+# - Local Docker: docker-run.sh mounts .secrets → /etc/secrets/.secrets
+# - Render Docker: add Secret File with filename ".secrets" (app/core/env_loader.py)
+# - Non-secret config: pass .env via --env-file (local) or Render env vars / .env bulk import
+
 # Start FastAPI with Uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8675"]

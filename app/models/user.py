@@ -51,6 +51,13 @@ class AppSettings(BaseModel):
     letterTemplateSelection: Optional[LetterTemplateSelection] = None
 
 
+class AuthProviderSummary(BaseModel):
+    """Linked OAuth provider (subject is never exposed to clients)."""
+
+    provider: str
+    linkedAt: datetime
+
+
 class UserPreferences(BaseModel):
     newsletterOptIn: Optional[bool] = False
     theme: Optional[str] = "light"
@@ -122,6 +129,7 @@ class UserResponse(BaseModel):
     archived_at: Optional[datetime] = None
     account_deletion_pending: Optional[bool] = False
     account_deletion_requested_at: Optional[datetime] = None
+    authProviders: Optional[List[AuthProviderSummary]] = None
 
     model_config = ConfigDict(from_attributes=True)
 

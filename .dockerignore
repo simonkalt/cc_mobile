@@ -1,0 +1,17 @@
+# Never bake local env/secrets into the image — pass at runtime via docker-run.sh
+.env
+.env.*
+.secrets
+
+.venv
+venv/
+__pycache__/
+*.py[cod]
+.git
+.gitignore
+debug/
+tmp/
+tmp-from-docker/
+playwright-browsers/
+*.pem
+keys/

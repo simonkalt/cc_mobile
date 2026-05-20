@@ -15,10 +15,16 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
-from dotenv import load_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from app.core.env_loader import load_project_env
 
 
 ACCOUNTS_BASE = "https://accounts.zoho.com"
@@ -92,7 +98,7 @@ def _list_accounts(access_token: str) -> dict:
 
 
 def main() -> None:
-    load_dotenv()
+    load_project_env()
 
     parser = argparse.ArgumentParser(description="Zoho OAuth helper")
     parser.add_argument(
@@ -149,7 +155,7 @@ def main() -> None:
             print("")
             refresh = (result.get("body") or {}).get("refresh_token")
             if refresh:
-                print("Copy this into .env as ZOHO_REFRESH_TOKEN:")
+                print("Copy this into .secrets as ZOHO_REFRESH_TOKEN:")
                 print(refresh)
                 print("")
 

@@ -49,13 +49,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-try:
-    from dotenv import load_dotenv
+from app.core.env_loader import load_project_env
 
-    load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / ".secrets", override=True)
-except ImportError:
-    pass
+load_project_env(ROOT)
 
 try:
     import jwt

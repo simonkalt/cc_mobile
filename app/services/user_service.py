@@ -1190,3 +1190,195 @@ def get_linkedin_token(user_id: str) -> Optional[Dict]:
         pass
     return None
 
+
+def normalize_email_for_lookup(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def _deep_merge_preferences(default: dict, provided: dict) -> dict:
+    """Recursively merge provided dict into default dict."""
+    result = default.copy()
+    for key, value in provided.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge_preferences(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _build_default_preferences_for_new_user() -> dict:
+    personality_profiles = _load_default_personality_profiles()
+    default_model_for_user = (
+        get_default_model_name_from_registry() or "claude-haiku-4-5"
+    )
+    return {
+        "newsletterOptIn": False,
+        "theme": "light",
+        "appSettings": {
+            "printProperties": {
+                "margins": {
+                    "top": 1.0,
+                    "right": 0.75,
+                    "bottom": 0.25,
+                    "left": 0.75,
+                },
+                "fontFamily": "Georgia",
+                "fontSize": 11.0,
+                "lineHeight": 1.15,
+                "pageSize": {"width": 8.5, "height": 11.0},
+                "useDefaultFonts": False,
+            },
+            "personalityProfiles": personality_profiles,
+            "selectedModel": default_model_for_user,
+            "lastResumeUsed": None,
+            "last_personality_profile_used": None,
+            "letterTemplateAutoPick": True,
+            "letterTemplateSelection": None,
+        },
+        "formDefaults": {
+            "companyName": "",
+            "hiringManager": "",
+            "adSource": "",
+            "jobDescription": "",
+            "additionalInstructions": "",
+            "tone": "Professional",
+            "address": "",
+            "phoneNumber": "",
+            "resume": "",
+        },
+    }
+
+
+def build_login_response_from_user_doc(
+    user_doc: dict,
+    *,
+    message: str = "Login successful",
+) -> UserLoginResponse:
+    """Issue JWT-shaped tokens and user payload (same contract as password login)."""
+    now = int(time.time())
+    access_ttl_seconds = 24 * 60 * 60
+    refresh_ttl_seconds = 30 * 24 * 60 * 60
+    user_id = str(user_doc["_id"])
+
+    access_payload = _apply_standard_jwt_claims({
+        "sub": user_id,
+        "email": user_doc.get("email"),
+        "type": "access",
+        "iat": now,
+        "exp": now + access_ttl_seconds,
+    })
+    refresh_payload = _apply_standard_jwt_claims({
+        "sub": user_id,
+        "email": user_doc.get("email"),
+        "type": "refresh",
+        "iat": now,
+        "exp": now + refresh_ttl_seconds,
+    })
+
+    access_token = _make_signed_token(access_payload, settings.JWT_SECRET)
+    refresh_token = _make_signed_token(refresh_payload, settings.JWT_SECRET)
+    files_list = list_user_resume_files_for_login(user_id)
+
+    return UserLoginResponse(
+        success=True,
+        user=user_doc_to_response(user_doc),
+        message=message,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        expires_in=access_ttl_seconds,
+        files=files_list,
+    )
+
+
+def create_oauth_user_document(
+    *,
+    email: str,
+    name: str,
+    avatar_url: Optional[str],
+    provider: str,
+    subject: str,
+    email_from_provider: Optional[str],
+) -> dict:
+    """Insert a new OAuth-only user and return the MongoDB document."""
+    if not is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection unavailable",
+        )
+
+    collection = get_collection(USERS_COLLECTION)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to access users collection",
+        )
+
+    normalized_email = normalize_email_for_lookup(email)
+    pattern = f"^{re.escape(normalized_email)}$"
+    existing = collection.find_one({"email": {"$regex": pattern, "$options": "i"}})
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists",
+        )
+
+    now = datetime.now(UTC)
+    final_preferences = _build_default_preferences_for_new_user()
+    display_name = (name or "").strip() or normalized_email.split("@")[0]
+
+    user_doc = {
+        "name": display_name,
+        "email": email.strip(),
+        "hashedPassword": "",
+        "isActive": True,
+        "isEmailVerified": True,
+        "roles": ["user"],
+        "failedLoginAttempts": 0,
+        "lastLogin": now,
+        "passwordChangedAt": None,
+        "avatarUrl": avatar_url,
+        "dataUseSharingNoticeAcceptedAt": now,
+        "phone": None,
+        "address": {
+            "street": None,
+            "city": None,
+            "state": None,
+            "zip": None,
+            "country": None,
+        },
+        "dateCreated": now,
+        "dateUpdated": now,
+        "llm_counts": {},
+        "last_llm_used": None,
+        "preferences": final_preferences,
+        "subscriptionId": None,
+        "subscriptionStatus": "free",
+        "subscriptionPlan": "free",
+        "subscriptionCurrentPeriodEnd": None,
+        "lastPaymentDate": None,
+        "stripeCustomerId": None,
+        "generation_credits": 10,
+        "max_credits": 10,
+        "SMSOpt": "IN",
+        "SMSOptDate": now,
+        "authProviders": [
+            {
+                "provider": provider,
+                "subject": subject,
+                "linkedAt": now,
+                "emailFromProvider": email_from_provider,
+            }
+        ],
+    }
+
+    result = collection.insert_one(user_doc)
+    user_doc["_id"] = result.inserted_id
+    logger.info(
+        "OAuth user created: %s (ID: %s, provider=%s)",
+        user_doc["email"],
+        result.inserted_id,
+        provider,
+    )
+    return user_doc
+

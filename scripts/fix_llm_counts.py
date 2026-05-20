@@ -21,10 +21,9 @@ PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from dotenv import load_dotenv
+from app.core.env_loader import load_project_env
 
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
-load_dotenv(os.path.join(PROJECT_ROOT, ".secrets"), override=True)
+load_project_env(PROJECT_ROOT)
 
 from app.db.mongodb import connect_to_mongodb, get_database
 from app.utils.llm_utils import normalize_llm_name

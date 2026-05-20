@@ -43,7 +43,7 @@ async def linkedin_auth_url(
     if not client_id or not redirect_uri:
         raise HTTPException(
             status_code=503,
-            detail="LinkedIn OAuth not configured (LINKEDIN_CLIENT_ID, LINKEDIN_REDIRECT_URI required)",
+            detail="LinkedIn OAuth not configured (LINKEDIN_CLIENT_ID or EXPO_PUBLIC_LINKEDIN_CLIENT_ID, plus LINKEDIN_REDIRECT_URI required)",
         )
     if not scope or not scope.strip():
         raise HTTPException(

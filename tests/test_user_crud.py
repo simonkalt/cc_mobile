@@ -5,7 +5,7 @@ Tests: Create, Read, Update, Delete operations for user records
 import os
 import sys
 from datetime import UTC, datetime
-from dotenv import load_dotenv
+from pathlib import Path
 from bson import ObjectId
 
 # Cross-platform keypress wait
@@ -29,11 +29,16 @@ except ImportError:
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-# Load environment variables
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from app.core.env_loader import load_project_env
+
 try:
-    load_dotenv()
+    load_project_env(_ROOT)
 except Exception as e:
-    print(f"⚠️  Warning: Error loading .env file: {e}")
+    print(f"⚠️  Warning: Error loading .env / .secrets: {e}")
     print("Continuing with environment variables from system...")
 
 # Import MongoDB client

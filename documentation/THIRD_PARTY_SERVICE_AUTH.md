@@ -114,5 +114,6 @@ Other parts of the API may use end-user JWT (`Authorization: Bearer ...`) or be 
 ## Operator reference (internal)
 
 - Key is read from environment variable **`SERVICE_AUTH_KEY`**.
-- Local development: optional repo-root **`.secrets`** file (gitignored); see `.secrets.example`.
+- Local development: repo-root **`.secrets`** (gitignored); see `.secrets.example`.
+- Render: Secret File named **`.secrets`** → `/etc/secrets/.secrets` (same loader as local).
 - Implementation: `app/core/auth.py` (`verify_service_auth`), router `app/api/routers/integration.py`.

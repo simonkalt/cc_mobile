@@ -43,43 +43,46 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 
 **Note:** Render automatically sets the `$PORT` environment variable, so use that instead of a hardcoded port.
 
-## Step 4: Set Environment Variables
+## Step 4: Environment variables and secrets
 
-In the Render dashboard, go to **"Environment"** tab and add:
+In the Render dashboard, open **Environment**.
 
-### Required Variables
+### Non-secret config (`.env`)
+
+Use **Add from .env** or add variables individually for non-secret settings (hosts, feature flags, CORS, DB names, etc.). See repo `.env` for examples.
+
+### Secrets (`.secrets` file)
+
+Do **not** paste API keys and passwords into dozens of dashboard fields unless you prefer that. This repo keeps secrets in a gitignored **`.secrets`** file locally; on Render, upload the same file as a **Secret File**:
+
+1. **Secret Files** → **+ Add Secret File**
+2. **Filename:** `.secrets` (exact name — available at `/etc/secrets/.secrets` in Docker services)
+3. **Contents:** copy from your local `.secrets` (same `KEY=value` format as `.secrets.example`)
+4. Save and deploy
+
+The app loads `.env` values first, then overrides from `/etc/secrets/.secrets` (`app/core/env_loader.py`).
+
+### Minimum dashboard variables (if not in `.secrets`)
+
+You can still set any key in the Environment tab; per-key values override linked groups. Typical split:
 
 ```env
-# MongoDB Configuration
-MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/CoverLetter?retryWrites=true&w=majority
+# Often in .env / dashboard (non-secret)
 MONGODB_DB_NAME=CoverLetter
 MONGODB_COLLECTION_NAME=users
+CORS_ORIGINS=https://your-react-app.onrender.com
 
-# CORS - Add your React app URL(s)
-CORS_ORIGINS=https://your-react-app.onrender.com,https://your-custom-domain.com
-
-# API Keys (if using)
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_API_KEY=...
-GEMINI_API_KEY=...
-XAI_API_KEY=...
-```
-
-### Optional Variables
-
-```env
-# AWS S3 (if using)
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=us-east-1
+# In Secret File `.secrets` (see .secrets.example)
+MONGODB_URI=mongodb+srv://...
+JWT_SECRET=...
+OPENAI_API_KEY=...
 ```
 
 **Important:**
 
-- Never commit these to your repository
-- Use Render's environment variables section
-- Use strong, unique passwords
+- Never commit `.secrets` or production `.env` to git
+- Secret file max total size 1 MB per service
+- Docker: secret files are only at `/etc/secrets/<filename>` at runtime (not in the image)
 
 ## Step 5: Configure CORS for Your React App
 
