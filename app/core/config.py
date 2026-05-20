@@ -187,10 +187,10 @@ class Settings:
     TELNYX_PHONE_NUMBER: Optional[str] = os.getenv("TELNYX_PHONE_NUMBER")
 
     # Redis Configuration
-    REDIS_HOST: Optional[str] = os.getenv("REDIS_HOST")
+    REDIS_HOST: Optional[str] = _strip_env_value(os.getenv("REDIS_HOST") or "") or None
     REDIS_PORT: int = _env_int("REDIS_PORT", "6379")
-    REDIS_USERNAME: Optional[str] = os.getenv("REDIS_USERNAME")
-    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
+    REDIS_USERNAME: Optional[str] = _strip_env_value(os.getenv("REDIS_USERNAME") or "") or None
+    REDIS_PASSWORD: Optional[str] = _strip_env_value(os.getenv("REDIS_PASSWORD") or "") or None
     REDIS_DB: int = _env_int("REDIS_DB", "0")
     REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
     REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")

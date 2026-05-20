@@ -128,12 +128,18 @@ def get_redis_client():
             connection_params["host"] = parsed_host
             connection_params["port"] = parsed_port
 
+            # Redis Cloud / Redis Labs ACL expects username "default" when using a password.
+            if parsed_password and not parsed_username:
+                host_lower = (parsed_host or "").lower()
+                if "redislabs.com" in host_lower or "redis-cloud" in host_lower:
+                    parsed_username = "default"
+
             # Add authentication if provided
             if parsed_username and parsed_password:
                 connection_params["username"] = parsed_username
                 connection_params["password"] = parsed_password
             elif parsed_password:
-                # Some Redis setups only use password (no username)
+                # Legacy password-only AUTH (non-ACL Redis)
                 connection_params["password"] = parsed_password
 
             # Add SSL if configured
