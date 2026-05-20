@@ -50,6 +50,11 @@ from app.utils.llm_utils import (
     load_system_prompt,
     normalize_llm_name,
 )
+from app.utils.llm_token_limits import (
+    max_output_tokens_for_model,
+    resolve_openai_model,
+    uses_openai_max_completion_tokens,
+)
 from app.utils.grok_client import (
     GROK_MODEL_ID,
     grok_chat_completions,
@@ -744,7 +749,7 @@ except ImportError:
 system_message = load_system_prompt()
 
 # Model names - defaults, can be overridden by config
-gpt_model = "gpt-5.2"
+gpt_model = "gpt-5.5"
 claude_model = "claude-sonnet-4-6"
 claude_haiku_model = "claude-haiku-4-5"
 ollama_model = "llama3.2"
@@ -755,7 +760,7 @@ try:
     from llm_config_endpoint import load_llm_config
 
     config = load_llm_config()
-    gpt_model = config.get("internalModel", "gpt-5.2")
+    gpt_model = config.get("internalModel", "gpt-5.5")
     logger.info(f"Loaded GPT model from config: {gpt_model}")
 except Exception as e:
     logger.debug(f"Failed to load GPT model from config, using default: {e}")
@@ -1444,7 +1449,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 "temperature": 0.7,
                 "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": settings.LLM_MAX_OUTPUT_TOKENS,
+                "max_output_tokens": max_output_tokens_for_model("gemini-2.5-flash"),
             }
 
             _log_prompt_length(llm, full_text=msg)
@@ -1461,7 +1466,10 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             if not OPENAI_AVAILABLE or not settings.OPENAI_API_KEY:
                 raise ValueError("OpenAI not available or API key not set")
             client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            openai_model = llm if llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2") else gpt_model
+            openai_model = resolve_openai_model(
+                llm if llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2") else gpt_model,
+                fallback=gpt_model,
+            )
             messages = [
                 {"role": "system", "content": system_message},
                 {
@@ -1484,17 +1492,18 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             # Keep completion cap bounded for letter generation latency.
             _log_prompt_length(llm, messages=messages)
             _write_llm_prompt_log(llm, messages=messages)
-            if openai_model in ("gpt-5.2", "gpt-5.5"):
+            openai_max_tokens = max_output_tokens_for_model(openai_model)
+            if uses_openai_max_completion_tokens(openai_model):
                 response = client.chat.completions.create(
                     model=openai_model,
                     messages=messages,
-                    max_completion_tokens=settings.LLM_MAX_OUTPUT_TOKENS,  # GPT-5.x uses max_completion_tokens
+                    max_completion_tokens=openai_max_tokens,
                 )
             else:
                 response = client.chat.completions.create(
                     model=openai_model,
                     messages=messages,
-                    max_tokens=16000,  # Older GPT models use max_tokens
+                    max_tokens=openai_max_tokens,
                 )
             r = response.choices[0].message.content
 
@@ -1605,7 +1614,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 model=resolved_anthropic_model,
                 system=system_message,
                 messages=messages,
-                max_tokens=settings.LLM_MAX_OUTPUT_TOKENS,
+                max_tokens=max_output_tokens_for_model(resolved_anthropic_model),
                 temperature=1,
             )
             r = response.content[0].text

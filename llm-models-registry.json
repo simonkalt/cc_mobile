@@ -1,6 +1,5 @@
 {
   "models": [
-    { "name": "gpt-5.2", "default": false },
     { "name": "gpt-5.5", "default": false },
     { "name": "claude-haiku-4-5", "default": true },
     { "name": "gemini-2.5-flash", "default": false },
