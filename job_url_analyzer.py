@@ -1203,17 +1203,14 @@ Extraction Guidelines:
 - For company, job_title, and full_description: Extract the actual values from the page content
 - Ensure full_description includes the complete job description with all responsibilities, requirements, and qualifications"""
 
-        # Call OpenAI ChatGPT API - using gpt-5.2 for better extraction
-        # GPT-5.2 supports 128,000 max completion tokens, 400,000 context window
-        model_name = "gpt-5.2"
-        max_completion_tokens_value = (
-            128000  # GPT-5.2 supports up to 128,000 max completion tokens
-        )
+        # Call OpenAI ChatGPT API - using gpt-5.5 for extraction
+        model_name = "gpt-5.5"
+        max_completion_tokens_value = 128_000
         response = openai_client.chat.completions.create(
             model=model_name,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_completion_tokens=max_completion_tokens_value,  # GPT-5.2 uses max_completion_tokens instead of max_tokens
+            max_completion_tokens=max_completion_tokens_value,
             response_format={"type": "json_object"},  # Force JSON response
         )
 
