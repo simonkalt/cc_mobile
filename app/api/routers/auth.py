@@ -6,39 +6,14 @@ See documentation/OAUTH_LOGIN_API.md.
 import logging
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
 
+from app.api.linkedin_oauth_callback import linkedin_oauth_callback_response
 from app.models.oauth import OAuthLoginResponse, OAuthTokenExchangeRequest
 from app.services.oauth_login_service import oauth_login
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-# LinkedIn portal requires HTTPS redirect_uri; native apps complete the session on
-# ccmobile:// (Android has no HTTPS auth-session handler — see expo-web-browser polyfill).
-# Use JS redirect only (not HTTP 302) so iOS ASWebAuthenticationSession still works.
-_LINKEDIN_CALLBACK_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Signing in</title>
-  <style>
-    body { font-family: system-ui, sans-serif; text-align: center; padding: 2rem; }
-  </style>
-</head>
-<body>
-  <p>Signing you in…</p>
-  <script>
-    (function () {
-      var next = "ccmobile://oauth/linkedin" + (window.location.search || "");
-      window.location.replace(next);
-    })();
-  </script>
-</body>
-</html>
-"""
 
 
 @router.post("/oauth/google", response_model=OAuthLoginResponse)
@@ -57,19 +32,5 @@ async def oauth_linkedin_login(body: OAuthTokenExchangeRequest):
 
 @router.get("/oauth/linkedin/callback", include_in_schema=False)
 async def linkedin_oauth_https_callback(request: Request):
-    """
-    LinkedIn OIDC redirect target (HTTPS only in the developer portal).
-
-    Returns 200 with the authorization query string still on this URL so
-    expo-auth-session `openAuthSessionAsync` can match `redirect_uri` and pass
-    `code` + `state` back to the app. The same HTTPS URL must be sent as
-    redirect_uri in POST /api/auth/oauth/linkedin.
-    """
-    error = request.query_params.get("error")
-    code = request.query_params.get("code")
-    logger.info(
-        "LinkedIn OAuth callback (has_code=%s has_error=%s)",
-        bool(code),
-        bool(error),
-    )
-    return HTMLResponse(content=_LINKEDIN_CALLBACK_HTML, status_code=200)
+    """LinkedIn OIDC redirect target; 302 to ccmobile:// for native auth session."""
+    return linkedin_oauth_callback_response(request)

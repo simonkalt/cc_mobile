@@ -36,8 +36,8 @@ Register **all four** (one LinkedIn app can list multiple). LinkedIn only allows
 | **UAT** | `https://cc-mobile-uat.onrender.com/api/auth/oauth/linkedin/callback` | `https://cc-mobile-uat.onrender.com/app/oauth/linkedin` |
 | **Production** | `https://www.saimonsoft.com/api/auth/oauth/linkedin/callback` | `https://www.saimonsoft.com/app/oauth/linkedin` |
 
-Native flow: LinkedIn → HTTPS callback (`?code=…`) → callback page **JS-redirects** to `ccmobile://oauth/linkedin?…` → app auth session completes → `POST /api/auth/oauth/linkedin` (still send the **HTTPS** `redirect_uri` in that POST).  
-Do **not** use HTTP **302** to `ccmobile://` on the callback (breaks iOS). JavaScript `location.replace` is required on **Android** (Expo only listens for deep links, not HTTPS, in the Custom Tab).
+Native flow: LinkedIn → HTTPS callback (`?code=…`) → API **302** to `ccmobile://oauth/linkedin?…` → app receives deep link → `POST /api/auth/oauth/linkedin` (still send the **HTTPS** `redirect_uri` in that POST).  
+**Android:** rebuild the dev client after `intentFilters` change (`npx expo run:android` or EAS dev build). Metro-only reload is not enough for manifest updates.
 
 ### Expected in-app browser UX (not a bug)
 

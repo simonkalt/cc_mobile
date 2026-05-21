@@ -240,41 +240,14 @@ async def oauth_callback(request: Request):
     )
 
 
-# LinkedIn mobile/web OIDC redirect (HTTPS only in LinkedIn developer portal).
-# Registered on root app (main:app) so Docker/Render always expose it; keep in sync with
-# app/api/routers/auth.py. JS bridge to ccmobile:// (not HTTP 302).
-_LINKEDIN_OAUTH_CALLBACK_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Signing in</title>
-  <style>
-    body { font-family: system-ui, sans-serif; text-align: center; padding: 2rem; }
-  </style>
-</head>
-<body>
-  <p>Signing you in…</p>
-  <script>
-    (function () {
-      var next = "ccmobile://oauth/linkedin" + (window.location.search || "");
-      window.location.replace(next);
-    })();
-  </script>
-</body>
-</html>
-"""
+# LinkedIn OIDC callback on root app (main:app) for Docker/Render — keep in sync with auth router.
+from app.api.linkedin_oauth_callback import linkedin_oauth_callback_response
 
 
 @app.get("/api/auth/oauth/linkedin/callback", include_in_schema=False)
 async def linkedin_oauth_https_callback(request: Request):
-    """LinkedIn OIDC redirect target; returns 200 so the app auth session can read ?code=."""
-    logger.info(
-        "LinkedIn OAuth callback (has_code=%s has_error=%s)",
-        bool(request.query_params.get("code")),
-        bool(request.query_params.get("error")),
-    )
-    return HTMLResponse(content=_LINKEDIN_OAUTH_CALLBACK_HTML, status_code=200)
+    """LinkedIn OIDC redirect target; 302 to ccmobile:// for native auth session."""
+    return linkedin_oauth_callback_response(request)
 
 
 # Mount static files for website and documents
