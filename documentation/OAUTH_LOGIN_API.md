@@ -20,10 +20,12 @@ Secrets (`GOOGLE_CLIENT_SECRET`, `LINKEDIN_CLIENT_SECRET`) live **only** on the 
 
 | Platform | Google | LinkedIn |
 |----------|--------|----------|
-| iOS / Android (native) | `ccmobile://oauth/google` | `ccmobile://oauth/linkedin` |
+| iOS / Android (native) | `ccmobile://oauth/google` | `https://<API-host>/api/auth/oauth/linkedin/callback` (HTTPS bridge → `ccmobile://`) |
 | Web (Expo `baseUrl` `/app`) | `{origin}/app/oauth/google` | `{origin}/app/oauth/linkedin` |
 
-Example web production: `https://your-domain.com/app/oauth/google`.
+LinkedIn’s developer portal **does not accept custom URL schemes**; native apps use `GET /api/auth/oauth/linkedin/callback` on this API (see `app/api/routers/auth.py`).
+
+Examples: UAT `https://cc-mobile-docker.onrender.com/api/auth/oauth/linkedin/callback`; production `https://www.saimonsoft.com/api/auth/oauth/linkedin/callback`.
 
 ---
 
