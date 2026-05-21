@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Minimal page so expo-auth-session (openAuthSessionAsync) can read ?code= on this URL.
-# Do NOT 302 to ccmobile:// here — that breaks returnUrl matching on Android/iOS.
+# LinkedIn portal requires HTTPS redirect_uri; native apps complete the session on
+# ccmobile:// (Android has no HTTPS auth-session handler — see expo-web-browser polyfill).
+# Use JS redirect only (not HTTP 302) so iOS ASWebAuthenticationSession still works.
 _LINKEDIN_CALLBACK_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -28,7 +29,13 @@ _LINKEDIN_CALLBACK_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <p>Signing you in… You can close this window and return to the app.</p>
+  <p>Signing you in…</p>
+  <script>
+    (function () {
+      var next = "ccmobile://oauth/linkedin" + (window.location.search || "");
+      window.location.replace(next);
+    })();
+  </script>
 </body>
 </html>
 """

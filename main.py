@@ -242,7 +242,7 @@ async def oauth_callback(request: Request):
 
 # LinkedIn mobile/web OIDC redirect (HTTPS only in LinkedIn developer portal).
 # Registered on root app (main:app) so Docker/Render always expose it; keep in sync with
-# app/api/routers/auth.py. Do not 302 to ccmobile:// — expo-auth-session needs this URL.
+# app/api/routers/auth.py. JS bridge to ccmobile:// (not HTTP 302).
 _LINKEDIN_OAUTH_CALLBACK_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -254,7 +254,13 @@ _LINKEDIN_OAUTH_CALLBACK_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <p>Signing you in… You can close this window and return to the app.</p>
+  <p>Signing you in…</p>
+  <script>
+    (function () {
+      var next = "ccmobile://oauth/linkedin" + (window.location.search || "");
+      window.location.replace(next);
+    })();
+  </script>
 </body>
 </html>
 """

@@ -20,7 +20,7 @@ URI mismatch on login almost always means the **first row** URLs are missing or 
 
 | Environment | API / web host |
 |-------------|----------------|
-| **UAT** | `https://cc-mobile-docker.onrender.com` |
+| **UAT** | `https://cc-mobile-uat.onrender.com` (Render service **cc_mobile (uat)** — not `cc-mobile-docker`) |
 | **Production** | `https://www.saimonsoft.com` |
 
 `EXPO_PUBLIC_BACKEND_URL` on mobile builds must match the environment you are testing.
@@ -33,11 +33,20 @@ Register **all four** (one LinkedIn app can list multiple). LinkedIn only allows
 
 | Environment | Native (iOS/Android) | Web (`/app` SPA) |
 |-------------|-------------------|------------------|
-| **UAT** | `https://cc-mobile-docker.onrender.com/api/auth/oauth/linkedin/callback` | `https://cc-mobile-docker.onrender.com/app/oauth/linkedin` |
+| **UAT** | `https://cc-mobile-uat.onrender.com/api/auth/oauth/linkedin/callback` | `https://cc-mobile-uat.onrender.com/app/oauth/linkedin` |
 | **Production** | `https://www.saimonsoft.com/api/auth/oauth/linkedin/callback` | `https://www.saimonsoft.com/app/oauth/linkedin` |
 
-Native flow: LinkedIn → HTTPS callback (page stays on that URL with `?code=…`) → Expo closes the browser tab and returns the code to the app → `POST /api/auth/oauth/linkedin`.  
-Do **not** 302 to `ccmobile://` on the callback; that prevents `openAuthSessionAsync` from completing on Android/iOS.
+Native flow: LinkedIn → HTTPS callback (`?code=…`) → callback page **JS-redirects** to `ccmobile://oauth/linkedin?…` → app auth session completes → `POST /api/auth/oauth/linkedin` (still send the **HTTPS** `redirect_uri` in that POST).  
+Do **not** use HTTP **302** to `ccmobile://` on the callback (breaks iOS). JavaScript `location.replace` is required on **Android** (Expo only listens for deep links, not HTTPS, in the Custom Tab).
+
+### Expected in-app browser UX (not a bug)
+
+LinkedIn OAuth is **two steps** in the system browser / Chrome Custom Tab:
+
+1. **Member login** — “Welcome back” (email/password). Same screen for sign-in and sign-up; there is no separate LinkedIn “register” OAuth URL.
+2. **App authorization** — Your app name/logo and **Allow** for `openid` / `profile` / `email` (OIDC consent). Shown after login unless the member already approved this app (then LinkedIn skips straight to your redirect).
+
+If you only see step 1, enter the password and tap **Sign in** — step 2 or an immediate redirect to `…/api/auth/oauth/linkedin/callback?code=…` should follow. Landing on the LinkedIn **feed** with no redirect means login did not complete the OAuth return (wrong redirect URL, wrong client id, or portal product/scopes).
 
 **Local `http://192.168.x.x:8675` will not work** in the LinkedIn portal. For device testing, point `EXPO_PUBLIC_BACKEND_URL` at your public HTTPS API host, or use an HTTPS tunnel (ngrok, etc.).
 
@@ -89,9 +98,10 @@ The deep link `ccmobile://oauth/linkedin` is only used **after** the HTTPS bridg
 
 ```bash
 # Must return HTTP/2 200 (HTML body), not {"detail":"Not Found"}
-curl -sI "https://cc-mobile-docker.onrender.com/api/auth/oauth/linkedin/callback" | head -1
+curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+  "https://cc-mobile-uat.onrender.com/api/auth/oauth/linkedin/callback"
 
-curl -s "https://cc-mobile-docker.onrender.com/openapi.json" | grep -o '"/api/auth/oauth[^"]*"' | sort -u
+curl -s "https://cc-mobile-uat.onrender.com/openapi.json" | grep -o '"/api/auth/oauth[^"]*"' | sort -u
 ```
 
 Expected after a good deploy: `/api/auth/oauth/google`, `/api/auth/oauth/linkedin`, `/api/auth/oauth/linkedin/callback`.
