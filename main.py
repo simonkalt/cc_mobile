@@ -240,8 +240,15 @@ async def oauth_callback(request: Request):
     )
 
 
-# LinkedIn OIDC callback on root app (main:app) for Docker/Render — keep in sync with auth router.
+# OAuth HTTPS callbacks on root app (main:app) for Docker/Render — keep in sync with auth router.
 from app.api.linkedin_oauth_callback import linkedin_oauth_callback_response
+from app.api.native_oauth_callback import native_oauth_callback_response
+
+
+@app.get("/api/auth/oauth/google/callback", include_in_schema=False)
+async def google_oauth_https_callback(request: Request):
+    """Google OIDC redirect target; 302 to ccmobile:// for native auth session."""
+    return native_oauth_callback_response(request, "google")
 
 
 @app.get("/api/auth/oauth/linkedin/callback", include_in_schema=False)

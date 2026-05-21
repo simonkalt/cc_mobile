@@ -20,7 +20,7 @@ Secrets (`GOOGLE_CLIENT_SECRET`, `LINKEDIN_CLIENT_SECRET`) live **only** on the 
 
 | Platform | Google | LinkedIn |
 |----------|--------|----------|
-| iOS / Android (native) | `ccmobile://oauth/google` | Authorize: `https://<API-host>/api/auth/oauth/linkedin/callback`. Session return: `ccmobile://oauth/linkedin` (callback page JS-redirect; required on Android) |
+| iOS / Android (native) | Authorize + exchange: `https://<API-host>/api/auth/oauth/google/callback`. Session return: `ccmobile://oauth/google` (API 302; see `GOOGLE_OAUTH_URI_CHECKLIST.md`) | Authorize + exchange: `https://<API-host>/api/auth/oauth/linkedin/callback`. Session return: `ccmobile://oauth/linkedin` (API 302) |
 | Web (Expo `baseUrl` `/app`) | `{origin}/app/oauth/google` | `{origin}/app/oauth/linkedin` |
 
 LinkedIn’s developer portal **does not accept custom URL schemes**; native apps use `GET /api/auth/oauth/linkedin/callback` on this API (see `app/api/routers/auth.py`).
@@ -66,7 +66,7 @@ Do **not** expose raw `subject` to the client unless product requires it; return
 ```json
 {
   "code": "authorization_code_from_redirect",
-  "redirect_uri": "ccmobile://oauth/google",
+  "redirect_uri": "https://cc-mobile-uat.onrender.com/api/auth/oauth/google/callback",
   "code_verifier": "pkce_verifier",
   "intent": "login",
   "dataUseSharingNoticeAccepted": true
@@ -209,7 +209,7 @@ Omit `subject` in API responses.
 # OAuth login (after client obtains code via PKCE)
 curl -s -X POST "$BASE/api/auth/oauth/google" \
   -H "Content-Type: application/json" \
-  -d '{"code":"...","redirect_uri":"ccmobile://oauth/google","code_verifier":"...","intent":"login"}'
+  -d '{"code":"...","redirect_uri":"https://cc-mobile-uat.onrender.com/api/auth/oauth/google/callback","code_verifier":"...","intent":"login"}'
 
 # Link LinkedIn while logged in
 curl -s -X POST "$BASE/api/users/me/link-oauth/linkedin" \

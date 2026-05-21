@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, Request
 
 from app.api.linkedin_oauth_callback import linkedin_oauth_callback_response
+from app.api.native_oauth_callback import native_oauth_callback_response
 from app.models.oauth import OAuthLoginResponse, OAuthTokenExchangeRequest
 from app.services.oauth_login_service import oauth_login
 
@@ -28,6 +29,12 @@ async def oauth_linkedin_login(body: OAuthTokenExchangeRequest):
     """Exchange LinkedIn authorization code (PKCE) for app session tokens."""
     logger.info("OAuth LinkedIn login intent=%s", body.intent)
     return oauth_login("linkedin", body)
+
+
+@router.get("/oauth/google/callback", include_in_schema=False)
+async def google_oauth_https_callback(request: Request):
+    """Google OIDC redirect target; 302 to ccmobile:// for native auth session."""
+    return native_oauth_callback_response(request, "google")
 
 
 @router.get("/oauth/linkedin/callback", include_in_schema=False)

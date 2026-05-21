@@ -104,7 +104,7 @@ curl -s -o /dev/null -w "HTTP %{http_code}\n" \
 curl -s "https://cc-mobile-uat.onrender.com/openapi.json" | grep -o '"/api/auth/oauth[^"]*"' | sort -u
 ```
 
-Expected after a good deploy: `/api/auth/oauth/google`, `/api/auth/oauth/linkedin`, `/api/auth/oauth/linkedin/callback`.
+Expected after a good deploy: `/api/auth/oauth/google`, `/api/auth/oauth/google/callback`, `/api/auth/oauth/linkedin`, `/api/auth/oauth/linkedin/callback`.
 
 If the callback is **404**, Render is still on an **old build** or the **auth router failed to import** (service logs: `Auth router NOT registered`). The route is defined in both `main.py` (Docker `main:app`) and `app/api/routers/auth.py` — redeploy the branch that contains those files.
 
@@ -143,4 +143,4 @@ If the portal and redirect URI are correct, this returns tokens; otherwise 401 `
 
 ## Next: Google
 
-Same pattern: native `ccmobile://oauth/google`, web `https://<host>/app/oauth/google`. See `documentation/OAUTH_LOGIN_API.md` and `cc_mobile_ui/documentation/VENDOR_OAUTH_SETUP.md`.
+Google uses the same HTTPS callback → `ccmobile://` bridge; see `GOOGLE_OAUTH_URI_CHECKLIST.md` (Google Web client does not accept `ccmobile://` in the console).

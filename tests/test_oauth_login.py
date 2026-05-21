@@ -50,7 +50,7 @@ def test_oauth_login_user_not_found(mock_db, mock_identity):
 
     body = OAuthTokenExchangeRequest(
         code="code",
-        redirect_uri="ccmobile://oauth/google",
+        redirect_uri="https://example.com/api/auth/oauth/google/callback",
         code_verifier="verifier",
         intent="login",
     )
@@ -79,7 +79,7 @@ def test_oauth_login_data_use_notice_required(mock_db, mock_identity):
 
     body = OAuthTokenExchangeRequest(
         code="code",
-        redirect_uri="ccmobile://oauth/google",
+        redirect_uri="https://example.com/api/auth/oauth/google/callback",
         code_verifier="verifier",
         intent="register",
         dataUseSharingNoticeAccepted=False,
