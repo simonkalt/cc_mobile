@@ -36,8 +36,8 @@ Register **all four** (one LinkedIn app can list multiple). LinkedIn only allows
 | **UAT** | `https://cc-mobile-docker.onrender.com/api/auth/oauth/linkedin/callback` | `https://cc-mobile-docker.onrender.com/app/oauth/linkedin` |
 | **Production** | `https://www.saimonsoft.com/api/auth/oauth/linkedin/callback` | `https://www.saimonsoft.com/app/oauth/linkedin` |
 
-Native flow: LinkedIn → HTTPS callback → API **302** to `ccmobile://oauth/linkedin?code=…`.  
-The app and `POST /api/auth/oauth/linkedin` must send the **same HTTPS** `redirect_uri` as in the table (not `ccmobile://`).
+Native flow: LinkedIn → HTTPS callback (page stays on that URL with `?code=…`) → Expo closes the browser tab and returns the code to the app → `POST /api/auth/oauth/linkedin`.  
+Do **not** 302 to `ccmobile://` on the callback; that prevents `openAuthSessionAsync` from completing on Android/iOS.
 
 **Local `http://192.168.x.x:8675` will not work** in the LinkedIn portal. For device testing, point `EXPO_PUBLIC_BACKEND_URL` at your public HTTPS API host, or use an HTTPS tunnel (ngrok, etc.).
 
