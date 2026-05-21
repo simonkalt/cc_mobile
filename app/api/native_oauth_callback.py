@@ -7,6 +7,8 @@ import logging
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,10 +17,11 @@ def native_oauth_callback_response(request: Request, provider: str) -> RedirectR
     Google and LinkedIn Web OAuth clients only accept https:// redirect URIs.
 
     Native clients authorize with the HTTPS callback on this API, then receive
-    ccmobile:// via 302 (Android Custom Tab does not complete on HTTPS alone).
+    {OAUTH_NATIVE_APP_SCHEME}:// via 302 (Android Custom Tab does not complete on HTTPS alone).
     """
+    scheme = settings.OAUTH_NATIVE_APP_SCHEME or "ccmobile"
     query = request.url.query
-    target = f"ccmobile://oauth/{provider}"
+    target = f"{scheme}://oauth/{provider}"
     if query:
         target = f"{target}?{query}"
 

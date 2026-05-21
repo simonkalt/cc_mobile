@@ -167,6 +167,10 @@ class Settings:
     # Google OAuth (mobile/web login — Authorization Code + PKCE)
     GOOGLE_CLIENT_ID: Optional[str] = os.getenv("GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET: Optional[str] = os.getenv("GOOGLE_CLIENT_SECRET")
+    # Deep link after HTTPS OAuth callback (ccmobile prod; ccmobile-dev on UAT for Expo dev)
+    OAUTH_NATIVE_APP_SCHEME: str = _strip_env_value(
+        os.getenv("OAUTH_NATIVE_APP_SCHEME") or "ccmobile"
+    )
 
     # LinkedIn API (3-legged OAuth + jobLibrary integration; OIDC login reuses these)
     # Falls back to EXPO_PUBLIC_* when LINKEDIN_* are unset (shared .env with mobile app).

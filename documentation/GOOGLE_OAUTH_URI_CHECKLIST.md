@@ -95,3 +95,22 @@ After `app.config.js` `intentFilters` changes, rebuild: `npx expo run:android`.
 4. Sign in — browser should briefly hit the API callback, then return to the app.
 
 LinkedIn: `LINKEDIN_OAUTH_URI_CHECKLIST.md`.
+
+---
+
+## Expo dev vs installed store app (same `ccmobile://` conflict)
+
+If OAuth opens the **Play Store / App Store build** instead of your **Expo dev client**, both apps register the same deep link.
+
+| Environment | Mobile `EXPO_PUBLIC_APP_SCHEME` | Render / API `OAUTH_NATIVE_APP_SCHEME` |
+|-------------|--------------------------------|----------------------------------------|
+| Expo dev + UAT | `ccmobile-dev` | `ccmobile-dev` |
+| Production | `ccmobile` (default) | `ccmobile` (default) |
+
+1. UAT Render → Environment → add `OAUTH_NATIVE_APP_SCHEME=ccmobile-dev`
+2. `cc_mobile_ui/.env` → `EXPO_PUBLIC_APP_SCHEME=ccmobile-dev`
+3. Rebuild dev client: `npx expo run:android` (manifest change)
+
+Metro logs should show `sessionReturnUri: ccmobile-dev://oauth/google`. The store app does not handle `ccmobile-dev://`.
+
+**Quick workaround without rebuild:** uninstall the store app while testing OAuth in Expo.
