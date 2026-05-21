@@ -85,6 +85,21 @@ The deep link `ccmobile://oauth/linkedin` is only used **after** the HTTPS bridg
 
 ---
 
+## Verify UAT/prod deploy (before testing on a phone)
+
+```bash
+# Must return HTTP/2 200 (HTML body), not {"detail":"Not Found"}
+curl -sI "https://cc-mobile-docker.onrender.com/api/auth/oauth/linkedin/callback" | head -1
+
+curl -s "https://cc-mobile-docker.onrender.com/openapi.json" | grep -o '"/api/auth/oauth[^"]*"' | sort -u
+```
+
+Expected after a good deploy: `/api/auth/oauth/google`, `/api/auth/oauth/linkedin`, `/api/auth/oauth/linkedin/callback`.
+
+If the callback is **404**, Render is still on an **old build** or the **auth router failed to import** (service logs: `Auth router NOT registered`). The route is defined in both `main.py` (Docker `main:app`) and `app/api/routers/auth.py` — redeploy the branch that contains those files.
+
+---
+
 ## Symptom → likely cause
 
 | What you see | Likely fix |
@@ -93,6 +108,7 @@ The deep link `ccmobile://oauth/linkedin` is only used **after** the HTTPS bridg
 | App returns to app but API returns 401 `invalid_code` | `redirect_uri` in token exchange ≠ authorize step; or wrong `LINKEDIN_CLIENT_SECRET` on server |
 | “LinkedIn sign-in is not configured” in app | Missing `EXPO_PUBLIC_LINKEDIN_CLIENT_ID` in mobile `.env` or EAS profile |
 | Works locally, fails on Render | Render `.secrets` missing or different `LINKEDIN_CLIENT_ID` than mobile build |
+| `curl` callback URL returns `Not Found` | UAT not redeployed with OAuth code, or wrong Render service/branch |
 
 ---
 

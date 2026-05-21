@@ -239,6 +239,38 @@ async def oauth_callback(request: Request):
         },
     )
 
+
+# LinkedIn mobile/web OIDC redirect (HTTPS only in LinkedIn developer portal).
+# Registered on root app (main:app) so Docker/Render always expose it; keep in sync with
+# app/api/routers/auth.py. Do not 302 to ccmobile:// — expo-auth-session needs this URL.
+_LINKEDIN_OAUTH_CALLBACK_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signing in</title>
+  <style>
+    body { font-family: system-ui, sans-serif; text-align: center; padding: 2rem; }
+  </style>
+</head>
+<body>
+  <p>Signing you in… You can close this window and return to the app.</p>
+</body>
+</html>
+"""
+
+
+@app.get("/api/auth/oauth/linkedin/callback", include_in_schema=False)
+async def linkedin_oauth_https_callback(request: Request):
+    """LinkedIn OIDC redirect target; returns 200 so the app auth session can read ?code=."""
+    logger.info(
+        "LinkedIn OAuth callback (has_code=%s has_error=%s)",
+        bool(request.query_params.get("code")),
+        bool(request.query_params.get("error")),
+    )
+    return HTMLResponse(content=_LINKEDIN_OAUTH_CALLBACK_HTML, status_code=200)
+
+
 # Mount static files for website and documents
 # Get the project root directory - try multiple methods for compatibility
 try:
@@ -322,8 +354,13 @@ try:
     from app.api.routers import auth
 
     app.include_router(auth.router)
+    logger.info("Registered auth router (Google/LinkedIn OAuth)")
 except Exception as e:
-    logger.error(f"Failed to register auth router: {e}", exc_info=True)
+    logger.critical(
+        "Auth router NOT registered — POST /api/auth/oauth/* will 404: %s",
+        e,
+        exc_info=True,
+    )
 
 try:
     from app.api.routers import (
