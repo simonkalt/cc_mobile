@@ -11,7 +11,8 @@ The **Web application** OAuth client is used on mobile (`EXPO_PUBLIC_GOOGLE_OAUT
 `redirect_uri` = `https://<API-host>/api/auth/oauth/google/callback` (must be in Google Cloud).  
 The app closes the Custom Tab on that HTTPS URL; no `ccmobile://` is required for Google sign-in.
 
-The GET callback returns **200 HTML** (no 302 to `ccmobile://`). The app completes sign-in on the HTTPS URL via `openAuthSessionAsync`.
+The GET callback returns **200 HTML** that immediately redirects to `ccmobile://oauth/google?...`.  
+`openAuthSessionAsync` waits for that deep link (authorize + token exchange still use the HTTPS URI).
 
 ---
 
@@ -99,4 +100,4 @@ LinkedIn: `LINKEDIN_OAUTH_URI_CHECKLIST.md`.
 
 Both use **`ccmobile://`**. Uninstall the Play Store app while testing a dev build from `npx expo run:android` (Expo Go does not support this OAuth flow).
 
-Metro should show `redirectUri: https://cc-mobile-uat.onrender.com/api/auth/oauth/google/callback` (or your `BACKEND_URL`). On Render UAT, remove `OAUTH_NATIVE_APP_SCHEME=ccmobile-dev` if still set.
+Metro should show `redirectUri` (HTTPS) and `sessionReturnUri: ccmobile://oauth/google`. On Render UAT, set `OAUTH_NATIVE_APP_SCHEME=ccmobile` (not `ccmobile-dev`). Uninstall the Play Store app if it steals `ccmobile://`.

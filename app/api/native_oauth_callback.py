@@ -2,51 +2,64 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse, Response
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
-# 200 on the HTTPS callback URL — do not 302 to ccmobile://. openAuthSessionAsync closes
-# when this URL (with ?code=) loads; a 302 to a custom scheme leaves the tab hanging.
-_OAUTH_DONE_HTML = """<!DOCTYPE html>
+
+def _mobile_oauth_bridge_html(target: str) -> str:
+    """
+    Google/LinkedIn redirect here over HTTPS (registered in Cloud Console).
+    Android openAuthSessionAsync often does not complete on https:// alone;
+    a short HTML page that jumps to ccmobile:// closes the Custom Tab.
+    """
+    target_json = json.dumps(target)
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Signed in</title>
-  <style>
-    body {
-      font-family: system-ui, sans-serif;
-      text-align: center;
-      padding: 2rem;
-      background: #fff;
-      color: #111;
-    }
-  </style>
+  <title>Returning to app</title>
+  <script>
+    (function () {{
+      var target = {target_json};
+      try {{
+        window.location.replace(target);
+      }} catch (e) {{}}
+    }})();
+  </script>
 </head>
 <body>
-  <p>Sign-in complete. Return to the app.</p>
+  <p>Returning to the app…</p>
 </body>
 </html>"""
 
 
 def native_oauth_callback_response(request: Request, provider: str) -> Response:
     """
-    Google and LinkedIn Web OAuth clients redirect here (HTTPS).
-
-    The mobile app uses openAuthSessionAsync(redirectUri) and must receive this URL
-    with query params intact. A 302 to ccmobile:// breaks that flow.
+    Web OAuth clients redirect to this HTTPS URL. Native apps authorize with that
+    URI but openAuthSessionAsync waits for {scheme}://oauth/{provider}?...
     """
+    scheme = settings.OAUTH_NATIVE_APP_SCHEME or "ccmobile"
+    query = request.url.query
+    target = f"{scheme}://oauth/{provider}"
+    if query:
+        target = f"{target}?{query}"
+
     ua = request.headers.get("user-agent") or ""
     logger.info(
-        "%s OAuth callback HTTPS finish (has_code=%s has_error=%s ua=%s)",
+        "%s OAuth callback HTTPS → app %s (has_code=%s has_error=%s ua=%s)",
         provider.capitalize(),
+        target.split("?")[0],
         bool(request.query_params.get("code")),
         bool(request.query_params.get("error")),
         ua[:120],
     )
 
-    return HTMLResponse(content=_OAUTH_DONE_HTML, status_code=200)
+    return HTMLResponse(content=_mobile_oauth_bridge_html(target), status_code=200)
