@@ -20,7 +20,7 @@ Secrets (`GOOGLE_CLIENT_SECRET`, `LINKEDIN_CLIENT_SECRET`) live **only** on the 
 
 | Platform | Google | LinkedIn |
 |----------|--------|----------|
-| iOS / Android (native) | Authorize + exchange: `https://<API-host>/api/auth/oauth/google/callback`. Session return: `ccmobile://oauth/google` (API 302; see `GOOGLE_OAUTH_URI_CHECKLIST.md`) | Authorize + exchange: `https://<API-host>/api/auth/oauth/linkedin/callback`. Session return: `ccmobile://oauth/linkedin` (API 302) |
+| iOS / Android (native) | Authorize + exchange: `https://<API-host>/api/auth/oauth/google/callback`. Session return: HTTPS in Expo dev (`OAUTH_CALLBACK_DEEP_LINK=false`), else `ccmobile://oauth/google` (API 302) — see `GOOGLE_OAUTH_URI_CHECKLIST.md` | Same pattern for LinkedIn |
 | Web (Expo `baseUrl` `/app`) | `{origin}/app/oauth/google` | `{origin}/app/oauth/linkedin` |
 
 LinkedIn’s developer portal **does not accept custom URL schemes**; native apps use `GET /api/auth/oauth/linkedin/callback` on this API (see `app/api/routers/auth.py`).

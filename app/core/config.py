@@ -171,6 +171,11 @@ class Settings:
     OAUTH_NATIVE_APP_SCHEME: str = _strip_env_value(
         os.getenv("OAUTH_NATIVE_APP_SCHEME") or "ccmobile"
     )
+    # False = 200 on HTTPS callback (Expo dev client / openAuthSessionAsync on https).
+    # True = 302 to {OAUTH_NATIVE_APP_SCHEME}://oauth/... (release / TestFlight builds).
+    OAUTH_CALLBACK_DEEP_LINK: bool = os.getenv(
+        "OAUTH_CALLBACK_DEEP_LINK", "true"
+    ).lower() in ("1", "true", "yes")
 
     # LinkedIn API (3-legged OAuth + jobLibrary integration; OIDC login reuses these)
     # Falls back to EXPO_PUBLIC_* when LINKEDIN_* are unset (shared .env with mobile app).
