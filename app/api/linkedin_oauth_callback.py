@@ -7,7 +7,7 @@ from fastapi.responses import Response
 
 from app.api.native_oauth_callback import native_oauth_callback_response
 
-LINKEDIN_NATIVE_RETURN_BASE = "ccmobile://oauth/linkedin"  # prod default; UAT may use ccmobile-dev
+LINKEDIN_NATIVE_RETURN_BASE = "ccmobile://oauth/linkedin"
 
 
 def linkedin_oauth_callback_response(request: Request) -> Response:

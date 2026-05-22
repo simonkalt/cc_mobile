@@ -5,16 +5,19 @@ See also `documentation/OAUTH_LOGIN_API.md` and `cc_mobile_ui/documentation/VEND
 
 ---
 
-## Do not put `ccmobile://` in Google Cloud
+## Native app (restored flow — `ccmobile://`)
 
-The **Web application** OAuth client’s **Authorized redirect URIs** field only accepts `https://` URLs (with a valid domain). Custom schemes such as `ccmobile://oauth/google` are **rejected** in the console.
+The mobile app uses **platform OAuth clients** and `redirect_uri` = `ccmobile://oauth/google` (via `promptAsync`, not an HTTPS bridge).
 
-Native apps use the same **HTTPS bridge** as LinkedIn:
+| Platform | Mobile env | Google Cloud client type |
+|----------|------------|---------------------------|
+| Android | `EXPO_PUBLIC_GOOGLE_OAUTH_ANDROID_CLIENT_ID` | Android OAuth client — add custom URI scheme / redirect as documented for that client type |
+| iOS | `EXPO_PUBLIC_GOOGLE_OAUTH_IOS_CLIENT_ID` | iOS OAuth client |
+| Web | `EXPO_PUBLIC_GOOGLE_OAUTH_WEB_CLIENT_ID` | Web application — **https://** redirect URIs only (table below) |
 
-1. Authorize with `redirect_uri` = `https://<API-host>/api/auth/oauth/google/callback`
-2. Google redirects to that HTTPS URL with `?code=…`
-3. API responds **302** → `ccmobile://oauth/google?…`
-4. App receives the deep link and `POST`s the code with the **HTTPS** `redirect_uri`
+Server `POST /api/auth/oauth/google` still exchanges the code; `redirect_uri` in the request body must match what the app used (`ccmobile://oauth/google` on native).
+
+LinkedIn native still uses the **HTTPS bridge** (`/api/auth/oauth/linkedin/callback` → 302 → `ccmobile://oauth/linkedin`).
 
 ---
 
@@ -22,10 +25,9 @@ Native apps use the same **HTTPS bridge** as LinkedIn:
 
 | Check | Fix |
 |-------|-----|
-| Wrong client ID on phone vs server | `EXPO_PUBLIC_GOOGLE_OAUTH_WEB_CLIENT_ID` = API `GOOGLE_CLIENT_ID` (Web client) |
-| Missing HTTPS callback in console | Register callback URLs below on the **Web** client |
+| Using Web client ID on Android with `ccmobile://` | Use **Android** (or iOS) client ID in `.env`, not Web-only |
+| Missing redirect on Android/iOS client | Register `ccmobile://oauth/google` on the matching platform client |
 | Consent screen in Testing | Add your Google account under **Test users** |
-| UAT API not deployed with `/google/callback` | Deploy API; `curl -sI 'https://cc-mobile-uat.onrender.com/api/auth/oauth/google/callback?code=x'` should return **302** + `location: ccmobile://oauth/google?...` |
 
 ---
 
@@ -98,19 +100,8 @@ LinkedIn: `LINKEDIN_OAUTH_URI_CHECKLIST.md`.
 
 ---
 
-## Expo dev vs installed store app (same `ccmobile://` conflict)
+## Expo dev vs Play Store app
 
-If OAuth opens the **Play Store / App Store build** instead of your **Expo dev client**, both apps register the same deep link.
+Both use **`ccmobile://`**. Uninstall the Play Store app while testing a dev build from `npx expo run:android` (Expo Go does not support this OAuth flow).
 
-| Environment | Mobile `EXPO_PUBLIC_APP_SCHEME` | Render / API `OAUTH_NATIVE_APP_SCHEME` |
-|-------------|--------------------------------|----------------------------------------|
-| Expo dev + UAT | `ccmobile-dev` | `ccmobile-dev` |
-| Production | `ccmobile` (default) | `ccmobile` (default) |
-
-1. UAT Render → Environment → add `OAUTH_NATIVE_APP_SCHEME=ccmobile-dev`
-2. `cc_mobile_ui/.env` → `EXPO_PUBLIC_APP_SCHEME=ccmobile-dev`
-3. Rebuild dev client: `npx expo run:android` (manifest change)
-
-Metro logs should show `sessionReturnUri: ccmobile-dev://oauth/google`. The store app does not handle `ccmobile-dev://`.
-
-**Quick workaround without rebuild:** uninstall the store app while testing OAuth in Expo.
+Metro should show `redirectUri: ccmobile://oauth/google` for Google. On Render UAT, remove `OAUTH_NATIVE_APP_SCHEME=ccmobile-dev` if it is still set (default `ccmobile` is fine for LinkedIn’s 302).
