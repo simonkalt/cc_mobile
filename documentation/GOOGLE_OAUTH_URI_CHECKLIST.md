@@ -14,7 +14,7 @@ The app closes the Custom Tab on that HTTPS URL; no `ccmobile://` is required fo
 | Setting | Value |
 |---------|--------|
 | App `sessionReturnUri` (native) | **`ccmobile://oauth/google`** always |
-| API `OAUTH_CALLBACK_DEEP_LINK` | **`true`** (302 on iOS; **HTML + intent:// on Android**) |
+| API `OAUTH_CALLBACK_DEEP_LINK` | **`true`** (302 on iOS; **HTML → `ccmobile://` on Android**; intent link is manual only, **no `package=`** — that sent dev builds to Play Store) |
 
 **Android:** `openAuthSessionAsync` only completes on **`ccmobile://`** (Linking), not on the HTTPS “Sign-in complete” page.
 

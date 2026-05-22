@@ -11,18 +11,23 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Must match Expo android.package (com.saimonsoft.customcoverlettermobile.app).
-_ANDROID_APP_PACKAGE = "com.saimonsoft.customcoverlettermobile.app"
-
-
 def _android_intent_uri(scheme: str, provider: str, query: str) -> str:
-    """Chrome Custom Tabs on many devices only open the app via intent://, not 302→scheme."""
+    """
+    Optional manual fallback only (no package=).
+
+    Including package=com.saimonsoft... makes Chrome open the Play Store when the
+    installed dev APK does not handle the intent exactly like the store build.
+    """
     path = f"oauth/{provider}"
     if query:
         path = f"{path}?{query}"
     return (
-        f"intent://{path}"
-        f"#Intent;scheme={scheme};package={_ANDROID_APP_PACKAGE};end"
+        f"intent://{path}#Intent;"
+        f"scheme={scheme};"
+        f"action=android.intent.action.VIEW;"
+        f"category=android.intent.category.BROWSABLE;"
+        f"category=android.intent.category.DEFAULT;"
+        f"end"
     )
 
 
@@ -41,35 +46,29 @@ def _mobile_oauth_bridge_html(
   <script>
     (function () {{
       var target = {target_json};
-      var intent = {intent_json};
-      function goCustom() {{
+      function goApp() {{
         try {{ window.location.replace(target); }} catch (e) {{}}
       }}
-      function goIntent() {{
-        if (!intent) return false;
-        try {{ window.location.replace(intent); return true; }} catch (e) {{}}
-        return false;
-      }}
-      if (!goIntent()) goCustom();
-      setTimeout(goCustom, 400);
+      goApp();
+      setTimeout(goApp, 350);
+      setTimeout(goApp, 900);
     }})();
   </script>
 </head>
 <body style="font-family:system-ui,sans-serif;text-align:center;padding:2rem;">
   <p>Returning to the app…</p>
-  <p><a id="open" href="{target}" style="font-size:1.1rem;">Open app</a></p>
+  <p><a id="open" href="{target}" style="font-size:1.1rem;">Tap to open the app</a></p>
   <script>
     (function () {{
-      var a = document.getElementById("open");
       var intent = {intent_json};
-      if (intent) {{
-        var i = document.createElement("a");
-        i.href = intent;
-        i.textContent = "Open app (Android)";
-        i.style.display = "block";
-        i.style.marginTop = "1rem";
-        a.parentNode.appendChild(i);
-      }}
+      if (!intent) return;
+      var i = document.createElement("a");
+      i.href = intent;
+      i.textContent = "Still here? Try alternate link";
+      i.style.display = "block";
+      i.style.marginTop = "1rem";
+      i.style.fontSize = "0.95rem";
+      document.body.appendChild(i);
     }})();
   </script>
 </body>
@@ -109,7 +108,7 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
     if use_deep_link and is_android:
         intent_uri = _android_intent_uri(scheme, provider, query)
         logger.info(
-            "%s OAuth callback Android bridge (intent + %s)",
+            "%s OAuth callback Android bridge (%s, no package= in intent)",
             provider.capitalize(),
             target.split("?")[0],
         )
