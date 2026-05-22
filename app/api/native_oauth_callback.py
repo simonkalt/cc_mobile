@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-
 from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
@@ -12,10 +11,27 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Must match Expo android.package (com.saimonsoft.customcoverlettermobile.app).
+_ANDROID_APP_PACKAGE = "com.saimonsoft.customcoverlettermobile.app"
 
-def _mobile_oauth_bridge_html(target: str) -> str:
-    """Custom Tab loads HTTPS first; JS/302 hands off to ccmobile:// for Linking."""
+
+def _android_intent_uri(scheme: str, provider: str, query: str) -> str:
+    """Chrome Custom Tabs on many devices only open the app via intent://, not 302→scheme."""
+    path = f"oauth/{provider}"
+    if query:
+        path = f"{path}?{query}"
+    return (
+        f"intent://{path}"
+        f"#Intent;scheme={scheme};package={_ANDROID_APP_PACKAGE};end"
+    )
+
+
+def _mobile_oauth_bridge_html(
+    target: str, *, android_intent: str | None = None
+) -> str:
+    """Custom Tab loads HTTPS first; hands off to ccmobile:// for Linking."""
     target_json = json.dumps(target)
+    intent_json = json.dumps(android_intent) if android_intent else "null"
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -25,14 +41,37 @@ def _mobile_oauth_bridge_html(target: str) -> str:
   <script>
     (function () {{
       var target = {target_json};
-      try {{
-        window.location.replace(target);
-      }} catch (e) {{}}
+      var intent = {intent_json};
+      function goCustom() {{
+        try {{ window.location.replace(target); }} catch (e) {{}}
+      }}
+      function goIntent() {{
+        if (!intent) return false;
+        try {{ window.location.replace(intent); return true; }} catch (e) {{}}
+        return false;
+      }}
+      if (!goIntent()) goCustom();
+      setTimeout(goCustom, 400);
     }})();
   </script>
 </head>
-<body>
+<body style="font-family:system-ui,sans-serif;text-align:center;padding:2rem;">
   <p>Returning to the app…</p>
+  <p><a id="open" href="{target}" style="font-size:1.1rem;">Open app</a></p>
+  <script>
+    (function () {{
+      var a = document.getElementById("open");
+      var intent = {intent_json};
+      if (intent) {{
+        var i = document.createElement("a");
+        i.href = intent;
+        i.textContent = "Open app (Android)";
+        i.style.display = "block";
+        i.style.marginTop = "1rem";
+        a.parentNode.appendChild(i);
+      }}
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -64,6 +103,26 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
         ua[:120],
     )
 
+    ua_lower = ua.lower()
+    is_android = "android" in ua_lower
+
+    if use_deep_link and is_android:
+        intent_uri = _android_intent_uri(scheme, provider, query)
+        logger.info(
+            "%s OAuth callback Android bridge (intent + %s)",
+            provider.capitalize(),
+            target.split("?")[0],
+        )
+        return HTMLResponse(
+            content=_mobile_oauth_bridge_html(target, android_intent=intent_uri),
+            status_code=200,
+        )
+
     if use_deep_link:
         return RedirectResponse(url=target, status_code=302)
-    return HTMLResponse(content=_mobile_oauth_bridge_html(target), status_code=200)
+
+    intent_uri = _android_intent_uri(scheme, provider, query) if is_android else None
+    return HTMLResponse(
+        content=_mobile_oauth_bridge_html(target, android_intent=intent_uri),
+        status_code=200,
+    )
