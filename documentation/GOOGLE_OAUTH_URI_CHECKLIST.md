@@ -11,8 +11,9 @@ The **Web application** OAuth client is used on mobile (`EXPO_PUBLIC_GOOGLE_OAUT
 `redirect_uri` = `https://<API-host>/api/auth/oauth/google/callback` (must be in Google Cloud).  
 The app closes the Custom Tab on that HTTPS URL; no `ccmobile://` is required for Google sign-in.
 
-The GET callback returns **200 HTML** that immediately redirects to `ccmobile://oauth/google?...`.  
-`openAuthSessionAsync` waits for that deep link (authorize + token exchange still use the HTTPS URI).
+The GET callback returns **302** to `ccmobile://oauth/google?...`.  
+`openAuthSessionAsync` waits for that deep link (authorize + token exchange still use the HTTPS URI).  
+After changing Android `queries` for `ccmobile`, **rebuild** the dev APK (`npx expo run:android`), not only Metro reload.
 
 ---
 
