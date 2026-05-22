@@ -11,36 +11,12 @@ cd "$PROJECT_DIR"
 source "$PROJECT_DIR/scripts/env-files.sh"
 require_env_files "$PROJECT_DIR" || exit 1
 
+# shellcheck source=scripts/ensure_venv.sh
+source "$PROJECT_DIR/scripts/ensure_venv.sh"
+ensure_project_venv "$PROJECT_DIR" || exit 1
+
 VENV_DIR="$PROJECT_DIR/.venv"
-# Step 1: Create project-root venv if it doesn't exist
-if [ ! -d "$VENV_DIR" ]; then
-    echo "📦 Creating virtual environment..."
-    python3 -m venv "$VENV_DIR"
-    echo "✓ Virtual environment created"
-else
-    echo "✓ Virtual environment already exists"
-fi
-# Step 2: Activate venv
 source "$VENV_DIR/bin/activate"
-# Step 3: Map python -> python3
-if [ ! -f "$VENV_DIR/bin/python" ]; then
-    echo "🔗 Mapping python -> python3..."
-    ln -s "$VENV_DIR/bin/python3" "$VENV_DIR/bin/python"
-    echo "✓ python mapped to python3"
-else
-    echo "✓ python already mapped"
-fi
-# Step 4: Upgrade pip
-echo "📦 Upgrading pip..."
-pip install --upgrade pip setuptools wheel --quiet
-# Step 5: Install Python dependencies
-echo "📦 Installing Python dependencies..."
-if ! pip list | grep -q fastapi; then
-    pip install -r requirements.txt
-    echo "✓ Python dependencies installed"
-else
-    echo "✓ Python dependencies already installed"
-fi
 # Step 6: Start server
 echo ""
 echo "🚀 Starting FastAPI server..."

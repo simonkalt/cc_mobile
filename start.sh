@@ -4,19 +4,16 @@
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 
-# Check if venv exists
-if [ ! -d "$VENV_DIR" ]; then
-    echo "❌ Virtual environment not found!"
-    echo "Run: bash setup_and_run.sh"
-    exit 1
-fi
-
 # Navigate to project directory
 cd "$PROJECT_DIR"
 
 # shellcheck source=scripts/env-files.sh
 source "$PROJECT_DIR/scripts/env-files.sh"
 require_env_files "$PROJECT_DIR" || exit 1
+
+# shellcheck source=scripts/ensure_venv.sh
+source "$PROJECT_DIR/scripts/ensure_venv.sh"
+ensure_project_venv "$PROJECT_DIR" || exit 1
 
 # Activate project-root virtual environment
 source "$VENV_DIR/bin/activate"
