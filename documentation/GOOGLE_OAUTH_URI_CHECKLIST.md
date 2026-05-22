@@ -5,28 +5,23 @@ See also `documentation/OAUTH_LOGIN_API.md` and `cc_mobile_ui/documentation/VEND
 
 ---
 
-## Native app (restored flow — `ccmobile://`)
+## Native app (Web client + HTTPS)
 
-The mobile app uses **platform OAuth clients** and `redirect_uri` = `ccmobile://oauth/google` (via `promptAsync`, not an HTTPS bridge).
+The **Web application** OAuth client is used on mobile (`EXPO_PUBLIC_GOOGLE_OAUTH_WEB_CLIENT_ID` = API `GOOGLE_CLIENT_ID`).  
+`redirect_uri` = `https://<API-host>/api/auth/oauth/google/callback` (must be in Google Cloud).  
+The app closes the Custom Tab on that HTTPS URL; no `ccmobile://` is required for Google sign-in.
 
-| Platform | Mobile env | Google Cloud client type |
-|----------|------------|---------------------------|
-| Android | `EXPO_PUBLIC_GOOGLE_OAUTH_ANDROID_CLIENT_ID` | Android OAuth client — add custom URI scheme / redirect as documented for that client type |
-| iOS | `EXPO_PUBLIC_GOOGLE_OAUTH_IOS_CLIENT_ID` | iOS OAuth client |
-| Web | `EXPO_PUBLIC_GOOGLE_OAUTH_WEB_CLIENT_ID` | Web application — **https://** redirect URIs only (table below) |
-
-Server `POST /api/auth/oauth/google` still exchanges the code; `redirect_uri` in the request body must match what the app used (`ccmobile://oauth/google` on native).
-
-LinkedIn native still uses the **HTTPS bridge** (`/api/auth/oauth/linkedin/callback` → 302 → `ccmobile://oauth/linkedin`).
+The GET callback returns **200 HTML** (no 302 to `ccmobile://`). The app completes sign-in on the HTTPS URL via `openAuthSessionAsync`.
 
 ---
 
-## Root cause of `Error 400: invalid_request`
+## Root cause of `Error 400: invalid_request` / Authorization Error
 
 | Check | Fix |
 |-------|-----|
-| Using Web client ID on Android with `ccmobile://` | Use **Android** (or iOS) client ID in `.env`, not Web-only |
-| Missing redirect on Android/iOS client | Register `ccmobile://oauth/google` on the matching platform client |
+| `ccmobile://` in authorize URL | Mobile must use **HTTPS** callback URI (see `oauthRedirectUri.js`) |
+| Wrong client ID on phone vs server | `EXPO_PUBLIC_GOOGLE_OAUTH_WEB_CLIENT_ID` = API `GOOGLE_CLIENT_ID` |
+| Missing HTTPS callback in console | Register callback URLs below on the **Web** client |
 | Consent screen in Testing | Add your Google account under **Test users** |
 
 ---
@@ -104,4 +99,4 @@ LinkedIn: `LINKEDIN_OAUTH_URI_CHECKLIST.md`.
 
 Both use **`ccmobile://`**. Uninstall the Play Store app while testing a dev build from `npx expo run:android` (Expo Go does not support this OAuth flow).
 
-Metro should show `redirectUri: ccmobile://oauth/google` for Google. On Render UAT, remove `OAUTH_NATIVE_APP_SCHEME=ccmobile-dev` if it is still set (default `ccmobile` is fine for LinkedIn’s 302).
+Metro should show `redirectUri: https://cc-mobile-uat.onrender.com/api/auth/oauth/google/callback` (or your `BACKEND_URL`). On Render UAT, remove `OAUTH_NATIVE_APP_SCHEME=ccmobile-dev` if still set.
