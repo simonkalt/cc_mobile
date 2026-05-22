@@ -11,14 +11,14 @@ The **Web application** OAuth client is used on mobile (`EXPO_PUBLIC_GOOGLE_OAUT
 `redirect_uri` = `https://<API-host>/api/auth/oauth/google/callback` (must be in Google Cloud).  
 The app closes the Custom Tab on that HTTPS URL; no `ccmobile://` is required for Google sign-in.
 
-| Environment | API `OAUTH_CALLBACK_DEEP_LINK` | App `sessionReturnUri` |
-|-------------|-------------------------------|-------------------------|
-| Expo dev build (`__DEV__`) | **`false`** on UAT | HTTPS callback (same as `redirectUri`) |
-| Release / Play Store | **`true`** (default) | `ccmobile://oauth/google` |
+| Setting | Value |
+|---------|--------|
+| App `sessionReturnUri` (native) | **`ccmobile://oauth/google`** always |
+| API `OAUTH_CALLBACK_DEEP_LINK` | **`true`** (302) recommended; `false` uses HTML→`ccmobile` bridge |
 
-**Do not** use `ccmobile://` redirects with Expo development builds on Android — the dev launcher home screen opens instead of your app.
+**Android:** `openAuthSessionAsync` only completes on **`ccmobile://`** (Linking), not on the HTTPS “Sign-in complete” page.
 
-After changing Android `queries` for `ccmobile`, **rebuild** release APKs only (`npx expo run:android`).
+After changing Android `queries` for `ccmobile`, **rebuild** the dev APK (`npx expo run:android`).
 
 ---
 
@@ -106,4 +106,4 @@ LinkedIn: `LINKEDIN_OAUTH_URI_CHECKLIST.md`.
 
 Both use **`ccmobile://`**. Uninstall the Play Store app while testing a dev build from `npx expo run:android` (Expo Go does not support this OAuth flow).
 
-Metro in **dev** should show the same URL for `redirectUri` and `sessionReturnUri` (HTTPS). On Render **UAT**, set `OAUTH_CALLBACK_DEEP_LINK=false` while testing with `npx expo run:android`. Production keeps the default `true` and `OAUTH_NATIVE_APP_SCHEME=ccmobile`.
+Metro should show `redirectUri` (HTTPS) and `sessionReturnUri: ccmobile://oauth/google`. On Render UAT, use `OAUTH_CALLBACK_DEEP_LINK=true` (or omit). After deploy you should see a brief “Returning to the app…” flash, then `[OAuth] Linking url:` or `openAuthSessionAsync type: success`.
