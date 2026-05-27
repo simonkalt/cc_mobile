@@ -268,6 +268,8 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
     by_sub = _find_user_by_provider_sub(collection, provider, identity.sub)
     if by_sub:
         if intent == "register":
+            if by_sub.get("oauthRegistrationPending"):
+                return _login_existing_user(collection, by_sub, identity)
             raise _oauth_http_error(
                 status.HTTP_409_CONFLICT,
                 "oauth_account_exists",
@@ -296,6 +298,10 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
                     )
                 if _user_has_provider(by_email, provider):
                     if intent == "register":
+                        if by_email.get("oauthRegistrationPending"):
+                            return _login_existing_user(
+                                collection, by_email, identity
+                            )
                         raise _oauth_http_error(
                             status.HTTP_409_CONFLICT,
                             "oauth_account_exists",
