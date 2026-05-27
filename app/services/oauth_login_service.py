@@ -263,11 +263,19 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
     identity = _resolve_identity(provider, body)
     collection = _require_db_collection()
 
+    intent = (body.intent or "login").strip().lower()
+
     by_sub = _find_user_by_provider_sub(collection, provider, identity.sub)
     if by_sub:
+        if intent == "register":
+            raise _oauth_http_error(
+                status.HTTP_409_CONFLICT,
+                "oauth_account_exists",
+                "An account with this sign-in already exists. "
+                "Sign in on the login screen, or choose another account.",
+            )
         return _login_existing_user(collection, by_sub, identity)
 
-    intent = (body.intent or "login").strip().lower()
     replace_provider = intent == "replace_provider" or bool(body.replace_existing_provider)
     email = (identity.email or "").strip()
     linked_provider: Optional[str] = None
@@ -287,6 +295,13 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
                         replaced_provider=provider,
                     )
                 if _user_has_provider(by_email, provider):
+                    if intent == "register":
+                        raise _oauth_http_error(
+                            status.HTTP_409_CONFLICT,
+                            "oauth_account_exists",
+                            "An account with this email already uses this sign-in method. "
+                            "Sign in on the login screen, or choose another account.",
+                        )
                     return _login_existing_user(collection, by_email, identity)
                 updated = _append_auth_provider(collection, by_email["_id"], identity)
                 linked_provider = provider

@@ -28,11 +28,17 @@ from app.models.user import (
     UserResponse,
     UserLoginRequest,
     UserLoginResponse,
+    OAuthRegistrationSendCodeRequest,
+    OAuthRegistrationCompleteRequest,
     RefreshTokenRequest,
     RefreshTokenResponse,
     AccountDeletionRequestResponse,
 )
 from app.services.oauth_login_service import oauth_link_provider
+from app.services.oauth_registration_service import (
+    complete_oauth_registration,
+    send_oauth_registration_verification_code,
+)
 from app.services.account_deletion_service import create_account_deletion_request
 from app.services.user_service import (
     register_user,
@@ -161,6 +167,36 @@ async def link_oauth_provider_endpoint(
     """Link Google or LinkedIn to the authenticated user (PKCE code exchange)."""
     logger.info("OAuth link request provider=%s user_id=%s", provider, current_user.id)
     return oauth_link_provider(current_user, provider, body)
+
+
+@router.post("/me/oauth-registration/send-verification-code", status_code=status.HTTP_200_OK)
+async def oauth_registration_send_code_endpoint(
+    body: OAuthRegistrationSendCodeRequest,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Send email/SMS verification code while OAuth registration is pending."""
+    send_oauth_registration_verification_code(
+        current_user.id,
+        delivery_method=body.delivery_method,
+        phone=body.phone,
+    )
+    return {"success": True, "message": "Verification code sent successfully"}
+
+
+@router.post("/me/oauth-registration/complete", response_model=UserResponse)
+async def oauth_registration_complete_endpoint(
+    body: OAuthRegistrationCompleteRequest,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Terms, verification, phone, and SMS consent — required after OAuth sign-up."""
+    return complete_oauth_registration(
+        current_user.id,
+        code=body.code,
+        terms_of_service_accepted=body.termsOfServiceAccepted,
+        phone=body.phone,
+        sms_opt_in=body.smsOptIn,
+        delivery_method=body.delivery_method,
+    )
 
 
 @router.post(

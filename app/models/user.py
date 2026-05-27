@@ -2,7 +2,7 @@
 User-related Pydantic models
 """
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 
@@ -130,6 +130,7 @@ class UserResponse(BaseModel):
     account_deletion_pending: Optional[bool] = False
     account_deletion_requested_at: Optional[datetime] = None
     authProviders: Optional[List[AuthProviderSummary]] = None
+    oauthRegistrationPending: Optional[bool] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -161,4 +162,17 @@ class AccountDeletionRequestResponse(BaseModel):
     message: str
     deletion_request_id: str
     scheduled_completion_by: str
+
+
+class OAuthRegistrationSendCodeRequest(BaseModel):
+    delivery_method: Literal["email", "sms"] = "email"
+    phone: Optional[str] = None
+
+
+class OAuthRegistrationCompleteRequest(BaseModel):
+    code: str
+    phone: str
+    termsOfServiceAccepted: bool = False
+    smsOptIn: bool = False
+    delivery_method: Literal["email", "sms"] = "email"
 

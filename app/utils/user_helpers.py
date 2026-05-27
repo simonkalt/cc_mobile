@@ -206,5 +206,6 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
         authProviders=sanitize_auth_providers_for_response(
             user_doc.get("authProviders")
         ),
+        oauthRegistrationPending=bool(user_doc.get("oauthRegistrationPending")),
     )
 

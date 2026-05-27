@@ -379,6 +379,7 @@ def send_verification_code_email(email: str, code: str, purpose: str = "verifica
         "forgot_password": "Password Reset Verification Code",
         "change_password": "Password Change Verification Code",
         "finish_registration": "Registration Verification Code",
+        "complete_oauth_registration": "Registration Verification Code",
         "verification": "Verification Code",
     }
 
@@ -386,6 +387,7 @@ def send_verification_code_email(email: str, code: str, purpose: str = "verifica
         "forgot_password": f"Your password reset code is: {code}. This code will expire in 10 minutes.",
         "change_password": f"Your password change verification code is: {code}. This code will expire in 10 minutes.",
         "finish_registration": f"Your registration verification code is: {code}. This code will expire in 10 minutes.",
+        "complete_oauth_registration": f"Your registration verification code is: {code}. This code will expire in 10 minutes.",
         "verification": f"Your verification code is: {code}. This code will expire in 10 minutes.",
     }
 

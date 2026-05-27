@@ -100,6 +100,7 @@ def send_verification_code(phone_number: str, code: str, purpose: str = "verific
         "forgot_password": f"Your password reset code is: {code}. This code will expire in 10 minutes.",
         "change_password": f"Your password change verification code is: {code}. This code will expire in 10 minutes.",
         "finish_registration": f"Your registration verification code is: {code}. This code will expire in 10 minutes.",
+        "complete_oauth_registration": f"Your registration verification code is: {code}. This code will expire in 10 minutes.",
         "verification": f"Your verification code is: {code}. This code will expire in 10 minutes.",
     }
 

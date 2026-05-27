@@ -1332,7 +1332,9 @@ def create_oauth_user_document(
         "email": email.strip(),
         "hashedPassword": "",
         "isActive": True,
-        "isEmailVerified": True,
+        "isEmailVerified": False,
+        "oauthRegistrationPending": True,
+        "termsOfServiceAcceptedAt": None,
         "roles": ["user"],
         "failedLoginAttempts": 0,
         "lastLogin": now,
@@ -1360,8 +1362,8 @@ def create_oauth_user_document(
         "stripeCustomerId": None,
         "generation_credits": 10,
         "max_credits": 10,
-        "SMSOpt": "IN",
-        "SMSOptDate": now,
+        "SMSOpt": "OUT",
+        "SMSOptDate": None,
         "authProviders": [
             {
                 "provider": provider,
