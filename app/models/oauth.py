@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.user import UserLoginResponse, UserResponse
 
 OAuthProvider = Literal["google", "linkedin"]
-OAuthIntent = Literal["login", "register"]
+OAuthIntent = Literal["login", "register", "replace_provider"]
 
 
 class OAuthTokenExchangeRequest(BaseModel):
@@ -24,13 +24,19 @@ class OAuthTokenExchangeRequest(BaseModel):
         default=None,
         alias="dataUseSharingNoticeAccepted",
     )
+    replace_existing_provider: Optional[bool] = Field(
+        default=None,
+        alias="replaceExisting",
+    )
 
 
 class OAuthLoginResponse(UserLoginResponse):
     linkedProvider: Optional[str] = None
+    replacedProvider: Optional[str] = None
 
 
 class OAuthLinkResponse(BaseModel):
     success: bool = True
     user: UserResponse
-    linkedProvider: str
+    linkedProvider: Optional[str] = None
+    replacedProvider: Optional[str] = None

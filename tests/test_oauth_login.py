@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from unittest.mock import MagicMock, patch
 
 from app.models.oauth import OAuthTokenExchangeRequest
-from app.services.oauth_login_service import oauth_login
+from app.services.oauth_login_service import oauth_link_provider, oauth_login
 from app.services.oauth_providers import OAuthIdentity
 from app.utils.user_helpers import sanitize_auth_providers_for_response
 
@@ -90,3 +90,58 @@ def test_oauth_login_data_use_notice_required(mock_db, mock_identity):
 
     assert exc.value.status_code == 400
     assert exc.value.detail["code"] == "data_use_notice_required"
+
+
+@patch("app.services.oauth_login_service.user_doc_to_response")
+@patch("app.services.oauth_login_service._oauth_replace_provider_for_user")
+@patch("app.services.oauth_login_service._resolve_identity")
+@patch("app.services.oauth_login_service._require_db_collection")
+def test_oauth_link_replace_provider(
+    mock_db, mock_identity, mock_replace, mock_user_response
+):
+    from bson import ObjectId
+
+    user_oid = ObjectId()
+    mock_collection = MagicMock()
+    mock_db.return_value = mock_collection
+    mock_identity.return_value = OAuthIdentity(
+        provider="google",
+        sub="sub-new",
+        email="user@example.com",
+        email_verified=True,
+        name="User",
+        picture=None,
+    )
+    user_doc = {
+        "_id": user_oid,
+        "email": "user@example.com",
+        "authProviders": [{"provider": "google", "subject": "sub-old"}],
+    }
+    mock_collection.find_one.return_value = user_doc
+    mock_replace.return_value = user_doc
+    from app.models.user import UserResponse
+
+    now = datetime.now(UTC)
+    mock_user_response.return_value = UserResponse(
+        id=str(user_oid),
+        name="User",
+        email="user@example.com",
+        isActive=True,
+        isEmailVerified=True,
+        roles=["user"],
+        dateCreated=now,
+        dateUpdated=now,
+    )
+
+    current_user = mock_user_response.return_value
+    body = OAuthTokenExchangeRequest(
+        code="code",
+        redirect_uri="https://example.com/cb",
+        code_verifier="verifier",
+        replaceExisting=True,
+    )
+
+    result = oauth_link_provider(current_user, "google", body)
+
+    assert result.replacedProvider == "google"
+    mock_replace.assert_called_once()

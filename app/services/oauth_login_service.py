@@ -104,6 +104,32 @@ def _assert_user_can_authenticate(user_doc: dict) -> None:
         )
 
 
+def _replace_auth_provider(
+    collection,
+    user_id: ObjectId,
+    identity: OAuthIdentity,
+) -> dict:
+    now = datetime.now(UTC)
+    collection.update_one(
+        {"_id": user_id, "authProviders.provider": identity.provider},
+        {
+            "$set": {
+                "authProviders.$.subject": identity.sub,
+                "authProviders.$.linkedAt": now,
+                "authProviders.$.emailFromProvider": identity.email,
+                "dateUpdated": now,
+            }
+        },
+    )
+    updated = collection.find_one({"_id": user_id})
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load user after replacing provider",
+        )
+    return updated
+
+
 def _append_auth_provider(
     collection,
     user_id: ObjectId,
@@ -170,6 +196,7 @@ def _login_existing_user(
     identity: OAuthIdentity,
     *,
     linked_provider: Optional[str] = None,
+    replaced_provider: Optional[str] = None,
 ) -> OAuthLoginResponse:
     _assert_user_can_authenticate(user_doc)
     _touch_last_login(collection, user_doc["_id"])
@@ -186,7 +213,44 @@ def _login_existing_user(
         expires_in=base.expires_in,
         files=base.files,
         linkedProvider=linked_provider,
+        replacedProvider=replaced_provider,
     )
+
+
+def _oauth_replace_provider_for_user(
+    collection,
+    user_doc: dict,
+    identity: OAuthIdentity,
+) -> dict:
+    user_oid = user_doc["_id"]
+    provider = identity.provider
+
+    if not _user_has_provider(user_doc, provider):
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "provider_not_linked",
+            f"This account does not have {provider} linked yet.",
+        )
+
+    if _provider_sub_linked_to_other_user(collection, provider, identity.sub, user_oid):
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "provider_sub_conflict",
+            "This sign-in is already linked to another account.",
+        )
+
+    existing_by_sub = _find_user_by_provider_sub(collection, provider, identity.sub)
+    if existing_by_sub and existing_by_sub["_id"] == user_oid:
+        return user_doc
+
+    if existing_by_sub and existing_by_sub["_id"] != user_oid:
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "provider_sub_conflict",
+            "This sign-in is already linked to another account.",
+        )
+
+    return _replace_auth_provider(collection, user_oid, identity)
 
 
 def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginResponse:
@@ -204,6 +268,7 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
         return _login_existing_user(collection, by_sub, identity)
 
     intent = (body.intent or "login").strip().lower()
+    replace_provider = intent == "replace_provider" or bool(body.replace_existing_provider)
     email = (identity.email or "").strip()
     linked_provider: Optional[str] = None
 
@@ -211,6 +276,16 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
         by_email = _find_user_by_email_insensitive(collection, email)
         if by_email:
             if identity.email_verified:
+                if replace_provider and _user_has_provider(by_email, provider):
+                    updated = _oauth_replace_provider_for_user(
+                        collection, by_email, identity
+                    )
+                    return _login_existing_user(
+                        collection,
+                        updated,
+                        identity,
+                        replaced_provider=provider,
+                    )
                 if _user_has_provider(by_email, provider):
                     return _login_existing_user(collection, by_email, identity)
                 updated = _append_auth_provider(collection, by_email["_id"], identity)
@@ -288,11 +363,21 @@ def oauth_link_provider(
             detail="User not found",
         )
 
+    replace_existing = bool(body.replace_existing_provider)
+
     if _user_has_provider(user_doc, provider):
-        raise _oauth_http_error(
-            status.HTTP_409_CONFLICT,
-            "provider_already_linked",
-            f"This account already has {provider} linked.",
+        if not replace_existing:
+            raise _oauth_http_error(
+                status.HTTP_409_CONFLICT,
+                "provider_already_linked",
+                f"This account already has {provider} linked.",
+            )
+        updated = _oauth_replace_provider_for_user(collection, user_doc, identity)
+        logger.info("Replaced %s for user_id=%s", provider, current_user.id)
+        return OAuthLinkResponse(
+            success=True,
+            user=user_doc_to_response(updated),
+            replacedProvider=provider,
         )
 
     if _provider_sub_linked_to_other_user(collection, provider, identity.sub, user_oid):
