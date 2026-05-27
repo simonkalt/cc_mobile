@@ -175,12 +175,11 @@ async def oauth_registration_send_code_endpoint(
     current_user: UserResponse = Depends(get_current_user),
 ):
     """Send email/SMS verification code while OAuth registration is pending."""
-    send_oauth_registration_verification_code(
+    return send_oauth_registration_verification_code(
         current_user.id,
         delivery_method=body.delivery_method,
         phone=body.phone,
     )
-    return {"success": True, "message": "Verification code sent successfully"}
 
 
 @router.post("/me/oauth-registration/complete", response_model=UserResponse)

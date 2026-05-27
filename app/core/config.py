@@ -70,6 +70,10 @@ class Settings:
     APP_NAME: str = "Cover Letter API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    # When true, store verification codes even if outbound email fails (UAT / local testing).
+    VERIFICATION_EMAIL_FAIL_OPEN: bool = (
+        os.getenv("VERIFICATION_EMAIL_FAIL_OPEN", "False").lower() == "true"
+    )
 
     # Google Analytics (GA4) — injected into website/index.html when serving /
     GOOGLE_ANALYTICS_TAG: Optional[str] = os.getenv("GOOGLE_ANALYTICS_TAG")

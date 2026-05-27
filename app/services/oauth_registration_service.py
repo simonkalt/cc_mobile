@@ -40,6 +40,23 @@ def _users_collection():
     return collection
 
 
+def _oauth_registration_needs_completion(user_doc: dict) -> bool:
+    if user_doc.get("oauthRegistrationPending"):
+        return True
+    providers = user_doc.get("authProviders") or []
+    has_oauth = any(
+        isinstance(p, dict) and p.get("provider") in ("google", "linkedin")
+        for p in providers
+    )
+    if not has_oauth:
+        return False
+    if not user_doc.get("termsOfServiceAcceptedAt"):
+        return True
+    if user_doc.get("isEmailVerified") is False:
+        return True
+    return False
+
+
 def _load_pending_oauth_user(user_id: str) -> dict:
     collection = _users_collection()
     try:
@@ -56,11 +73,17 @@ def _load_pending_oauth_user(user_id: str) -> dict:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
-    if not user_doc.get("oauthRegistrationPending"):
+    if not _oauth_registration_needs_completion(user_doc):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="OAuth registration is not pending for this account",
         )
+    if not user_doc.get("oauthRegistrationPending"):
+        collection.update_one(
+            {"_id": user_oid},
+            {"$set": {"oauthRegistrationPending": True}},
+        )
+        user_doc = collection.find_one({"_id": user_oid}) or user_doc
     return user_doc
 
 
@@ -69,7 +92,7 @@ def send_oauth_registration_verification_code(
     *,
     delivery_method: Literal["email", "sms"] = "email",
     phone: Optional[str] = None,
-) -> None:
+) -> dict:
     user_doc = _load_pending_oauth_user(user_id)
     email = (user_doc.get("email") or "").strip()
     if not email:
@@ -92,6 +115,10 @@ def send_oauth_registration_verification_code(
             "dataUseSharingNoticeAccepted": True,
         }
 
+    from app.services.verification_service import (
+        _verification_email_delivery_fail_open,
+    )
+
     send_and_store_verification_code_email(
         user_id=user_id,
         email=email,
@@ -104,6 +131,16 @@ def send_oauth_registration_verification_code(
         user_id,
         delivery_method,
     )
+    result = {
+        "success": True,
+        "message": "Verification code sent successfully",
+    }
+    if delivery_method == "email" and _verification_email_delivery_fail_open():
+        result["emailDeliveryWarning"] = (
+            "Email delivery may be unavailable in this environment. "
+            "If you do not receive a message, check server logs or try resend."
+        )
+    return result
 
 
 def complete_oauth_registration(

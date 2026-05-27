@@ -2,6 +2,7 @@
 Verification code service - handles storage and validation of SMS verification codes
 """
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Optional, Dict, Any
 from bson import ObjectId
@@ -33,6 +34,19 @@ logger = logging.getLogger(__name__)
 
 # Verification code expiration time (10 minutes)
 VERIFICATION_CODE_EXPIRY_MINUTES = 10
+
+
+def _verification_email_delivery_fail_open() -> bool:
+    """Allow API success when SMTP fails (UAT/local); code remains in DB for verify."""
+    if settings.DEBUG or settings.VERIFICATION_EMAIL_FAIL_OPEN:
+        return True
+    deploy = (
+        (os.getenv("DEPLOYMENT_ENV") or "") or (os.getenv("ENVIRONMENT") or "")
+    ).strip().lower()
+    if deploy in {"uat", "staging", "stage", "preview", "development", "dev"}:
+        return True
+    render_url = (os.getenv("RENDER_EXTERNAL_URL") or "").lower()
+    return "uat" in render_url or "staging" in render_url
 
 # forgot_password send-code: identical response when the account is missing (anti-enumeration)
 ANTI_ENUM_SEND_CODE_MESSAGE = (
@@ -312,16 +326,25 @@ def send_and_store_verification_code_email(
         ):
             logger.warning(f"Failed to store verification session in Redis for {email}")
     elif user_id:
-        # For existing users, use MongoDB
-        # Send email (stub - just logs for now)
-        if not send_verification_code_email(email, code, purpose):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send verification code"
-            )
-        
-        # Store code in MongoDB
+        # For existing users, use MongoDB — store first so resend/verify still works if SMTP fails.
         store_verification_code(user_id, code, purpose, email=email)
+        email_sent = send_verification_code_email(email, code, purpose)
+        if not email_sent:
+            fail_open = _verification_email_delivery_fail_open()
+            if fail_open:
+                logger.warning(
+                    "Verification email not delivered to %s (purpose=%s); code stored (fail-open)",
+                    email,
+                    purpose,
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=(
+                        "We could not deliver the verification email. "
+                        "Check the address and try again in a few minutes."
+                    ),
+                )
     else:
         # No user_id and not registration - this shouldn't happen
         raise HTTPException(
