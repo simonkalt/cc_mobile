@@ -39,11 +39,65 @@ if not EMAIL_AVAILABLE:
         f"Missing environment variables: {', '.join(missing_vars)}"
     )
 else:
-    logger.info("Zoho Mail API configuration check passed. Email sending is available.")
+    _cid = settings.ZOHO_CLIENT_ID or ""
+    logger.info(
+        "Zoho Mail API configuration check passed. "
+        "client_id_prefix=%s secret_len=%s refresh_len=%s accounts_base=%s",
+        _cid[:12] if len(_cid) >= 12 else _cid,
+        len(settings.ZOHO_CLIENT_SECRET or ""),
+        len(settings.ZOHO_REFRESH_TOKEN or ""),
+        settings.ZOHO_ACCOUNTS_BASE,
+    )
 
 # Cache for access token
 _access_token_cache: Optional[str] = None
 _token_expires_at: Optional[datetime] = None
+
+
+def zoho_config_fingerprint() -> dict:
+    """Non-secret snapshot of loaded Zoho env (for UAT/debug)."""
+    cid = (settings.ZOHO_CLIENT_ID or "").strip()
+    secret = (settings.ZOHO_CLIENT_SECRET or "").strip()
+    refresh = (settings.ZOHO_REFRESH_TOKEN or "").strip()
+    return {
+        "email_available": EMAIL_AVAILABLE,
+        "client_id_prefix": cid[:12] if cid else "",
+        "client_id_length": len(cid),
+        "client_secret_length": len(secret),
+        "refresh_token_length": len(refresh),
+        "refresh_token_looks_like_zoho": refresh.startswith("1000.") if refresh else False,
+        "accounts_base": (settings.ZOHO_ACCOUNTS_BASE or "https://accounts.zoho.com").rstrip(
+            "/"
+        ),
+    }
+
+
+def probe_zoho_refresh_token() -> dict:
+    """
+    Try one refresh-token exchange; return only success/error (no tokens).
+    """
+    fp = zoho_config_fingerprint()
+    if not EMAIL_AVAILABLE:
+        return {**fp, "ok": False, "error": "not_configured"}
+    accounts_base = fp["accounts_base"]
+    try:
+        response = requests.post(
+            f"{accounts_base}/oauth/v2/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": (settings.ZOHO_CLIENT_ID or "").strip(),
+                "client_secret": (settings.ZOHO_CLIENT_SECRET or "").strip(),
+                "refresh_token": (settings.ZOHO_REFRESH_TOKEN or "").strip(),
+            },
+            timeout=10,
+        )
+        data = response.json() if response.content else {}
+        if response.status_code == 200 and data.get("access_token"):
+            return {**fp, "ok": True, "error": None}
+        err = data.get("error") or f"http_{response.status_code}"
+        return {**fp, "ok": False, "error": err}
+    except requests.RequestException as exc:
+        return {**fp, "ok": False, "error": str(exc)}
 
 
 def get_zoho_access_token() -> Optional[str]:
@@ -82,21 +136,26 @@ def get_zoho_access_token() -> Optional[str]:
     )
 
     try:
-        # Request new access token using refresh token
-        token_url = "https://accounts.zoho.com/oauth/v2/token"
-        params = {
-            "refresh_token": settings.ZOHO_REFRESH_TOKEN,
-            "client_id": settings.ZOHO_CLIENT_ID,
-            "client_secret": settings.ZOHO_CLIENT_SECRET,
+        accounts_base = (settings.ZOHO_ACCOUNTS_BASE or "https://accounts.zoho.com").rstrip(
+            "/"
+        )
+        token_url = f"{accounts_base}/oauth/v2/token"
+        form = {
+            "refresh_token": (settings.ZOHO_REFRESH_TOKEN or "").strip(),
+            "client_id": (settings.ZOHO_CLIENT_ID or "").strip(),
+            "client_secret": (settings.ZOHO_CLIENT_SECRET or "").strip(),
             "grant_type": "refresh_token",
         }
 
         logger.info(f"Requesting new Zoho access token from: {token_url}")
         logger.debug(
-            f"Request params: grant_type=refresh_token, client_id={settings.ZOHO_CLIENT_ID[:10]}..., refresh_token length={len(settings.ZOHO_REFRESH_TOKEN)}"
+            "Token request: grant_type=refresh_token, client_id=%s..., refresh_len=%s, secret_len=%s",
+            (settings.ZOHO_CLIENT_ID or "")[:10],
+            len(settings.ZOHO_REFRESH_TOKEN or ""),
+            len(settings.ZOHO_CLIENT_SECRET or ""),
         )
 
-        response = requests.post(token_url, params=params, timeout=10)
+        response = requests.post(token_url, data=form, timeout=10)
 
         logger.info(f"Zoho token API response status: {response.status_code}")
         logger.debug(f"Zoho token API response headers: {dict(response.headers)}")
@@ -121,9 +180,25 @@ def get_zoho_access_token() -> Optional[str]:
                 )
                 logger.debug(f"Access token preview: {access_token[:20]}...{access_token[-10:]}")
                 return access_token
-            else:
-                logger.error(f"Zoho token response missing access_token. Response data: {data}")
-                return None
+
+            oauth_error = data.get("error")
+            if oauth_error == "invalid_client_secret":
+                logger.error(
+                    "Zoho invalid_client_secret (client_id_prefix=%s secret_len=%s refresh_len=%s "
+                    "accounts=%s): client_id, client_secret, and refresh_token must be one set from "
+                    "the same Zoho API client — re-run zoho_auth_helper exchange after updating Render. "
+                    "On Render, ensure dashboard and /etc/secrets/.secrets do not disagree.",
+                    (settings.ZOHO_CLIENT_ID or "")[:12],
+                    len((settings.ZOHO_CLIENT_SECRET or "").strip()),
+                    len((settings.ZOHO_REFRESH_TOKEN or "").strip()),
+                    accounts_base,
+                )
+            logger.error(
+                "Zoho token response missing access_token (error=%s). Response data: %s",
+                oauth_error,
+                data,
+            )
+            return None
         else:
             logger.error(f"Failed to get Zoho access token: HTTP {response.status_code}")
             logger.error(f"Response text: {response.text}")
@@ -243,6 +318,16 @@ def send_email(to_email: str, subject: str, body: str) -> bool:
             try:
                 error_data = response.json()
                 logger.error(f"Error response JSON: {error_data}")
+                more = (error_data.get("data") or {}).get("moreInfo", "")
+                if more and "internal error" in str(more).lower():
+                    logger.error(
+                        "Zoho generic internal error often means ZOHO_ACCOUNT_ID does not "
+                        "match FROM_EMAIL. Run: python scripts/zoho_auth_helper.py --mode accounts "
+                        "and use the accountId on the row whose primaryEmailAddress equals FROM_EMAIL "
+                        "(from=%s accountId=%s).",
+                        settings.FROM_EMAIL,
+                        settings.ZOHO_ACCOUNT_ID,
+                    )
 
                 # If we get an error about extra keys, try alternative payload formats
                 if (

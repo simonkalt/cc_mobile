@@ -36,6 +36,15 @@ logger = logging.getLogger(__name__)
 VERIFICATION_CODE_EXPIRY_MINUTES = 10
 
 
+def _coerce_utc_datetime(value: Any) -> Optional[datetime]:
+    """MongoDB often returns naive UTC datetimes; compare using aware UTC."""
+    if value is None or not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _verification_email_delivery_fail_open() -> bool:
     """Allow API success when SMTP fails (UAT/local); code remains in DB for verify."""
     if settings.DEBUG or settings.VERIFICATION_EMAIL_FAIL_OPEN:
@@ -169,8 +178,8 @@ def verify_code(user_id: str, code: str, purpose: str) -> bool:
             logger.warning(f"Verification purpose mismatch for user {user_id}")
             return False
         
-        # Check if expired
-        expires_at = verification_data.get("expires_at")
+        # Check if expired (BSON datetimes from Mongo are often naive UTC)
+        expires_at = _coerce_utc_datetime(verification_data.get("expires_at"))
         if expires_at and datetime.now(UTC) > expires_at:
             logger.warning(f"Verification code expired for user {user_id}")
             return False
@@ -333,9 +342,11 @@ def send_and_store_verification_code_email(
             fail_open = _verification_email_delivery_fail_open()
             if fail_open:
                 logger.warning(
-                    "Verification email not delivered to %s (purpose=%s); code stored (fail-open)",
+                    "Verification email not delivered to %s (purpose=%s); "
+                    "code stored (fail-open). UAT/dev code=%s",
                     email,
                     purpose,
+                    code,
                 )
             else:
                 raise HTTPException(

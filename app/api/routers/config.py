@@ -61,6 +61,29 @@ def get_app_update_policy():
     )
 
 
+@router.get("/zoho-mail-status")
+def get_zoho_mail_status():
+    """
+    Public diagnostic: which Zoho env the running process sees (no secrets).
+    Use on UAT to confirm Render loaded the same client id / secret lengths as local .secrets.
+    """
+    from app.utils.email_utils import probe_zoho_refresh_token, zoho_config_fingerprint
+
+    probe = probe_zoho_refresh_token()
+    return {
+        "fingerprint": zoho_config_fingerprint(),
+        "refresh_probe": {
+            "ok": probe.get("ok"),
+            "error": probe.get("error"),
+        },
+        "hint": (
+            "If refresh_probe.error is invalid_client_secret, ZOHO_CLIENT_SECRET on this "
+            "instance does not match ZOHO_CLIENT_ID (or refresh token was minted for a "
+            "different client). Update all three together on Render, then redeploy."
+        ),
+    }
+
+
 @router.get("/google-places-key")
 def get_google_places_key():
     """JSON API endpoint to get the Google Places API key"""

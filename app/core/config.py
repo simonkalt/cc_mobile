@@ -208,11 +208,20 @@ class Settings:
     REDIS_SSL: bool = os.getenv("REDIS_SSL", "false").lower() == "true"
     REDIS_API_KEY: Optional[str] = os.getenv("REDIS_API_KEY")
 
-    # Zoho Mail API
-    ZOHO_CLIENT_ID: Optional[str] = os.getenv("ZOHO_CLIENT_ID")
-    ZOHO_CLIENT_SECRET: Optional[str] = os.getenv("ZOHO_CLIENT_SECRET")
-    ZOHO_REFRESH_TOKEN: Optional[str] = os.getenv("ZOHO_REFRESH_TOKEN")
-    ZOHO_ACCOUNT_ID: Optional[str] = os.getenv("ZOHO_ACCOUNT_ID")
+    # Zoho Mail API (legacy Render names ZOHO_SIMON_* are fallbacks only)
+    ZOHO_CLIENT_ID: Optional[str] = _env_first("ZOHO_CLIENT_ID", "ZOHO_SIMON_CLIENT_ID")
+    ZOHO_CLIENT_SECRET: Optional[str] = _env_first(
+        "ZOHO_CLIENT_SECRET", "ZOHO_SIMON_CLIENT_SECRET"
+    )
+    ZOHO_REFRESH_TOKEN: Optional[str] = _env_first(
+        "ZOHO_REFRESH_TOKEN", "ZOHO_SIMON_REFRESH_TOKEN"
+    )
+    ZOHO_ACCOUNT_ID: Optional[str] = _env_first("ZOHO_ACCOUNT_ID", "ZOHO_SIMON_ACCOUNT_ID")
+    # EU: https://accounts.zoho.eu  IN: https://accounts.zoho.in  (default US)
+    ZOHO_ACCOUNTS_BASE: str = (
+        _env_first("ZOHO_ACCOUNTS_BASE", "ZOHO_ACCOUNTS_URL")
+        or "https://accounts.zoho.com"
+    )
     FROM_EMAIL: Optional[str] = os.getenv("FROM_EMAIL", "no-reply@saimonsoft.com")
 
     # Stripe Configuration (supports both legacy and newer env names)

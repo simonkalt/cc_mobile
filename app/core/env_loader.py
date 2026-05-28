@@ -48,6 +48,12 @@ def load_project_env(root: Path | str | None = None) -> Path:
 
     secrets_path = resolve_secrets_path(root)
     if secrets_path:
-        load_dotenv(secrets_path, override=True)
+        # On Render, dashboard env vars are set before the process starts; do not let
+        # /etc/secrets/.secrets override them (common source of stale ZOHO_* values).
+        on_render = bool(
+            (os.getenv("RENDER") or "").strip()
+            or (os.getenv("RENDER_EXTERNAL_URL") or "").strip()
+        )
+        load_dotenv(secrets_path, override=not on_render)
 
     return root
