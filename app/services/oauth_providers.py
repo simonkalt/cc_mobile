@@ -184,7 +184,7 @@ def _linkedin_token_exchange(
             **headers,
             "Authorization": _oauth_basic_auth_header(client_id, client_secret),
         },
-        data=base_data,
+        data={**base_data, "client_id": client_id},
         timeout=15,
     )
     if basic_response.status_code == 200:
@@ -321,11 +321,15 @@ def exchange_linkedin_code(
             pass
         logger.warning(
             "LinkedIn token exchange failed status=%s auth=%s client_id_prefix=%s "
-            "secret_len=%s body=%s",
+            "secret_len=%s secret_fp=%s redirect_uri=%s code_len=%s verifier_len=%s body=%s",
             response.status_code,
             auth_method,
             fp.get("client_id_prefix"),
             fp.get("client_secret_length"),
+            fp.get("client_secret_sha256_prefix"),
+            redirect_uri,
+            len(code or ""),
+            len(code_verifier or ""),
             response.text[:500],
         )
         if linkedin_error == "invalid_client":
