@@ -207,5 +207,6 @@ def user_doc_to_response(user_doc: dict) -> UserResponse:
             user_doc.get("authProviders")
         ),
         oauthRegistrationPending=bool(user_doc.get("oauthRegistrationPending")),
+        termsOfServiceAcceptedAt=user_doc.get("termsOfServiceAcceptedAt"),
     )
 

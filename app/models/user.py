@@ -131,6 +131,7 @@ class UserResponse(BaseModel):
     account_deletion_requested_at: Optional[datetime] = None
     authProviders: Optional[List[AuthProviderSummary]] = None
     oauthRegistrationPending: Optional[bool] = None
+    termsOfServiceAcceptedAt: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
