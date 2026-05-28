@@ -4,9 +4,11 @@ Identity-provider token exchange and ID token / userinfo validation for OAuth lo
 
 from __future__ import annotations
 
+import base64
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+from urllib.parse import quote
 
 import requests
 from jose import jwt
@@ -37,9 +39,94 @@ class OAuthIdentity:
 class OAuthProviderError(Exception):
     """Raised when code exchange or token validation fails."""
 
-    def __init__(self, message: str = "Invalid authorization code") -> None:
+    def __init__(
+        self,
+        message: str = "Invalid authorization code",
+        *,
+        error_code: str = "invalid_code",
+    ) -> None:
         super().__init__(message)
         self.message = message
+        self.error_code = error_code
+
+
+def linkedin_oauth_config_fingerprint() -> dict:
+    """Non-secret snapshot of loaded LinkedIn OAuth env (for UAT/debug)."""
+    client_id = (settings.LINKEDIN_CLIENT_ID or "").strip()
+    client_secret = (settings.LINKEDIN_CLIENT_SECRET or "").strip()
+    return {
+        "configured": bool(client_id and client_secret),
+        "client_id_prefix": client_id[:6] if client_id else "",
+        "client_id_length": len(client_id),
+        "client_secret_length": len(client_secret),
+        "client_secret_looks_like_linkedin": client_secret.startswith("WPL_AP1.")
+        if client_secret
+        else False,
+    }
+
+
+def _oauth_basic_auth_header(client_id: str, client_secret: str) -> str:
+    """RFC 6749 client_secret_basic (form-urlencoded id:secret)."""
+    creds = f"{quote(client_id, safe='')}:{quote(client_secret, safe='')}"
+    encoded = base64.b64encode(creds.encode()).decode()
+    return f"Basic {encoded}"
+
+
+def _linkedin_token_exchange(
+    code: str,
+    redirect_uri: str,
+    code_verifier: str,
+    client_id: str,
+    client_secret: str,
+) -> Tuple[requests.Response, str]:
+    """
+    Exchange LinkedIn auth code for tokens. Tries POST body credentials first,
+    then HTTP Basic auth (some secrets with special chars fail in form bodies).
+    Returns (response, auth_method).
+    """
+    base_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "code_verifier": code_verifier,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    body_response = requests.post(
+        LINKEDIN_TOKEN_URL,
+        headers=headers,
+        data={
+            **base_data,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        },
+        timeout=15,
+    )
+    if body_response.status_code == 200:
+        return body_response, "client_secret_post"
+
+    body_error = ""
+    try:
+        body_error = (body_response.json() or {}).get("error") or ""
+    except Exception:
+        body_error = ""
+
+    if body_error != "invalid_client":
+        return body_response, "client_secret_post"
+
+    basic_response = requests.post(
+        LINKEDIN_TOKEN_URL,
+        headers={
+            **headers,
+            "Authorization": _oauth_basic_auth_header(client_id, client_secret),
+        },
+        data=base_data,
+        timeout=15,
+    )
+    if basic_response.status_code == 200:
+        return basic_response, "client_secret_basic"
+
+    return body_response, "client_secret_post"
 
 
 def _fetch_google_jwks() -> Dict[str, Any]:
@@ -136,35 +223,49 @@ def exchange_linkedin_code(
     redirect_uri: str,
     code_verifier: str,
 ) -> OAuthIdentity:
-    client_id = settings.LINKEDIN_CLIENT_ID
-    client_secret = settings.LINKEDIN_CLIENT_SECRET
+    client_id = (settings.LINKEDIN_CLIENT_ID or "").strip()
+    client_secret = (settings.LINKEDIN_CLIENT_SECRET or "").strip()
     if not client_id or not client_secret:
-        raise OAuthProviderError("LinkedIn OAuth is not configured on this server")
+        raise OAuthProviderError(
+            "LinkedIn OAuth is not configured on this server",
+            error_code="oauth_not_configured",
+        )
 
+    fp = linkedin_oauth_config_fingerprint()
     try:
-        response = requests.post(
-            LINKEDIN_TOKEN_URL,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uri": redirect_uri,
-                "code_verifier": code_verifier,
-            },
-            timeout=15,
+        response, auth_method = _linkedin_token_exchange(
+            code,
+            redirect_uri,
+            code_verifier,
+            client_id,
+            client_secret,
         )
     except requests.RequestException as exc:
         logger.warning("LinkedIn token exchange request failed: %s", exc)
         raise OAuthProviderError() from exc
 
     if response.status_code != 200:
+        linkedin_error = ""
+        try:
+            linkedin_error = (response.json() or {}).get("error") or ""
+        except Exception:
+            pass
         logger.warning(
-            "LinkedIn token exchange failed status=%s body=%s",
+            "LinkedIn token exchange failed status=%s auth=%s client_id_prefix=%s "
+            "secret_len=%s body=%s",
             response.status_code,
+            auth_method,
+            fp.get("client_id_prefix"),
+            fp.get("client_secret_length"),
             response.text[:500],
         )
+        if linkedin_error == "invalid_client":
+            raise OAuthProviderError(
+                "LinkedIn rejected server credentials (invalid_client). "
+                "LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET on this API host must "
+                "match the same LinkedIn Developer Portal app as the mobile client ID.",
+                error_code="oauth_provider_misconfigured",
+            )
         raise OAuthProviderError()
 
     token_data = response.json()

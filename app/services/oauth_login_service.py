@@ -176,7 +176,7 @@ def _resolve_identity(provider: str, body: OAuthTokenExchangeRequest) -> OAuthId
     except OAuthProviderError as exc:
         raise _oauth_http_error(
             status.HTTP_401_UNAUTHORIZED,
-            "invalid_code",
+            exc.error_code or "invalid_code",
             exc.message or "Authorization code is invalid or expired",
         ) from exc
 

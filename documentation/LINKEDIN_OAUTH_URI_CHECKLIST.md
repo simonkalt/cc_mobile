@@ -72,7 +72,9 @@ If you only see step 1, enter the password and tap **Sign in** — step 2 or an 
 
 They must be the **same LinkedIn application** Client ID. The server secret (`LINKEDIN_CLIENT_SECRET`) is only on the API.
 
-**Render:** Secret File `.secrets` must include `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET` (not only commented placeholders in `.env`).
+**Render:** Set `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET` on the **cc_mobile (uat)** service. On Render, **dashboard environment variables take precedence** over `/etc/secrets/.secrets` — a correct secret in the file but a wrong/stale value in the dashboard causes `invalid_client` at token exchange (same pattern as Zoho).
+
+After deploy, check: `GET https://cc-mobile-uat.onrender.com/api/config/linkedin-oauth-status` — `client_id_prefix` / `client_secret_length` should match your LinkedIn portal app (secret often starts with `WPL_AP1.` and is ~40+ chars; do not truncate trailing `=` when copying).
 
 **EAS production:** `eas.json` currently sets `EXPO_PUBLIC_LINKEDIN_CLIENT_ID` to `""` for the `production` profile — production builds will fail LinkedIn login until you set the real ID in EAS env or `eas.json`.
 
@@ -115,7 +117,8 @@ If the callback is **404**, Render is still on an **old build** or the **auth ro
 | What you see | Likely fix |
 |--------------|------------|
 | LinkedIn error page right after “Sign in with LinkedIn” (before API call) | Redirect URL not listed in portal, or typo (`ccmobile://oauth/linkedin` vs missing `/oauth`, wrong scheme) |
-| App returns to app but API returns 401 `invalid_code` | `redirect_uri` in token exchange ≠ authorize step; or wrong `LINKEDIN_CLIENT_SECRET` on server |
+| App returns to app but API returns 401 `invalid_code` | `redirect_uri` in token exchange ≠ authorize step; or code expired |
+| App returns to register; logs `invalid_client` / API `oauth_provider_misconfigured` | Wrong `LINKEDIN_CLIENT_SECRET` or id/secret pair mismatch on Render (check dashboard vs `.secrets`) |
 | “LinkedIn sign-in is not configured” in app | Missing `EXPO_PUBLIC_LINKEDIN_CLIENT_ID` in mobile `.env` or EAS profile |
 | Works locally, fails on Render | Render `.secrets` missing or different `LINKEDIN_CLIENT_ID` than mobile build |
 | `curl` callback URL returns `Not Found` | UAT not redeployed with OAuth code, or wrong Render service/branch |

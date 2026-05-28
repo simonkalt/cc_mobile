@@ -61,6 +61,26 @@ def get_app_update_policy():
     )
 
 
+@router.get("/linkedin-oauth-status")
+def get_linkedin_oauth_status():
+    """
+    Public diagnostic: which LinkedIn OAuth env the running process sees (no secrets).
+    Use on UAT to confirm Render loaded the same client id / secret as local .secrets.
+    """
+    from app.services.oauth_providers import linkedin_oauth_config_fingerprint
+
+    fp = linkedin_oauth_config_fingerprint()
+    return {
+        "fingerprint": fp,
+        "hint": (
+            "If LinkedIn token exchange logs invalid_client, LINKEDIN_CLIENT_SECRET on this "
+            "instance does not match LINKEDIN_CLIENT_ID (or dashboard env overrides a stale "
+            "secret file on Render). Update both on Render, redeploy, and ensure "
+            "EXPO_PUBLIC_LINKEDIN_CLIENT_ID on mobile matches LINKEDIN_CLIENT_ID here."
+        ),
+    }
+
+
 @router.get("/zoho-mail-status")
 def get_zoho_mail_status():
     """

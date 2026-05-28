@@ -162,6 +162,8 @@ All errors should include a stable machine-readable `code` and human `message` /
 |------|--------|------|
 | 400 | `data_use_notice_required` | New user create without notice acceptance |
 | 401 | `invalid_code` | Code exchange or token validation failed |
+| 401 | `oauth_provider_misconfigured` | IdP rejected server credentials (e.g. LinkedIn `invalid_client`) |
+| 401 | `oauth_not_configured` | Server missing OAuth client id/secret for provider |
 | 401 | `user_not_found` | Login intent, no matching user |
 | 403 | `inactive_account` | Same as password login |
 | 409 | `link_not_allowed` | Cannot link (unverified email, mismatch, etc.) |
