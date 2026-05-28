@@ -238,6 +238,9 @@ def exchange_google_code(
     redirect_uri: str,
     code_verifier: str,
 ) -> OAuthIdentity:
+    if not (code_verifier or "").strip():
+        raise OAuthProviderError("Google OAuth requires PKCE code_verifier")
+
     client_id = settings.GOOGLE_CLIENT_ID
     client_secret = settings.GOOGLE_CLIENT_SECRET
     if not client_id or not client_secret:

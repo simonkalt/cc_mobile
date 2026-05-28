@@ -18,7 +18,8 @@ class OAuthTokenExchangeRequest(BaseModel):
 
     code: str
     redirect_uri: str
-    code_verifier: str
+    # LinkedIn OIDC: omit on mobile (usePKCE false); server does not forward to LinkedIn.
+    code_verifier: str = ""
     intent: Optional[OAuthIntent] = "login"
     data_use_sharing_notice_accepted: Optional[bool] = Field(
         default=None,
