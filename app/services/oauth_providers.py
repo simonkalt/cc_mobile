@@ -5,6 +5,7 @@ Identity-provider token exchange and ID token / userinfo validation for OAuth lo
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
@@ -54,15 +55,78 @@ def linkedin_oauth_config_fingerprint() -> dict:
     """Non-secret snapshot of loaded LinkedIn OAuth env (for UAT/debug)."""
     client_id = (settings.LINKEDIN_CLIENT_ID or "").strip()
     client_secret = (settings.LINKEDIN_CLIENT_SECRET or "").strip()
+    secret_fp = ""
+    if client_secret:
+        secret_fp = hashlib.sha256(client_secret.encode()).hexdigest()[:12]
     return {
         "configured": bool(client_id and client_secret),
         "client_id_prefix": client_id[:6] if client_id else "",
         "client_id_length": len(client_id),
         "client_secret_length": len(client_secret),
+        "client_secret_sha256_prefix": secret_fp,
         "client_secret_looks_like_linkedin": client_secret.startswith("WPL_AP1.")
         if client_secret
         else False,
+        "client_secret_ends_with_equals": client_secret.endswith("=")
+        if client_secret
+        else False,
     }
+
+
+def probe_linkedin_server_credentials() -> dict:
+    """
+    Validate LINKEDIN_CLIENT_ID + LINKEDIN_CLIENT_SECRET with LinkedIn (no user code).
+
+    OIDC apps often reject client_credentials (access_denied) even when the secret is
+    valid. We POST a dummy authorization_code instead: invalid_client => bad secret;
+    authorization code not found / invalid_request => secret accepted.
+    """
+    client_id = (settings.LINKEDIN_CLIENT_ID or "").strip()
+    client_secret = (settings.LINKEDIN_CLIENT_SECRET or "").strip()
+    if not client_id or not client_secret:
+        return {"ok": False, "error": "not_configured", "auth_method": None}
+
+    redirect_uri = (
+        (settings.LINKEDIN_REDIRECT_URI or "").strip()
+        or "https://cc-mobile-uat.onrender.com/api/auth/oauth/linkedin/callback"
+    )
+    data = {
+        "grant_type": "authorization_code",
+        "code": "cc_mobile_credentials_probe_dummy",
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "code_verifier": "cc_mobile_credentials_probe_verifier",
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    try:
+        response = requests.post(
+            LINKEDIN_TOKEN_URL,
+            headers=headers,
+            data=data,
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        return {"ok": False, "error": str(exc), "auth_method": "client_secret_post"}
+
+    try:
+        body = response.json() or {}
+    except Exception:
+        body = {}
+
+    error = body.get("error") or f"http_{response.status_code}"
+    description = (body.get("error_description") or "").lower()
+
+    if error == "invalid_client":
+        return {"ok": False, "error": error, "auth_method": "client_secret_post"}
+
+    if "authorization code not found" in description or error in (
+        "invalid_request",
+        "invalid_grant",
+    ):
+        return {"ok": True, "error": None, "auth_method": "client_secret_post"}
+
+    return {"ok": False, "error": error, "auth_method": "client_secret_post"}
 
 
 def _oauth_basic_auth_header(client_id: str, client_secret: str) -> str:
@@ -126,6 +190,11 @@ def _linkedin_token_exchange(
     if basic_response.status_code == 200:
         return basic_response, "client_secret_basic"
 
+    logger.warning(
+        "LinkedIn token exchange basic auth also failed status=%s body=%s",
+        basic_response.status_code,
+        basic_response.text[:500],
+    )
     return body_response, "client_secret_post"
 
 

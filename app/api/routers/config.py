@@ -67,16 +67,23 @@ def get_linkedin_oauth_status():
     Public diagnostic: which LinkedIn OAuth env the running process sees (no secrets).
     Use on UAT to confirm Render loaded the same client id / secret as local .secrets.
     """
-    from app.services.oauth_providers import linkedin_oauth_config_fingerprint
+    from app.services.oauth_providers import (
+        linkedin_oauth_config_fingerprint,
+        probe_linkedin_server_credentials,
+    )
 
     fp = linkedin_oauth_config_fingerprint()
+    probe = probe_linkedin_server_credentials()
     return {
         "fingerprint": fp,
+        "credentials_probe": probe,
         "hint": (
-            "If LinkedIn token exchange logs invalid_client, LINKEDIN_CLIENT_SECRET on this "
-            "instance does not match LINKEDIN_CLIENT_ID (or dashboard env overrides a stale "
-            "secret file on Render). Update both on Render, redeploy, and ensure "
-            "EXPO_PUBLIC_LINKEDIN_CLIENT_ID on mobile matches LINKEDIN_CLIENT_ID here."
+            "credentials_probe.ok=false with invalid_client means the running process has a "
+            "bad id/secret pair (regenerate in LinkedIn portal, update Render, redeploy). "
+            "On Render, delete LINKEDIN_CLIENT_SECRET from the Environment tab if it duplicates "
+            ".secrets — dashboard vars override the secret file. "
+            "After rotating, client_secret_sha256_prefix must change. "
+            "credentials_probe.ok=true but login still fails → PKCE/code/redirect_uri, not secret."
         ),
     }
 
