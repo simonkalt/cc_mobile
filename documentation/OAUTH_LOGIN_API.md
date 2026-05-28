@@ -124,6 +124,8 @@ Same request/response/error contract as Google, with provider `linkedin` and Lin
 
 **Scopes at authorize (client):** `openid`, `profile`, `email`.
 
+**LinkedIn + PKCE:** Accept `code_verifier` in the JSON body for API uniformity; **do not** pass it to LinkedIn `POST /oauth/v2/accessToken` (LinkedIn returns misleading `invalid_client`). Mobile uses `usePKCE: false` for LinkedIn only.
+
 ---
 
 ## `POST /api/users/me/link-oauth/{provider}`

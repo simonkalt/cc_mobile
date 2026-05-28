@@ -118,6 +118,7 @@ If the callback is **404**, Render is still on an **old build** or the **auth ro
 |--------------|------------|
 | LinkedIn error page right after “Sign in with LinkedIn” (before API call) | Redirect URL not listed in portal, or typo (`ccmobile://oauth/linkedin` vs missing `/oauth`, wrong scheme) |
 | App returns to app but API returns 401 `invalid_code` | `redirect_uri` in token exchange ≠ authorize step; or code expired |
+| App returns to register; logs `invalid_client` with `verifier_len` > 0 | **PKCE:** server must not send `code_verifier` to LinkedIn `accessToken` (misleading `invalid_client`). Deploy `cc_mobile` + app build with LinkedIn `usePKCE: false`. |
 | App returns to register; logs `invalid_client` / API `oauth_provider_misconfigured` | Wrong `LINKEDIN_CLIENT_SECRET` or id/secret pair mismatch on Render (check dashboard vs `.secrets`) |
 | “LinkedIn sign-in is not configured” in app | Missing `EXPO_PUBLIC_LINKEDIN_CLIENT_ID` in mobile `.env` or EAS profile |
 | Works locally, fails on Render | Render `.secrets` missing or different `LINKEDIN_CLIENT_ID` than mobile build |
@@ -127,7 +128,7 @@ If the callback is **404**, Render is still on an **old build** or the **auth ro
 
 ## Quick API smoke test (after a successful redirect in app)
 
-Replace `CODE`, `VERIFIER`, and `REDIRECT` with values from a real run (same `REDIRECT` as logged redirect URI):
+Replace `CODE` and `REDIRECT` with values from a real run (same `REDIRECT` as logged redirect URI). `code_verifier` in the JSON body is accepted by the API but **not** forwarded to LinkedIn.
 
 ```bash
 curl -s -X POST "$BASE/api/auth/oauth/linkedin" \
@@ -135,7 +136,7 @@ curl -s -X POST "$BASE/api/auth/oauth/linkedin" \
   -d '{
     "code": "CODE",
     "redirect_uri": "REDIRECT",
-    "code_verifier": "VERIFIER",
+    "code_verifier": "unused-for-linkedin",
     "intent": "login"
   }'
 ```

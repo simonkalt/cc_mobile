@@ -90,13 +90,13 @@ def probe_linkedin_server_credentials() -> dict:
         (settings.LINKEDIN_REDIRECT_URI or "").strip()
         or "https://cc-mobile-uat.onrender.com/api/auth/oauth/linkedin/callback"
     )
+    # LinkedIn OIDC token endpoint rejects code_verifier (returns misleading invalid_client).
     data = {
         "grant_type": "authorization_code",
         "code": "cc_mobile_credentials_probe_dummy",
         "redirect_uri": redirect_uri,
         "client_id": client_id,
         "client_secret": client_secret,
-        "code_verifier": "cc_mobile_credentials_probe_verifier",
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     try:
@@ -148,11 +148,12 @@ def _linkedin_token_exchange(
     then HTTP Basic auth (some secrets with special chars fail in form bodies).
     Returns (response, auth_method).
     """
+    # Sign In with LinkedIn (OIDC): do not send code_verifier on accessToken — LinkedIn
+    # returns invalid_client if it is present (even when PKCE was used in authorize).
     base_data = {
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "code_verifier": code_verifier,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
