@@ -128,9 +128,51 @@ Same request/response/error contract as Google, with provider `linkedin` and Lin
 
 ---
 
+## `POST /api/auth/oauth/apple` (Sign in with Apple)
+
+**Auth:** Public. **Status:** Implemented.
+
+Native flow (no PKCE / browser code). The iOS client posts the identity token returned by `AppleAuthentication.signInAsync`; the server verifies it against Apple's JWKS and returns the same login JSON as Google/LinkedIn.
+
+### Request
+
+```json
+{
+  "identity_token": "eyJraWQi... (Apple JWT)",
+  "authorization_code": "c1a2...",
+  "apple_user": "001234.abcd...1234",
+  "email": "user@example.com",
+  "full_name": { "givenName": "Jane", "familyName": "Doe" },
+  "intent": "login",
+  "dataUseSharingNoticeAccepted": true
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `identity_token` | Yes | Apple JWT; the **only** trusted source of `sub`/`email`. |
+| `authorization_code` | No | Currently unused server-side; reserved for refresh-token revocation checks. |
+| `apple_user` | No | Apple stable user id (informational; `sub` is authoritative). |
+| `email` | No | Untrusted; the token's `email` is used. Apple returns email in the token on first consent. |
+| `full_name` | Conditional | Apple sends name **only on first authorization**; persisted as the display name on create. |
+| `intent` | No | `login` \| `register`. |
+| `dataUseSharingNoticeAccepted` | Conditional | Required `true` on new-user create. |
+
+### Server logic
+
+1. Verify token signature (RS256) against `https://appleid.apple.com/auth/keys`, with `iss == https://appleid.apple.com` and `aud == APPLE_OAUTH_CLIENT_ID` (defaults to the app bundle id `com.saimonsoft.customcoverlettermobile.app`).
+2. Read `sub`, `email`, `email_verified` (Apple may send it as the string `"true"`).
+3. Reuse the shared login path: find by `(apple, sub)`, else auto-link by verified email, else create (with `oauthRegistrationPending: true`). Same `authProviders`/error contract as Google/LinkedIn (`provider: "apple"`).
+
+### Config
+
+`APPLE_OAUTH_CLIENT_ID` (optional) overrides the audience; otherwise falls back to `APP_STORE_BUNDLE_ID`, then the default bundle id.
+
+---
+
 ## `POST /api/users/me/link-oauth/{provider}`
 
-**Auth:** Bearer required. `{provider}` is `google` or `linkedin`.
+**Auth:** Bearer required. `{provider}` is `google` or `linkedin`. Apple uses a dedicated route, `POST /api/users/me/link-oauth/apple`, with the Apple identity-token body (same shape as the Apple login request, minus `intent`).
 
 ### Request
 

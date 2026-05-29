@@ -21,7 +21,11 @@ from app.core.config import settings
 from app.db.mongodb import get_collection, is_connected
 from app.utils.user_helpers import USERS_COLLECTION
 
-from app.models.oauth import OAuthLinkResponse, OAuthTokenExchangeRequest
+from app.models.oauth import (
+    AppleOAuthLinkRequest,
+    OAuthLinkResponse,
+    OAuthTokenExchangeRequest,
+)
 from app.models.user import (
     UserRegisterRequest,
     UserUpdateRequest,
@@ -34,7 +38,7 @@ from app.models.user import (
     RefreshTokenResponse,
     AccountDeletionRequestResponse,
 )
-from app.services.oauth_login_service import oauth_link_provider
+from app.services.oauth_login_service import apple_oauth_link_provider, oauth_link_provider
 from app.services.oauth_registration_service import (
     complete_oauth_registration,
     send_oauth_registration_verification_code,
@@ -153,6 +157,19 @@ async def get_user_by_email_endpoint(email: str):
 async def get_current_user_endpoint(current_user: UserResponse = Depends(get_current_user)):
     """Get current authenticated user"""
     return get_user_by_id(current_user.id)
+
+
+@router.post(
+    "/me/link-oauth/apple",
+    response_model=OAuthLinkResponse,
+)
+async def link_oauth_apple_endpoint(
+    body: AppleOAuthLinkRequest,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Link Sign in with Apple to the authenticated user (native identity token)."""
+    logger.info("OAuth link request provider=apple user_id=%s", current_user.id)
+    return apple_oauth_link_provider(current_user, body)
 
 
 @router.post(

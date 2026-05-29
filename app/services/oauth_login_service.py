@@ -14,9 +14,20 @@ from fastapi import HTTPException, status
 
 from app.constants.http_details import HTTP_DETAIL_PENDING_ACCOUNT_DELETION
 from app.constants.oauth_errors import oauth_error_detail
-from app.models.oauth import OAuthLinkResponse, OAuthLoginResponse, OAuthTokenExchangeRequest
+from app.models.oauth import (
+    AppleOAuthLinkRequest,
+    AppleOAuthLoginRequest,
+    OAuthLinkResponse,
+    OAuthLoginResponse,
+    OAuthTokenExchangeRequest,
+)
 from app.models.user import UserResponse
-from app.services.oauth_providers import OAuthIdentity, OAuthProviderError, resolve_oauth_identity
+from app.services.oauth_providers import (
+    OAuthIdentity,
+    OAuthProviderError,
+    resolve_oauth_identity,
+    verify_apple_identity_token,
+)
 from app.services.user_service import (
     USERS_COLLECTION,
     build_login_response_from_user_doc,
@@ -28,7 +39,7 @@ from app.utils.user_helpers import user_doc_to_response
 
 logger = logging.getLogger(__name__)
 
-OAUTH_PROVIDERS = frozenset({"google", "linkedin"})
+OAUTH_PROVIDERS = frozenset({"google", "linkedin", "apple"})
 
 
 def _require_db_collection():
@@ -260,6 +271,21 @@ def _oauth_replace_provider_for_user(
     return _replace_auth_provider(collection, user_oid, identity)
 
 
+def _resolve_apple_identity(
+    identity_token: str,
+    full_name,
+) -> OAuthIdentity:
+    full_name_dict = full_name.model_dump() if full_name is not None else None
+    try:
+        return verify_apple_identity_token(identity_token, full_name=full_name_dict)
+    except OAuthProviderError as exc:
+        raise _oauth_http_error(
+            status.HTTP_401_UNAUTHORIZED,
+            exc.error_code or "invalid_code",
+            exc.message or "Sign in with Apple is invalid or expired",
+        ) from exc
+
+
 def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginResponse:
     if provider not in OAUTH_PROVIDERS:
         raise HTTPException(
@@ -269,8 +295,39 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
 
     identity = _resolve_identity(provider, body)
     collection = _require_db_collection()
-
     intent = (body.intent or "login").strip().lower()
+    return _complete_oauth_login(
+        collection,
+        identity,
+        intent=intent,
+        replace_existing=bool(body.replace_existing_provider),
+        data_use_accepted=body.data_use_sharing_notice_accepted,
+    )
+
+
+def apple_oauth_login(body: AppleOAuthLoginRequest) -> OAuthLoginResponse:
+    """Sign in with Apple: verify the native identity token, then login/link/create."""
+    identity = _resolve_apple_identity(body.identity_token, body.full_name)
+    collection = _require_db_collection()
+    intent = (body.intent or "login").strip().lower()
+    return _complete_oauth_login(
+        collection,
+        identity,
+        intent=intent,
+        replace_existing=False,
+        data_use_accepted=body.data_use_sharing_notice_accepted,
+    )
+
+
+def _complete_oauth_login(
+    collection,
+    identity: OAuthIdentity,
+    *,
+    intent: str,
+    replace_existing: bool,
+    data_use_accepted: Optional[bool],
+) -> OAuthLoginResponse:
+    provider = identity.provider
 
     by_sub = _find_user_by_provider_sub(collection, provider, identity.sub)
     if by_sub:
@@ -285,7 +342,7 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
             )
         return _login_existing_user(collection, by_sub, identity)
 
-    replace_provider = intent == "replace_provider" or bool(body.replace_existing_provider)
+    replace_provider = intent == "replace_provider" or bool(replace_existing)
     email = (identity.email or "").strip()
     linked_provider: Optional[str] = None
 
@@ -337,7 +394,7 @@ def oauth_login(provider: str, body: OAuthTokenExchangeRequest) -> OAuthLoginRes
             "No account found for this sign-in. Register first or use a different method.",
         )
 
-    if not body.data_use_sharing_notice_accepted:
+    if not data_use_accepted:
         raise _oauth_http_error(
             status.HTTP_400_BAD_REQUEST,
             "data_use_notice_required",
@@ -374,6 +431,33 @@ def oauth_link_provider(
         )
 
     identity = _resolve_identity(provider, body)
+    return _complete_oauth_link(
+        current_user,
+        identity,
+        replace_existing=bool(body.replace_existing_provider),
+    )
+
+
+def apple_oauth_link_provider(
+    current_user: UserResponse,
+    body: AppleOAuthLinkRequest,
+) -> OAuthLinkResponse:
+    """Link Sign in with Apple to the authenticated user."""
+    identity = _resolve_apple_identity(body.identity_token, body.full_name)
+    return _complete_oauth_link(
+        current_user,
+        identity,
+        replace_existing=bool(body.replace_existing_provider),
+    )
+
+
+def _complete_oauth_link(
+    current_user: UserResponse,
+    identity: OAuthIdentity,
+    *,
+    replace_existing: bool,
+) -> OAuthLinkResponse:
+    provider = identity.provider
     collection = _require_db_collection()
 
     try:
@@ -390,8 +474,6 @@ def oauth_link_provider(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
-
-    replace_existing = bool(body.replace_existing_provider)
 
     if _user_has_provider(user_doc, provider):
         if not replace_existing:

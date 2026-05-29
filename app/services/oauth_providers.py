@@ -23,8 +23,11 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 LINKEDIN_USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
+APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+APPLE_ISSUER = "https://appleid.apple.com"
 
 _jwks_cache: Optional[Dict[str, Any]] = None
+_apple_jwks_cache: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -395,6 +398,99 @@ def exchange_linkedin_code(
         email_verified=bool(email_verified),
         name=userinfo.get("name") or claims.get("name"),
         picture=userinfo.get("picture") or claims.get("picture"),
+    )
+
+
+def _fetch_apple_jwks(*, force_refresh: bool = False) -> Dict[str, Any]:
+    global _apple_jwks_cache
+    if _apple_jwks_cache is not None and not force_refresh:
+        return _apple_jwks_cache
+    response = requests.get(APPLE_JWKS_URL, timeout=15)
+    response.raise_for_status()
+    _apple_jwks_cache = response.json()
+    return _apple_jwks_cache
+
+
+def _find_apple_signing_key(kid: Optional[str]) -> Optional[Dict[str, Any]]:
+    try:
+        jwks = _fetch_apple_jwks()
+        key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+        if key:
+            return key
+        # Apple rotates keys; refresh once before giving up.
+        jwks = _fetch_apple_jwks(force_refresh=True)
+        return next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+    except requests.RequestException as exc:
+        raise OAuthProviderError("Could not fetch Apple signing keys") from exc
+
+
+def verify_apple_identity_token(
+    identity_token: str,
+    *,
+    full_name: Optional[Dict[str, Any]] = None,
+) -> OAuthIdentity:
+    """
+    Verify a Sign in with Apple identity token (JWT) and build an OAuthIdentity.
+
+    The token is the only trusted source of `sub`/`email`. Apple does not include
+    the user's name in the token, so `full_name` (provided by the client only on the
+    first authorization) is used for the display name when present.
+    """
+    client_id = (settings.APPLE_OAUTH_CLIENT_ID or "").strip()
+    if not client_id:
+        raise OAuthProviderError(
+            "Sign in with Apple is not configured on this server",
+            error_code="oauth_not_configured",
+        )
+
+    token = (identity_token or "").strip()
+    if not token:
+        raise OAuthProviderError("Missing Apple identity token")
+
+    try:
+        header = jwt.get_unverified_header(token)
+    except JWTError as exc:
+        raise OAuthProviderError("Invalid Apple identity token") from exc
+
+    key = _find_apple_signing_key(header.get("kid"))
+    if not key:
+        raise OAuthProviderError("Apple signing key not found")
+
+    try:
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=["RS256"],
+            audience=client_id,
+            issuer=APPLE_ISSUER,
+        )
+    except JWTError as exc:
+        raise OAuthProviderError("Apple identity token validation failed") from exc
+
+    sub = claims.get("sub")
+    if not sub:
+        raise OAuthProviderError("Apple identity token missing subject")
+
+    raw_verified = claims.get("email_verified")
+    if isinstance(raw_verified, str):
+        email_verified = raw_verified.strip().lower() == "true"
+    else:
+        email_verified = bool(raw_verified)
+
+    name: Optional[str] = None
+    if full_name:
+        given = (full_name.get("givenName") or "").strip()
+        family = (full_name.get("familyName") or "").strip()
+        combined = f"{given} {family}".strip()
+        name = combined or None
+
+    return OAuthIdentity(
+        provider="apple",
+        sub=str(sub),
+        email=claims.get("email"),
+        email_verified=email_verified,
+        name=name,
+        picture=None,
     )
 
 

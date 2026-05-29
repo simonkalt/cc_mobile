@@ -194,6 +194,13 @@ class Settings:
     LINKEDIN_REDIRECT_URI: Optional[str] = os.getenv("LINKEDIN_REDIRECT_URI")
     LINKEDIN_SCOPE: Optional[str] = os.getenv("LINKEDIN_SCOPE")
     LINKEDIN_SUCCESS_REDIRECT: Optional[str] = os.getenv("LINKEDIN_SUCCESS_REDIRECT")
+
+    # Sign in with Apple (native iOS login). The identity token's `aud` is the app
+    # bundle id; defaults to the production bundle id and falls back to APP_STORE_BUNDLE_ID.
+    APPLE_OAUTH_CLIENT_ID: Optional[str] = (
+        _env_first("APPLE_OAUTH_CLIENT_ID", "APP_STORE_BUNDLE_ID")
+        or "com.saimonsoft.customcoverlettermobile.app"
+    )
     
     # Telnyx SMS Configuration
     TELNYX_API_KEY: Optional[str] = os.getenv("TELNYX_API_KEY")
