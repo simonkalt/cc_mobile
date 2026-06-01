@@ -534,3 +534,81 @@ def _complete_oauth_link(
         user=user_doc_to_response(updated),
         linkedProvider=provider,
     )
+
+
+def _user_has_usable_password(user_doc: dict) -> bool:
+    hashed = user_doc.get("hashedPassword")
+    return isinstance(hashed, str) and bool(hashed.strip())
+
+
+def _count_auth_providers(user_doc: dict) -> int:
+    providers = user_doc.get("authProviders") or []
+    return sum(
+        1
+        for p in providers
+        if isinstance(p, dict) and p.get("provider") in OAUTH_PROVIDERS
+    )
+
+
+def oauth_unlink_provider(current_user: UserResponse, provider: str) -> OAuthLinkResponse:
+    """Remove a linked OAuth provider from the authenticated user."""
+    if provider not in OAUTH_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown OAuth provider: {provider}",
+        )
+
+    collection = _require_db_collection()
+
+    try:
+        user_oid = ObjectId(current_user.id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        ) from exc
+
+    user_doc = collection.find_one({"_id": user_oid})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if not _user_has_provider(user_doc, provider):
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "provider_not_linked",
+            f"This account does not have {provider} linked.",
+        )
+
+    has_password = _user_has_usable_password(user_doc)
+    provider_count = _count_auth_providers(user_doc)
+    if not has_password and provider_count <= 1:
+        raise _oauth_http_error(
+            status.HTTP_409_CONFLICT,
+            "last_signin_method",
+            "Add a password or link another sign-in method before disconnecting your only sign-in option.",
+        )
+
+    now = datetime.now(UTC)
+    collection.update_one(
+        {"_id": user_oid},
+        {
+            "$pull": {"authProviders": {"provider": provider}},
+            "$set": {"dateUpdated": now},
+        },
+    )
+    updated = collection.find_one({"_id": user_oid})
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load user after unlinking provider",
+        )
+
+    logger.info("Unlinked %s for user_id=%s", provider, current_user.id)
+    return OAuthLinkResponse(
+        success=True,
+        user=user_doc_to_response(updated),
+        unlinkedProvider=provider,
+    )

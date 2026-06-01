@@ -80,3 +80,4 @@ class OAuthLinkResponse(BaseModel):
     user: UserResponse
     linkedProvider: Optional[str] = None
     replacedProvider: Optional[str] = None
+    unlinkedProvider: Optional[str] = None

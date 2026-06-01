@@ -166,7 +166,7 @@ Native flow (no PKCE / browser code). The iOS client posts the identity token re
 
 ### Config
 
-`APPLE_OAUTH_CLIENT_ID` (optional) overrides the audience; otherwise falls back to `APP_STORE_BUNDLE_ID`, then the default bundle id.
+`APPLE_OAUTH_CLIENT_ID` (optional) overrides the audience; otherwise falls back to `APP_STORE_BUNDLE_ID`, then the default bundle id `com.saimonsoft.customcoverlettermobile.app`. On UAT, leave unset or set to that exact value so JWT `aud` matches the iOS app. iOS Simulator debugging: see `cc_mobile_ui/documentation/APPLE_SIGN_IN_SIMULATOR.md`.
 
 ---
 
@@ -190,7 +190,22 @@ Same body as public OAuth routes (code, redirect_uri, code_verifier). Do **not**
 
 Does not re-issue tokens unless you choose to; client may keep existing session.
 
+---
+
+## `DELETE /api/users/me/link-oauth/{provider}`
+
+**Auth:** Bearer required. `{provider}` is `google`, `linkedin`, or `apple` (same path as link; Apple does not need a separate route).
+
+Removes that provider from `authProviders`. Success `200 OK` with updated `user` and optional `unlinkedProvider`.
+
 ### Errors
+
+- `409 provider_not_linked`
+- `409 last_signin_method` — no password and this is the user's only OAuth sign-in method
+
+---
+
+### Link errors (`POST`)
 
 - `409 provider_already_linked` — this user already has that provider.
 - `409 provider_sub_conflict` — `sub` belongs to another user.

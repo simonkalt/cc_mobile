@@ -9,7 +9,11 @@ from fastapi import HTTPException
 from unittest.mock import MagicMock, patch
 
 from app.models.oauth import OAuthTokenExchangeRequest
-from app.services.oauth_login_service import oauth_link_provider, oauth_login
+from app.services.oauth_login_service import (
+    oauth_link_provider,
+    oauth_login,
+    oauth_unlink_provider,
+)
 from app.services.oauth_providers import OAuthIdentity
 from app.utils.user_helpers import sanitize_auth_providers_for_response
 
@@ -145,3 +149,81 @@ def test_oauth_link_replace_provider(
 
     assert result.replacedProvider == "google"
     mock_replace.assert_called_once()
+
+
+@patch("app.services.oauth_login_service.user_doc_to_response")
+@patch("app.services.oauth_login_service._require_db_collection")
+def test_oauth_unlink_provider(mock_db, mock_user_response):
+    from bson import ObjectId
+
+    from app.models.user import UserResponse
+
+    user_oid = ObjectId()
+    mock_collection = MagicMock()
+    mock_db.return_value = mock_collection
+    user_doc = {
+        "_id": user_oid,
+        "email": "user@example.com",
+        "hashedPassword": "hashed",
+        "authProviders": [
+            {"provider": "google", "subject": "sub-1"},
+            {"provider": "linkedin", "subject": "sub-2"},
+        ],
+    }
+    mock_collection.find_one.side_effect = [user_doc, {**user_doc, "authProviders": [{"provider": "linkedin", "subject": "sub-2"}]}]
+
+    now = datetime.now(UTC)
+    mock_user_response.return_value = UserResponse(
+        id=str(user_oid),
+        name="User",
+        email="user@example.com",
+        isActive=True,
+        isEmailVerified=True,
+        roles=["user"],
+        dateCreated=now,
+        dateUpdated=now,
+    )
+
+    current_user = mock_user_response.return_value
+    result = oauth_unlink_provider(current_user, "google")
+
+    assert result.unlinkedProvider == "google"
+    mock_collection.update_one.assert_called_once()
+    pull = mock_collection.update_one.call_args[0][1]["$pull"]
+    assert pull == {"authProviders": {"provider": "google"}}
+
+
+@patch("app.services.oauth_login_service._require_db_collection")
+def test_oauth_unlink_last_signin_method(mock_db):
+    from bson import ObjectId
+
+    from app.models.user import UserResponse
+
+    user_oid = ObjectId()
+    mock_collection = MagicMock()
+    mock_db.return_value = mock_collection
+    user_doc = {
+        "_id": user_oid,
+        "email": "oauth@example.com",
+        "hashedPassword": "",
+        "authProviders": [{"provider": "google", "subject": "sub-1"}],
+    }
+    mock_collection.find_one.return_value = user_doc
+
+    now = datetime.now(UTC)
+    current_user = UserResponse(
+        id=str(user_oid),
+        name="OAuth",
+        email="oauth@example.com",
+        isActive=True,
+        isEmailVerified=True,
+        roles=["user"],
+        dateCreated=now,
+        dateUpdated=now,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        oauth_unlink_provider(current_user, "google")
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "last_signin_method"

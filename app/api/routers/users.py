@@ -38,7 +38,11 @@ from app.models.user import (
     RefreshTokenResponse,
     AccountDeletionRequestResponse,
 )
-from app.services.oauth_login_service import apple_oauth_link_provider, oauth_link_provider
+from app.services.oauth_login_service import (
+    apple_oauth_link_provider,
+    oauth_link_provider,
+    oauth_unlink_provider,
+)
 from app.services.oauth_registration_service import (
     complete_oauth_registration,
     send_oauth_registration_verification_code,
@@ -184,6 +188,19 @@ async def link_oauth_provider_endpoint(
     """Link Google or LinkedIn to the authenticated user (PKCE code exchange)."""
     logger.info("OAuth link request provider=%s user_id=%s", provider, current_user.id)
     return oauth_link_provider(current_user, provider, body)
+
+
+@router.delete(
+    "/me/link-oauth/{provider}",
+    response_model=OAuthLinkResponse,
+)
+async def unlink_oauth_provider_endpoint(
+    provider: str,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Disconnect Google, LinkedIn, or Apple from the authenticated user."""
+    logger.info("OAuth unlink request provider=%s user_id=%s", provider, current_user.id)
+    return oauth_unlink_provider(current_user, provider)
 
 
 @router.post("/me/oauth-registration/send-verification-code", status_code=status.HTTP_200_OK)
