@@ -34,6 +34,7 @@ from app.models.user import (
     UserLoginResponse,
     OAuthRegistrationSendCodeRequest,
     OAuthRegistrationCompleteRequest,
+    AcceptTermsRequest,
     RefreshTokenRequest,
     RefreshTokenResponse,
     AccountDeletionRequestResponse,
@@ -44,6 +45,7 @@ from app.services.oauth_login_service import (
     oauth_unlink_provider,
 )
 from app.services.oauth_registration_service import (
+    accept_user_terms,
     complete_oauth_registration,
     send_oauth_registration_verification_code,
 )
@@ -229,6 +231,19 @@ async def oauth_registration_complete_endpoint(
         phone=body.phone,
         sms_opt_in=body.smsOptIn,
         delivery_method=body.delivery_method,
+    )
+
+
+@router.post("/me/accept-terms", response_model=UserResponse)
+async def accept_terms_endpoint(
+    body: AcceptTermsRequest,
+    current_user: UserResponse = Depends(get_current_user),
+):
+    """Record Terms of Service acceptance after social sign-in or link."""
+    return accept_user_terms(
+        current_user.id,
+        terms_of_service_accepted=body.termsOfServiceAccepted,
+        provider=body.provider,
     )
 
 

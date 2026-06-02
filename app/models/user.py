@@ -177,3 +177,8 @@ class OAuthRegistrationCompleteRequest(BaseModel):
     smsOptIn: bool = False
     delivery_method: Literal["email", "sms"] = "email"
 
+
+class AcceptTermsRequest(BaseModel):
+    termsOfServiceAccepted: bool = False
+    provider: Optional[str] = None
+
