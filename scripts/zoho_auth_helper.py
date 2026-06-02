@@ -15,16 +15,10 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-from app.core.env_loader import load_project_env
+from dotenv import load_dotenv
 
 
 ACCOUNTS_BASE = "https://accounts.zoho.com"
@@ -69,26 +63,6 @@ def _exchange_code(
     return {"status": resp.status_code, "body": resp.json()}
 
 
-def _print_refresh_token_hints(refresh_token: str, body: dict) -> None:
-    err = (body or {}).get("error") if isinstance(body, dict) else None
-    if err != "invalid_code":
-        return
-    print(
-        "Hint: Zoho returned invalid_code for grant_type=refresh_token. "
-        "ZOHO_REFRESH_TOKEN is missing, expired, revoked, or is an old "
-        "authorization code (not a refresh token). Regenerate it:\n"
-        "  1. python scripts/zoho_auth_helper.py --mode url\n"
-        "  2. Open the URL, sign in, approve\n"
-        "  3. Copy ?code= from the redirect (expires in ~2 minutes)\n"
-        "  4. python scripts/zoho_auth_helper.py --mode exchange --code 'PASTE_CODE'\n"
-        "  5. Save the printed refresh_token into .secrets as ZOHO_REFRESH_TOKEN\n"
-    )
-    if refresh_token and not refresh_token.startswith("1000."):
-        print(
-            "Warning: refresh token does not start with 1000. — double-check .secrets.\n"
-        )
-
-
 def _refresh_token(client_id: str, client_secret: str, refresh_token: str) -> dict:
     resp = requests.post(
         f"{ACCOUNTS_BASE}/oauth/v2/token",
@@ -118,7 +92,7 @@ def _list_accounts(access_token: str) -> dict:
 
 
 def main() -> None:
-    load_project_env()
+    load_dotenv()
 
     parser = argparse.ArgumentParser(description="Zoho OAuth helper")
     parser.add_argument(
@@ -147,15 +121,8 @@ def main() -> None:
         default="all",
         help="Action to run",
     )
-    parser.add_argument(
-        "--refresh-only",
-        action="store_true",
-        help="Shorthand for --mode refresh (test ZOHO_CLIENT_ID + SECRET + REFRESH_TOKEN)",
-    )
 
     args = parser.parse_args()
-    if args.refresh_only:
-        args.mode = "refresh"
 
     try:
         client_id = _require("ZOHO_CLIENT_ID")
@@ -182,7 +149,7 @@ def main() -> None:
             print("")
             refresh = (result.get("body") or {}).get("refresh_token")
             if refresh:
-                print("Copy this into .secrets as ZOHO_REFRESH_TOKEN:")
+                print("Copy this into .env as ZOHO_REFRESH_TOKEN:")
                 print(refresh)
                 print("")
 
@@ -197,11 +164,6 @@ def main() -> None:
             print("Refresh-token result:")
             print(json.dumps(result, indent=2))
             print("")
-            _print_refresh_token_hints(
-                refresh_token, (result.get("body") or {}) if isinstance(result, dict) else {}
-            )
-            if (result.get("body") or {}).get("access_token"):
-                print("OK: refresh succeeded — use this refresh token on Render/UAT.\n")
 
     if args.mode in {"accounts", "all"}:
         token = args.access_token.strip()
@@ -235,31 +197,7 @@ def main() -> None:
                     aid = data.get("accountId") or data.get("id")
                     if aid:
                         account_ids.append(str(aid))
-            if isinstance(body, dict) and isinstance(body.get("data"), list):
-                print("ZOHO_ACCOUNT_ID / FROM_EMAIL (use matching pair on Render):")
-                for item in body["data"]:
-                    if not isinstance(item, dict):
-                        continue
-                    aid = item.get("accountId") or item.get("id")
-                    primary = item.get("primaryEmailAddress") or item.get(
-                        "mailboxAddress", ""
-                    )
-                    mailbox = item.get("mailboxAddress", "")
-                    aliases = []
-                    for em in item.get("emailAddress") or []:
-                        if isinstance(em, dict) and em.get("mailId"):
-                            aliases.append(em["mailId"])
-                    print(f"  accountId={aid}")
-                    print(f"    primaryEmailAddress={primary}")
-                    if mailbox and mailbox != primary:
-                        print(f"    mailboxAddress={mailbox}")
-                    if aliases:
-                        print(f"    all mailIds={', '.join(aliases)}")
-                    print(
-                        f"    → set ZOHO_ACCOUNT_ID={aid} and FROM_EMAIL={primary}"
-                    )
-                    print("")
-            elif account_ids:
+            if account_ids:
                 print("Possible ZOHO_ACCOUNT_ID values:")
                 for aid in account_ids:
                     print(aid)

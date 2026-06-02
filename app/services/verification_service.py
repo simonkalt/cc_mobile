@@ -2,7 +2,6 @@
 Verification code service - handles storage and validation of SMS verification codes
 """
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 from typing import Optional, Dict, Any
 from bson import ObjectId
@@ -34,34 +33,6 @@ logger = logging.getLogger(__name__)
 
 # Verification code expiration time (10 minutes)
 VERIFICATION_CODE_EXPIRY_MINUTES = 10
-
-
-def _coerce_utc_datetime(value: Any) -> Optional[datetime]:
-    """MongoDB often returns naive UTC datetimes; compare using aware UTC."""
-    if value is None or not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
-def _verification_email_delivery_fail_open() -> bool:
-    """Allow API success when SMTP fails (UAT/local); code remains in DB for verify."""
-    if settings.DEBUG or settings.VERIFICATION_EMAIL_FAIL_OPEN:
-        return True
-    deploy = (
-        (os.getenv("DEPLOYMENT_ENV") or "") or (os.getenv("ENVIRONMENT") or "")
-    ).strip().lower()
-    if deploy in {"uat", "staging", "stage", "preview", "development", "dev"}:
-        return True
-    render_url = (os.getenv("RENDER_EXTERNAL_URL") or "").lower()
-    return "uat" in render_url or "staging" in render_url
-
-# forgot_password send-code: identical response when the account is missing (anti-enumeration)
-ANTI_ENUM_SEND_CODE_MESSAGE = (
-    "If an account exists for this email or phone number, a verification code has been sent."
-)
-ANTI_ENUM_SEND_CODE_EXPIRES_MINUTES = VERIFICATION_CODE_EXPIRY_MINUTES
 
 
 def store_verification_code(
@@ -178,8 +149,8 @@ def verify_code(user_id: str, code: str, purpose: str) -> bool:
             logger.warning(f"Verification purpose mismatch for user {user_id}")
             return False
         
-        # Check if expired (BSON datetimes from Mongo are often naive UTC)
-        expires_at = _coerce_utc_datetime(verification_data.get("expires_at"))
+        # Check if expired
+        expires_at = verification_data.get("expires_at")
         if expires_at and datetime.now(UTC) > expires_at:
             logger.warning(f"Verification code expired for user {user_id}")
             return False
@@ -281,7 +252,7 @@ def send_and_store_verification_code_email(
     Returns:
         Generated verification code
     """
-    # Generate code - use real random code for email (Zoho Mail API)
+    # Generate code - use real random code for email (SMTP is configured)
     # SMS still uses hardcoded "000000" until Twilio is approved
     if delivery_method == "email":
         code = str(random.randint(100000, 999999))
@@ -335,27 +306,16 @@ def send_and_store_verification_code_email(
         ):
             logger.warning(f"Failed to store verification session in Redis for {email}")
     elif user_id:
-        # For existing users, use MongoDB — store first so resend/verify still works if SMTP fails.
+        # For existing users, use MongoDB
+        # Send email (stub - just logs for now)
+        if not send_verification_code_email(email, code, purpose):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send verification code"
+            )
+        
+        # Store code in MongoDB
         store_verification_code(user_id, code, purpose, email=email)
-        email_sent = send_verification_code_email(email, code, purpose)
-        if not email_sent:
-            fail_open = _verification_email_delivery_fail_open()
-            if fail_open:
-                logger.warning(
-                    "Verification email not delivered to %s (purpose=%s); "
-                    "code stored (fail-open). UAT/dev code=%s",
-                    email,
-                    purpose,
-                    code,
-                )
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=(
-                        "We could not deliver the verification email. "
-                        "Check the address and try again in a few minutes."
-                    ),
-                )
     else:
         # No user_id and not registration - this shouldn't happen
         raise HTTPException(
