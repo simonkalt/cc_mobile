@@ -200,3 +200,63 @@ def complete_oauth_registration(
 
     logger.info("OAuth registration completed for user_id=%s", user_id)
     return user_doc_to_response(updated)
+
+
+def accept_user_terms(
+    user_id: str,
+    *,
+    terms_of_service_accepted: bool,
+    provider: Optional[str] = None,
+) -> dict:
+    """Persist Terms of Service acceptance (e.g. after social sign-in link)."""
+    if not terms_of_service_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must accept the Terms of Service",
+        )
+
+    collection = _users_collection()
+    try:
+        user_oid = ObjectId(user_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID",
+        ) from exc
+
+    user_doc = collection.find_one({"_id": user_oid})
+    if not user_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    now = datetime.now(UTC)
+    update_doc: dict = {
+        "termsOfServiceAcceptedAt": now,
+        "dateUpdated": now,
+    }
+    if user_doc.get("isEmailVerified") is False and not user_doc.get(
+        "oauthRegistrationPending"
+    ):
+        update_doc["isEmailVerified"] = True
+
+    collection.update_one({"_id": user_oid}, {"$set": update_doc})
+    updated = collection.find_one({"_id": user_oid})
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load user after accepting terms",
+        )
+
+    if provider:
+        logger.info(
+            "Terms accepted provider=%s user_id=%s email=%s",
+            provider,
+            user_id,
+            updated.get("email"),
+        )
+    else:
+        logger.info("Terms accepted user_id=%s", user_id)
+
+    return user_doc_to_response(updated)
