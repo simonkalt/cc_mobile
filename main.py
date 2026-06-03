@@ -348,15 +348,17 @@ except Exception as e:
         exc_info=True,
     )
 
-# Public config/version — register first so a failure in email/sms imports cannot 404 these.
+# Public config/version/terms — register first so a failure in email/sms imports cannot 404 these.
 try:
-    from app.api.routers import config, version
+    from app.api.routers import config, version, terms_public
 
     app.include_router(config.router)
     app.include_router(version.router)
+    app.include_router(terms_public.router)
 except Exception as e:
     logger.error(
-        "Config/version routers NOT registered — GET /api/config/* and /api/version will 404: %s",
+        "Public config routers NOT registered — GET /api/config/*, /api/version, "
+        "/api/files/terms-of-service may 404: %s",
         e,
         exc_info=True,
     )

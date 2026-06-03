@@ -1,9 +1,45 @@
-"""Terms of Service endpoint must fall back to bundled markdown when S3 is missing."""
+"""Terms of Service endpoint: S3 resolution, fallback, and early router registration."""
 
 import unittest
 from unittest import mock
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from app.utils import terms_of_service as tos
+
+
+class TestTermsS3UriResolution(unittest.TestCase):
+    def test_resolve_uri_uses_aws_s3_bucket_and_key(self):
+        with mock.patch.object(tos.settings, "TERMS_OF_SERVICE_S3_URI", None):
+            with mock.patch.object(tos.settings, "AWS_S3_BUCKET", "my-bucket"):
+                with mock.patch.object(
+                    tos.settings,
+                    "TERMS_OF_SERVICE_S3_KEY",
+                    "policy/sAImon Software - Terms of Service.md",
+                ):
+                    uri = tos.resolve_terms_markdown_s3_uri()
+        self.assertEqual(
+            uri,
+            "s3://my-bucket/policy/sAImon Software - Terms of Service.md",
+        )
+
+
+class TestTermsPublicRouterWithoutFilesBundle(unittest.TestCase):
+    def test_terms_route_without_files_router(self):
+        from app.api.routers import terms_public
+
+        app = FastAPI()
+        app.include_router(terms_public.router)
+        client = TestClient(app)
+        with mock.patch.object(
+            tos,
+            "_load_terms_markdown_from_s3",
+            return_value="# Terms\n\nBody",
+        ):
+            resp = client.get("/api/files/terms-of-service")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Terms", resp.text)
 
 
 class TestTermsOfServiceFallback(unittest.TestCase):

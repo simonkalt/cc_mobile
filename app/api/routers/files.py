@@ -33,7 +33,6 @@ from app.services.user_service import get_user_by_email
 from app.core.config import settings
 from app.db.mongodb import is_connected
 from app.utils.resume_files_list import list_user_resume_files_sync
-from app.utils.terms_of_service import load_terms_of_service_markdown
 
 MONGODB_AVAILABLE = True  # Always available if imported successfully
 
@@ -759,84 +758,5 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
-@router.get("/terms-of-service")
-async def get_terms_of_service(request: Request, format: Optional[str] = None):
-    """
-    Get the Terms of Service markdown (S3 primary, bundled policy/*.md fallback).
-    Public endpoint.
-    Registration contract default: raw markdown text response body.
-    Optional formats are available for manual debugging/inspection.
-    """
-    try:
-        markdown_text = load_terms_of_service_markdown()
-
-        requested_format = (format or "").strip().lower()
-        if requested_format == "pdf":
-            pdf_bytes = download_pdf_from_s3(
-                "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.pdf"
-            )
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": 'inline; filename=\"Terms of Service.pdf\"'},
-            )
-
-        if requested_format in {"", "md", "markdown", "text"}:
-            return PlainTextResponse(
-                content=markdown_text,
-                media_type="text/markdown; charset=utf-8",
-            )
-
-        try:
-            import markdown as mdlib
-            html_content = mdlib.markdown(
-                markdown_text, extensions=["extra", "tables", "sane_lists", "nl2br"]
-            )
-        except Exception:
-            import html as htmllib
-            html_content = f"<pre>{htmllib.escape(markdown_text)}</pre>"
-
-        return HTMLResponse(
-            content=(
-                "<!DOCTYPE html><html><head><meta charset='utf-8'/>"
-                "<title>Terms of Service</title>"
-                "<style>body{font-family:Georgia,serif;max-width:980px;margin:2rem auto;padding:0 1.25rem;line-height:1.55;color:#111;}"
-                "h1,h2,h3{margin:1.25rem 0 0.75rem 0;} p{margin:0 0 1rem 0;} ul,ol{margin:0 0 1rem 1.2rem;} li{margin:0.2rem 0;}"
-                "</style></head><body>"
-                f"{html_content}"
-                "</body></html>"
-            ),
-            media_type="text/html",
-        )
-
-    except HTTPException:
-        raise
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "Unknown")
-        if error_code in {"NoCredentialsError", "AccessDenied", "RequestTimeout"}:
-            raise HTTPException(
-                status_code=503,
-                detail="Service temporarily unavailable. Please try again later.",
-            )
-        raise HTTPException(
-            status_code=500,
-            detail="Server error. Please try again later or contact support.",
-        )
-    except Exception as e:
-        err = str(e).lower()
-        if (
-            "credentials" in err
-            or "proxy" in err
-            or "timed out" in err
-            or "connection refused" in err
-            or "service unavailable" in err
-        ):
-            raise HTTPException(
-                status_code=503,
-                detail="Service temporarily unavailable. Please try again later.",
-            )
-        raise HTTPException(
-            status_code=500,
-            detail="Server error. Please try again later or contact support.",
-        )
+# GET /api/files/terms-of-service — implemented in app.api.routers.terms_public (registered early in main.py)
 

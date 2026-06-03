@@ -104,10 +104,20 @@ class Settings:
         )
     )
 
-    # Terms of Service markdown (OAuth / registration modal). S3 primary; local fallback in policy/.
-    TERMS_OF_SERVICE_S3_URI: str = (
-        (os.getenv("TERMS_OF_SERVICE_S3_URI") or "").strip()
-        or "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
+    # Terms of Service (OAuth / registration modal). S3 primary via AWS_S3_BUCKET + key; local fallback in policy/.
+    TERMS_OF_SERVICE_S3_URI: Optional[str] = (
+        (os.getenv("TERMS_OF_SERVICE_S3_URI") or "").strip() or None
+    )
+    TERMS_OF_SERVICE_S3_KEY: str = (
+        (os.getenv("TERMS_OF_SERVICE_S3_KEY") or "").strip()
+        or "policy/sAImon Software - Terms of Service.md"
+    )
+    TERMS_OF_SERVICE_PDF_S3_URI: Optional[str] = (
+        (os.getenv("TERMS_OF_SERVICE_PDF_S3_URI") or "").strip() or None
+    )
+    TERMS_OF_SERVICE_PDF_S3_KEY: str = (
+        (os.getenv("TERMS_OF_SERVICE_PDF_S3_KEY") or "").strip()
+        or "policy/sAImon Software - Terms of Service.pdf"
     )
     TERMS_OF_SERVICE_MD_PATH: Path = Path(
         os.getenv(

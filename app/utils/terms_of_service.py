@@ -15,9 +15,9 @@ from app.utils.s3_utils import S3_AVAILABLE, get_s3_client
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TERMS_S3_URI = (
-    "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
-)
+DEFAULT_TERMS_S3_BUCKET = "custom-cover-user-resumes"
+DEFAULT_TERMS_S3_KEY = "policy/sAImon Software - Terms of Service.md"
+DEFAULT_TERMS_PDF_KEY = "policy/sAImon Software - Terms of Service.pdf"
 
 
 def _parse_s3_uri(uri: str) -> tuple[str, str]:
@@ -28,23 +28,64 @@ def _parse_s3_uri(uri: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def resolve_terms_markdown_s3_uri() -> str:
+    """S3 URI for ToS markdown — honors TERMS_OF_SERVICE_S3_URI, else AWS_S3_BUCKET + key."""
+    explicit = (settings.TERMS_OF_SERVICE_S3_URI or "").strip()
+    if explicit:
+        return explicit
+    bucket = (settings.AWS_S3_BUCKET or "").strip() or DEFAULT_TERMS_S3_BUCKET
+    key = (settings.TERMS_OF_SERVICE_S3_KEY or "").strip() or DEFAULT_TERMS_S3_KEY
+    return f"s3://{bucket}/{key}"
+
+
+def resolve_terms_pdf_s3_uri() -> str:
+    """S3 URI for optional ToS PDF (?format=pdf)."""
+    explicit = (settings.TERMS_OF_SERVICE_PDF_S3_URI or "").strip()
+    if explicit:
+        return explicit
+    bucket = (settings.AWS_S3_BUCKET or "").strip() or DEFAULT_TERMS_S3_BUCKET
+    key = (settings.TERMS_OF_SERVICE_PDF_S3_KEY or "").strip() or DEFAULT_TERMS_PDF_KEY
+    return f"s3://{bucket}/{key}"
+
+
 def _load_terms_markdown_from_s3(uri: str) -> Optional[str]:
     if not S3_AVAILABLE:
+        logger.warning("Terms of Service: boto3 unavailable; skipping S3")
         return None
+    bucket_name, object_key = _parse_s3_uri(uri)
     try:
-        bucket_name, object_key = _parse_s3_uri(uri)
         s3_client = get_s3_client()
         response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
         text = response["Body"].read().decode("utf-8")
-        return text if text.strip() else None
+        if text.strip():
+            logger.info(
+                "Terms of Service loaded from S3 bucket=%s key=%s (%s bytes)",
+                bucket_name,
+                object_key,
+                len(text.encode("utf-8")),
+            )
+            return text
+        logger.warning(
+            "Terms of Service object is empty in S3 bucket=%s key=%s",
+            bucket_name,
+            object_key,
+        )
+        return None
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "Unknown")
         if code in {"NoSuchKey", "404"}:
             logger.warning(
-                "Terms of Service markdown missing in S3 (%s); trying local fallback",
-                uri,
+                "Terms of Service markdown missing in S3 bucket=%s key=%s",
+                bucket_name,
+                object_key,
             )
             return None
+        logger.error(
+            "Terms of Service S3 ClientError bucket=%s key=%s code=%s",
+            bucket_name,
+            object_key,
+            code,
+        )
         raise
     except Exception as e:
         err = str(e).lower()
@@ -54,7 +95,12 @@ def _load_terms_markdown_from_s3(uri: str) -> Optional[str]:
             or "timed out" in err
             or "connection refused" in err
         ):
-            logger.warning("Terms of Service S3 unavailable (%s): %s", uri, e)
+            logger.warning(
+                "Terms of Service S3 unavailable bucket=%s key=%s: %s",
+                bucket_name,
+                object_key,
+                e,
+            )
             return None
         raise
 
@@ -64,7 +110,9 @@ def _load_terms_markdown_from_file(path: Path) -> Optional[str]:
         return None
     try:
         text = path.read_text(encoding="utf-8")
-        return text if text.strip() else None
+        if text.strip():
+            return text
+        return None
     except OSError as e:
         logger.warning("Could not read Terms of Service file %s: %s", path, e)
         return None
@@ -74,9 +122,9 @@ def load_terms_of_service_markdown() -> str:
     """
     Return Terms of Service markdown text.
 
-    Order: S3 (TERMS_OF_SERVICE_S3_URI) → local file (TERMS_OF_SERVICE_MD_PATH).
+    Order: S3 (resolve_terms_markdown_s3_uri) → local file (TERMS_OF_SERVICE_MD_PATH).
     """
-    s3_uri = (settings.TERMS_OF_SERVICE_S3_URI or "").strip() or DEFAULT_TERMS_S3_URI
+    s3_uri = resolve_terms_markdown_s3_uri()
     local_path = settings.TERMS_OF_SERVICE_MD_PATH
 
     text = _load_terms_markdown_from_s3(s3_uri)
@@ -90,5 +138,8 @@ def load_terms_of_service_markdown() -> str:
 
     raise HTTPException(
         status_code=404,
-        detail="Terms of Service file not found. Please contact support.",
+        detail=(
+            "Terms of Service file not found in S3 or on disk. "
+            f"Expected S3 object: {s3_uri}"
+        ),
     )
