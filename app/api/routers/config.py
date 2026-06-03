@@ -3,6 +3,7 @@ Configuration API routes
 """
 import logging
 import json
+import os
 from typing import Optional
 
 from fastapi import APIRouter
@@ -59,6 +60,26 @@ def get_app_update_policy():
         store_android_url=payload["store_android_url"],
         store_ios_url=payload["store_ios_url"],
     )
+
+
+@router.get("/oauth-native-callback-status")
+def get_oauth_native_callback_status():
+    """
+    Public diagnostic: native OAuth bridge settings for mobile Custom Tab handoff.
+    curl UAT after deploy — oauth_callback_deep_link should be true for ccmobile:// HTML bridge.
+    """
+    on_render = bool(os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_URL"))
+    return {
+        "oauth_callback_deep_link": settings.OAUTH_CALLBACK_DEEP_LINK,
+        "native_app_scheme": settings.OAUTH_NATIVE_APP_SCHEME,
+        "on_render": bool(on_render),
+        "hint": (
+            "When oauth_callback_deep_link is true, Android OAuth callback returns HTML that "
+            "redirects to {scheme}://oauth/{provider}. When false, callback stays on HTTPS and "
+            "the app may never receive ccmobile://. On Render, dashboard Environment variables "
+            "override /etc/secrets/.secrets — set OAUTH_CALLBACK_DEEP_LINK=true there if needed."
+        ),
+    }
 
 
 @router.get("/linkedin-oauth-status")
