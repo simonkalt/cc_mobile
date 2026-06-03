@@ -123,21 +123,16 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
     is_android = "android" in ua_lower
 
     if use_deep_link:
-        if is_android:
-            logger.info(
-                "%s OAuth callback 200 (Android Custom Tab HTTPS return, has_code=%s)",
-                provider.capitalize(),
-                bool(request.query_params.get("code")),
-            )
-            # Android openAuthSessionAsync uses the HTTPS redirect_uri as returnUrl.
-            # A 302 to ccmobile:// here prevents the session from finishing (stuck on Google UI).
-            return Response(status_code=200)
         logger.info(
-            "%s OAuth callback 302 → %s (has_code=%s)",
+            "%s OAuth callback 302 → %s (has_code=%s android=%s)",
             provider.capitalize(),
             target.split("?")[0],
             bool(request.query_params.get("code")),
+            is_android,
         )
+        # Native apps: Custom Tab / ASWebAuthenticationSession hand off via ccmobile://.
+        # Android expo-web-browser only completes OAuth when Linking receives this scheme
+        # (HTTPS callback URLs in the tab do not emit Linking events).
         return RedirectResponse(url=target, status_code=302)
 
     intent_uri = _android_intent_uri(scheme, provider, query) if is_android else None
