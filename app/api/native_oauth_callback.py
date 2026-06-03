@@ -8,6 +8,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.core.config import settings
+from app.services.oauth_native_handoff import store_oauth_native_handoff
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,16 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
 
     ua_lower = ua.lower()
     is_android = "android" in ua_lower
+
+    oauth_state = (request.query_params.get("state") or "").strip()
+    if oauth_state:
+        store_oauth_native_handoff(
+            state=oauth_state,
+            provider=provider,
+            code=request.query_params.get("code"),
+            error=request.query_params.get("error"),
+            error_description=request.query_params.get("error_description"),
+        )
 
     if use_deep_link:
         logger.info(
