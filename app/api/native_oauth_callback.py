@@ -123,14 +123,21 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
     is_android = "android" in ua_lower
 
     if use_deep_link:
+        if is_android:
+            logger.info(
+                "%s OAuth callback 200 (Android Custom Tab HTTPS return, has_code=%s)",
+                provider.capitalize(),
+                bool(request.query_params.get("code")),
+            )
+            # Android openAuthSessionAsync uses the HTTPS redirect_uri as returnUrl.
+            # A 302 to ccmobile:// here prevents the session from finishing (stuck on Google UI).
+            return Response(status_code=200)
         logger.info(
             "%s OAuth callback 302 → %s (has_code=%s)",
             provider.capitalize(),
             target.split("?")[0],
             bool(request.query_params.get("code")),
         )
-        # Custom Tab must receive a 302 to ccmobile:// so openAuthSessionAsync can finish.
-        # HTML bridge pages often leave Android stuck (tap links / auto-redirect do nothing).
         return RedirectResponse(url=target, status_code=302)
 
     intent_uri = _android_intent_uri(scheme, provider, query) if is_android else None
