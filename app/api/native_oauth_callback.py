@@ -32,43 +32,64 @@ def _android_intent_uri(scheme: str, provider: str, query: str) -> str:
 
 
 def _mobile_oauth_bridge_html(
-    target: str, *, android_intent: str | None = None
+    target: str,
+    *,
+    android_intent: str | None = None,
+    delay_auto_redirect_ms: int = 0,
 ) -> str:
-    """Custom Tab loads HTTPS first; hands off to ccmobile:// for Linking."""
+    """
+    Custom Tab loads HTTPS first (with ?code=). Delay ccmobile:// redirect so
+    openAuthSessionAsync(redirectUrl=HTTPS) can read the callback URL on Android.
+    Immediate redirect shows a blank/black tab and often loses the code.
+    """
     target_json = json.dumps(target)
     intent_json = json.dumps(android_intent) if android_intent else "null"
+    delay_ms = max(0, int(delay_auto_redirect_ms))
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Returning to app</title>
+</head>
+<body style="margin:0;background:#ffffff;color:#111111;font-family:system-ui,sans-serif;text-align:center;padding:2rem;">
+  <p style="font-size:1.05rem;">Returning to the app…</p>
+  <p><a id="open" href="{target}" style="font-size:1.1rem;color:#1565c0;">Tap to open the app</a></p>
   <script>
     (function () {{
       var target = {target_json};
-      function goApp() {{
+      var intent = {intent_json};
+      var delay = {delay_ms};
+      function goScheme() {{
         try {{ window.location.replace(target); }} catch (e) {{}}
       }}
-      goApp();
-      setTimeout(goApp, 350);
-      setTimeout(goApp, 900);
-    }})();
-  </script>
-</head>
-<body style="font-family:system-ui,sans-serif;text-align:center;padding:2rem;">
-  <p>Returning to the app…</p>
-  <p><a id="open" href="{target}" style="font-size:1.1rem;">Tap to open the app</a></p>
-  <script>
-    (function () {{
-      var intent = {intent_json};
-      if (!intent) return;
-      var i = document.createElement("a");
-      i.href = intent;
-      i.textContent = "Still here? Try alternate link";
-      i.style.display = "block";
-      i.style.marginTop = "1rem";
-      i.style.fontSize = "0.95rem";
-      document.body.appendChild(i);
+      function goIntent() {{
+        if (!intent) return;
+        try {{ window.location.href = intent; }} catch (e) {{}}
+      }}
+      function schedule() {{
+        if (delay > 0) {{
+          setTimeout(function () {{ goIntent(); goScheme(); }}, delay);
+          setTimeout(goScheme, delay + 600);
+          setTimeout(goScheme, delay + 1400);
+          return;
+        }}
+        goIntent();
+        goScheme();
+        setTimeout(goScheme, 350);
+        setTimeout(goScheme, 900);
+      }}
+      schedule();
+      if (intent) {{
+        var i = document.createElement("a");
+        i.href = intent;
+        i.textContent = "Still here? Try alternate link";
+        i.style.display = "block";
+        i.style.marginTop = "1rem";
+        i.style.fontSize = "0.95rem";
+        i.style.color = "#1565c0";
+        document.body.appendChild(i);
+      }}
     }})();
   </script>
 </body>
@@ -113,7 +134,11 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
             target.split("?")[0],
         )
         return HTMLResponse(
-            content=_mobile_oauth_bridge_html(target, android_intent=intent_uri),
+            content=_mobile_oauth_bridge_html(
+                target,
+                android_intent=intent_uri,
+                delay_auto_redirect_ms=1200,
+            ),
             status_code=200,
         )
 
@@ -122,6 +147,10 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
 
     intent_uri = _android_intent_uri(scheme, provider, query) if is_android else None
     return HTMLResponse(
-        content=_mobile_oauth_bridge_html(target, android_intent=intent_uri),
+        content=_mobile_oauth_bridge_html(
+            target,
+            android_intent=intent_uri,
+            delay_auto_redirect_ms=1200 if is_android else 0,
+        ),
         status_code=200,
     )
