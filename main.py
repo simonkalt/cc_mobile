@@ -348,13 +348,24 @@ except Exception as e:
         exc_info=True,
     )
 
+# Public config/version — register first so a failure in email/sms imports cannot 404 these.
+try:
+    from app.api.routers import config, version
+
+    app.include_router(config.router)
+    app.include_router(version.router)
+except Exception as e:
+    logger.error(
+        "Config/version routers NOT registered — GET /api/config/* and /api/version will 404: %s",
+        e,
+        exc_info=True,
+    )
+
 try:
     from app.api.routers import (
         job_url,
         llm_config,
         personality,
-        config,
-        version,
         cover_letter,
         files,
         cover_letters,
@@ -370,8 +381,6 @@ try:
     app.include_router(job_url.router)
     app.include_router(llm_config.router)
     app.include_router(personality.router)
-    app.include_router(config.router)
-    app.include_router(version.router)
     app.include_router(cover_letter.router)
     app.include_router(files.router)
     app.include_router(cover_letters.router)

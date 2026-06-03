@@ -33,6 +33,7 @@ from app.services.user_service import get_user_by_email
 from app.core.config import settings
 from app.db.mongodb import is_connected
 from app.utils.resume_files_list import list_user_resume_files_sync
+from app.utils.terms_of_service import load_terms_of_service_markdown
 
 MONGODB_AVAILABLE = True  # Always available if imported successfully
 
@@ -761,39 +762,13 @@ async def save_cover_letter(request: SaveCoverLetterRequest):
 @router.get("/terms-of-service")
 async def get_terms_of_service(request: Request, format: Optional[str] = None):
     """
-    Get the Terms of Service from S3.
+    Get the Terms of Service markdown (S3 primary, bundled policy/*.md fallback).
     Public endpoint.
     Registration contract default: raw markdown text response body.
     Optional formats are available for manual debugging/inspection.
     """
-    if not S3_AVAILABLE:
-        raise HTTPException(
-            status_code=503,
-            detail="S3 service is not available. boto3 is not installed.",
-        )
-
     try:
-        # Working model: load canonical markdown directly from S3.
-        # This avoids lossy PDF -> text conversion artifacts (narrow columns, odd wraps).
-        s3_path_md = "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
-        path_wo_scheme = s3_path_md[5:] if s3_path_md.startswith("s3://") else s3_path_md
-        parts = path_wo_scheme.split("/", 1)
-        if len(parts) != 2:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Invalid S3 path format: {s3_path_md}",
-            )
-
-        bucket_name, object_key = parts
-        s3_client = get_s3_client()
-        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
-        markdown_text = response["Body"].read().decode("utf-8")
-
-        if not markdown_text.strip():
-            raise HTTPException(
-                status_code=404,
-                detail="Terms of Service file not found. Please contact support.",
-            )
+        markdown_text = load_terms_of_service_markdown()
 
         requested_format = (format or "").strip().lower()
         if requested_format == "pdf":
@@ -838,11 +813,6 @@ async def get_terms_of_service(request: Request, format: Optional[str] = None):
         raise
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "Unknown")
-        if error_code in {"NoSuchKey", "404"}:
-            raise HTTPException(
-                status_code=404,
-                detail="Terms of Service file not found. Please contact support.",
-            )
         if error_code in {"NoCredentialsError", "AccessDenied", "RequestTimeout"}:
             raise HTTPException(
                 status_code=503,

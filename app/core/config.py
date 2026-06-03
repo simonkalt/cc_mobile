@@ -104,6 +104,18 @@ class Settings:
         )
     )
 
+    # Terms of Service markdown (OAuth / registration modal). S3 primary; local fallback in policy/.
+    TERMS_OF_SERVICE_S3_URI: str = (
+        (os.getenv("TERMS_OF_SERVICE_S3_URI") or "").strip()
+        or "s3://custom-cover-user-resumes/policy/sAImon Software - Terms of Service.md"
+    )
+    TERMS_OF_SERVICE_MD_PATH: Path = Path(
+        os.getenv(
+            "TERMS_OF_SERVICE_MD_PATH",
+            str(_ROOT / "policy" / "sAImon Software - Terms of Service.md"),
+        )
+    )
+
     # Third-party / server-to-server integration (set in .secrets, not committed)
     SERVICE_AUTH_KEY: Optional[str] = os.getenv("SERVICE_AUTH_KEY")
     INTEGRATION_AUTH_ENDPOINTS_FILE: str = os.getenv(
