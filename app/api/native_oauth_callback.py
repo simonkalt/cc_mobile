@@ -37,11 +37,7 @@ def _mobile_oauth_bridge_html(
     android_intent: str | None = None,
     delay_auto_redirect_ms: int = 0,
 ) -> str:
-    """
-    Custom Tab loads HTTPS first (with ?code=). Delay ccmobile:// redirect so
-    openAuthSessionAsync(redirectUrl=HTTPS) can read the callback URL on Android.
-    Immediate redirect shows a blank/black tab and often loses the code.
-    """
+    """Fallback when OAUTH_CALLBACK_DEEP_LINK=false (dev / legacy). Prefer 302 when deep_link=true."""
     target_json = json.dumps(target)
     intent_json = json.dumps(android_intent) if android_intent else "null"
     delay_ms = max(0, int(delay_auto_redirect_ms))
@@ -126,31 +122,28 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
     ua_lower = ua.lower()
     is_android = "android" in ua_lower
 
-    if use_deep_link and is_android:
-        intent_uri = _android_intent_uri(scheme, provider, query)
+    if use_deep_link:
         logger.info(
-            "%s OAuth callback Android bridge (%s, no package= in intent)",
+            "%s OAuth callback 302 → %s (has_code=%s)",
             provider.capitalize(),
             target.split("?")[0],
+            bool(request.query_params.get("code")),
         )
-        return HTMLResponse(
-            content=_mobile_oauth_bridge_html(
-                target,
-                android_intent=intent_uri,
-                delay_auto_redirect_ms=1200,
-            ),
-            status_code=200,
-        )
-
-    if use_deep_link:
+        # Custom Tab must receive a 302 to ccmobile:// so openAuthSessionAsync can finish.
+        # HTML bridge pages often leave Android stuck (tap links / auto-redirect do nothing).
         return RedirectResponse(url=target, status_code=302)
 
     intent_uri = _android_intent_uri(scheme, provider, query) if is_android else None
+    logger.info(
+        "%s OAuth callback HTML bridge (deep_link disabled, %s)",
+        provider.capitalize(),
+        target.split("?")[0],
+    )
     return HTMLResponse(
         content=_mobile_oauth_bridge_html(
             target,
             android_intent=intent_uri,
-            delay_auto_redirect_ms=1200 if is_android else 0,
+            delay_auto_redirect_ms=0,
         ),
         status_code=200,
     )
