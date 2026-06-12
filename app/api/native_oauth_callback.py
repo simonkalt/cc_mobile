@@ -32,6 +32,23 @@ def _android_intent_uri(scheme: str, provider: str, query: str) -> str:
     )
 
 
+def _android_return_to_app_html() -> str:
+    """When APK lacks ccmobile://, 302 shows a blank tab; app polls native-handoff by state."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signed in</title>
+</head>
+<body style="margin:0;background:#ffffff;color:#111111;font-family:system-ui,sans-serif;text-align:center;padding:2rem;">
+  <p style="font-size:1.15rem;font-weight:600;">Sign-in complete</p>
+  <p style="font-size:1rem;line-height:1.5;">Switch back to <strong>Job Cover Letters</strong> to finish logging in.</p>
+  <p style="font-size:0.95rem;color:#444;">You can close this browser tab.</p>
+</body>
+</html>"""
+
+
 def _mobile_oauth_bridge_html(
     target: str,
     *,
@@ -134,6 +151,14 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
         )
 
     if use_deep_link:
+        if is_android and oauth_state:
+            logger.info(
+                "%s OAuth callback Android return-to-app HTML (handoff stored, has_code=%s)",
+                provider.capitalize(),
+                bool(request.query_params.get("code")),
+            )
+            # 302→ccmobile:// often fails on dev APKs; code is in native-handoff for poll.
+            return HTMLResponse(content=_android_return_to_app_html(), status_code=200)
         logger.info(
             "%s OAuth callback 302 → %s (has_code=%s android=%s handoff_stored=%s)",
             provider.capitalize(),
@@ -142,9 +167,6 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
             is_android,
             bool(oauth_state),
         )
-        # 302 for all native clients. Android APKs without ccmobile:// may show a brief
-        # blank/error in the Custom Tab; the app completes via GET /oauth/native-handoff
-        # (state) when the user returns to the app.
         return RedirectResponse(url=target, status_code=302)
 
     intent_uri = _android_intent_uri(scheme, provider, query) if is_android else None
