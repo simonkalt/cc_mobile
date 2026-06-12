@@ -32,6 +32,44 @@ def _android_intent_uri(scheme: str, provider: str, query: str) -> str:
     )
 
 
+def _android_instant_deep_link_html(
+    target: str,
+    *,
+    android_intent: str | None = None,
+) -> str:
+    """
+    Blank page that immediately opens the native app (no visible interim copy).
+
+    Chrome Custom Tabs often fail to hand off HTTP 302 → custom scheme; JS navigation
+    plus intent:// is more reliable and still closes the tab when Linking fires.
+    """
+    target_json = json.dumps(target)
+    intent_json = json.dumps(android_intent) if android_intent else "null"
+    return f"""<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script>
+(function () {{
+  var target = {target_json};
+  var intent = {intent_json};
+  function goScheme() {{
+    try {{ window.location.replace(target); }} catch (e) {{}}
+  }}
+  function goIntent() {{
+    if (!intent) return;
+    try {{ window.location.href = intent; }} catch (e) {{}}
+  }}
+  goIntent();
+  goScheme();
+  setTimeout(function () {{ goIntent(); goScheme(); }}, 50);
+  setTimeout(goScheme, 250);
+  setTimeout(goScheme, 700);
+}})();
+</script>
+</head><body></body></html>"""
+
+
 def _mobile_oauth_bridge_html(
     target: str,
     *,
@@ -134,12 +172,27 @@ def native_oauth_callback_response(request: Request, provider: str) -> Response:
         )
 
     if use_deep_link:
+        if is_android:
+            intent_uri = _android_intent_uri(scheme, provider, query)
+            logger.info(
+                "%s OAuth callback Android instant redirect → %s (has_code=%s handoff_stored=%s)",
+                provider.capitalize(),
+                target.split("?")[0],
+                bool(request.query_params.get("code")),
+                bool(oauth_state),
+            )
+            return HTMLResponse(
+                content=_android_instant_deep_link_html(
+                    target,
+                    android_intent=intent_uri,
+                ),
+                status_code=200,
+            )
         logger.info(
-            "%s OAuth callback 302 → %s (has_code=%s android=%s handoff_stored=%s)",
+            "%s OAuth callback 302 → %s (has_code=%s handoff_stored=%s)",
             provider.capitalize(),
             target.split("?")[0],
             bool(request.query_params.get("code")),
-            is_android,
             bool(oauth_state),
         )
         return RedirectResponse(url=target, status_code=302)
