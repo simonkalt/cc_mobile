@@ -339,7 +339,17 @@ def exchange_linkedin_code(
             len(code_verifier or ""),
             response.text[:500],
         )
-        if linkedin_error == "invalid_client":
+        if (linkedin_error == "invalid_client":
+            description = ""
+            try:
+                description = (response.json() or {}).get("error_description") or ""
+            except Exception:
+                pass
+            logger.warning(
+                "LinkedIn invalid_client error_description=%s redirect_uri=%s",
+                description[:200],
+                redirect_uri,
+            )
             raise OAuthProviderError(
                 "LinkedIn rejected server credentials (invalid_client). "
                 "LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET on this API host must "

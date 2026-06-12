@@ -177,19 +177,22 @@ def _touch_last_login(collection, user_id: ObjectId) -> None:
 
 
 def _resolve_identity(provider: str, body: OAuthTokenExchangeRequest) -> OAuthIdentity:
+    code_verifier = (
+        "" if provider == "linkedin" else (body.code_verifier or "").strip()
+    )
     if provider == "linkedin":
         logger.info(
             "OAuth LinkedIn exchange redirect_uri=%s code_len=%s verifier_len=%s",
             body.redirect_uri.strip(),
             len(body.code.strip()),
-            len(body.code_verifier.strip()),
+            len((body.code_verifier or "").strip()),
         )
     try:
         return resolve_oauth_identity(
             provider,
             body.code.strip(),
             body.redirect_uri.strip(),
-            body.code_verifier.strip(),
+            code_verifier,
         )
     except OAuthProviderError as exc:
         raise _oauth_http_error(
