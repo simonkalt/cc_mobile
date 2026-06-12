@@ -339,7 +339,7 @@ def exchange_linkedin_code(
             len(code_verifier or ""),
             response.text[:500],
         )
-        if (linkedin_error == "invalid_client":
+        if linkedin_error == "invalid_client":
             description = ""
             try:
                 description = (response.json() or {}).get("error_description") or ""
