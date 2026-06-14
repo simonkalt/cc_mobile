@@ -42,7 +42,42 @@ except ImportError:
 _VISUAL_BULLET_RE = re.compile(r"^\s*[•◦▪▸\-\*\+]\s+")
 _VISUAL_NUMBER_RE = re.compile(r"^\s*(?:\(?[1-9]\d?\)?[.)])\s+")
 
+# Monochrome emoji font used in generated DOCX so Syncfusion PDF conversion can embed glyphs.
+DOCX_EMOJI_FONT = "Symbola"
 
+
+def _is_emoji_codepoint(codepoint: int) -> bool:
+    if codepoint in (0xFE0F, 0x200D):
+        return True
+    if 0x1F3FB <= codepoint <= 0x1F3FF:
+        return True
+    if 0x1F1E6 <= codepoint <= 0x1F1FF:
+        return True
+    if 0x1F300 <= codepoint <= 0x1FAFF:
+        return True
+    if 0x2600 <= codepoint <= 0x27BF:
+        return True
+    return False
+
+
+def _split_text_and_emoji(text: str) -> List[tuple]:
+    if not text:
+        return []
+    segments: List[tuple] = []
+    index = 0
+    while index < len(text):
+        start = index
+        is_emoji = _is_emoji_codepoint(ord(text[index]))
+        index += 1
+        while index < len(text) and _is_emoji_codepoint(ord(text[index])) == is_emoji:
+            index += 1
+        chunk = text[start:index]
+        if segments and segments[-1][1] == is_emoji:
+            prev_text, _ = segments[-1]
+            segments[-1] = (prev_text + chunk, is_emoji)
+        else:
+            segments.append((chunk, is_emoji))
+    return segments
 
 def _apply_visual_hanging_indent_fallback(doc) -> None:
     """
@@ -1005,41 +1040,44 @@ def build_docx_from_content(
             if not last_ended_with_space and not (text.startswith(" ") or text.startswith("\t")):
                 text = " " + text
             last_ended_with_space = text.endswith(" ") or text.endswith("\t")
-            run = p.add_run(text)
-            run_font = run.font
-            inline_font_family = (run_spec.get("font_family") or "").strip()
-            inline_size_pt = run_spec.get("font_size_pt")
-            has_inline_size = inline_size_pt is not None and inline_size_pt > 0
+            for segment_text, is_emoji in _split_text_and_emoji(text):
+                if not segment_text:
+                    continue
+                run = p.add_run(segment_text)
+                run_font = run.font
+                inline_font_family = (run_spec.get("font_family") or "").strip()
+                inline_size_pt = run_spec.get("font_size_pt")
+                has_inline_size = inline_size_pt is not None and inline_size_pt > 0
 
-            # Always honor explicit inline style tags from content (e.g. [size:28pt], [font:Georgia]),
-            # even when useDefaultFonts is enabled.
-            if inline_font_family:
-                run_font.name = inline_font_family
-            elif not use_default_fonts:
-                run_font.name = font_family
+                if is_emoji:
+                    run_font.name = DOCX_EMOJI_FONT
+                elif inline_font_family:
+                    run_font.name = inline_font_family
+                elif not use_default_fonts:
+                    run_font.name = font_family
 
-            if has_inline_size:
-                run_font.size = Pt(inline_size_pt)
-            elif not use_default_fonts:
-                run_font.size = Pt(font_size_pt)
-            run.bold = run_spec.get("bold", False)
-            run.italic = run_spec.get("italic", False)
-            color_hex = run_spec.get("color_hex")
-            if color_hex and RGBColor is not None:
-                hex_val = color_hex.lstrip("#")
-                if len(hex_val) >= 6:
-                    try:
-                        r = int(hex_val[0:2], 16)
-                        g = int(hex_val[2:4], 16)
-                        b = int(hex_val[4:6], 16)
-                        run_font.color.rgb = RGBColor(r, g, b)
-                    except (ValueError, TypeError):
-                        pass
-            highlight = run_spec.get("highlight")
-            if highlight and WD_COLOR_INDEX is not None:
-                idx = _map_highlight_to_docx_index(str(highlight))
-                if idx is not None:
-                    run_font.highlight_color = idx
+                if has_inline_size:
+                    run_font.size = Pt(inline_size_pt)
+                elif not use_default_fonts:
+                    run_font.size = Pt(font_size_pt)
+                run.bold = run_spec.get("bold", False)
+                run.italic = run_spec.get("italic", False)
+                color_hex = run_spec.get("color_hex")
+                if color_hex and RGBColor is not None and not is_emoji:
+                    hex_val = color_hex.lstrip("#")
+                    if len(hex_val) >= 6:
+                        try:
+                            r = int(hex_val[0:2], 16)
+                            g = int(hex_val[2:4], 16)
+                            b = int(hex_val[4:6], 16)
+                            run_font.color.rgb = RGBColor(r, g, b)
+                        except (ValueError, TypeError):
+                            pass
+                highlight = run_spec.get("highlight")
+                if highlight and WD_COLOR_INDEX is not None and not is_emoji:
+                    idx = _map_highlight_to_docx_index(str(highlight))
+                    if idx is not None:
+                        run_font.highlight_color = idx
 
     logger.info("DOCX: writing document to bytes buffer")
     _apply_visual_hanging_indent_fallback(doc)
