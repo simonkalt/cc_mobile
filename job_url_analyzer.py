@@ -74,6 +74,68 @@ def _clean_optional_field(value: Optional[str]) -> Optional[str]:
     return text
 
 
+_BLOCK_TAGS_WITH_BREAKS = (
+    "p",
+    "div",
+    "li",
+    "ul",
+    "ol",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "tr",
+)
+
+
+def _clean_description_text(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    from html import unescape
+
+    text = unescape(value.strip())
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
+    text = "\n".join(line for line in lines if line)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if not text or text.lower() in ("not specified", "n/a", "none"):
+        return None
+    return text
+
+
+def _html_element_to_text(element) -> Optional[str]:
+    if element is None:
+        return None
+    fragment = BeautifulSoup(str(element), "html.parser")
+    root = fragment.find() if fragment.find() else fragment
+    for br in root.find_all("br"):
+        br.replace_with("\n")
+    for tag in root.find_all(list(_BLOCK_TAGS_WITH_BREAKS)):
+        tag.append("\n")
+    return _clean_description_text(root.get_text())
+
+
+def _normalize_job_description(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    if "<" in value and ">" in value:
+        parsed = _html_element_to_text(BeautifulSoup(value, "html.parser"))
+        if parsed:
+            return parsed
+    return _clean_description_text(value)
+
+
+def _first_selector_description(soup: BeautifulSoup, selectors) -> Optional[str]:
+    for selector in selectors:
+        element = soup.select_one(selector)
+        if element:
+            text = _html_element_to_text(element)
+            if text:
+                return text
+    return None
+
+
 _HIRING_MANAGER_REJECT = frozenset(
     {
         "for this",
@@ -224,7 +286,7 @@ class LinkedInParser(BaseJobParser):
                             data.get("hiringOrganization", {}).get("name")
                         )
                         result.job_title = _clean_optional_field(data.get("title"))
-                        result.job_description = _clean_optional_field(
+                        result.job_description = _normalize_job_description(
                             data.get("description")
                         )
                         if result.has_minimum_data():
@@ -268,7 +330,7 @@ class LinkedInParser(BaseJobParser):
                 ],
             ) or og_title
 
-            result.job_description = _first_selector_text(
+            result.job_description = _first_selector_description(
                 soup,
                 [
                     "div.show-more-less-html__markup",
@@ -307,7 +369,9 @@ class IndeedParser(BaseJobParser):
                         logger.info("[IndeedParser] Found JobPosting in JSON-LD")
                         result.company = data.get("hiringOrganization", {}).get("name")
                         result.job_title = data.get("title")
-                        result.job_description = data.get("description")
+                        result.job_description = _normalize_job_description(
+                            data.get("description")
+                        )
                         logger.info(
                             f"[IndeedParser] JSON-LD extracted - Company: '{result.company}', Title: '{result.job_title}', Description: {len(result.job_description) if result.job_description else 0} chars"
                         )
@@ -372,9 +436,9 @@ class IndeedParser(BaseJobParser):
             for selector in desc_selectors:
                 element = soup.select_one(selector)
                 if element:
-                    result.job_description = element.get_text(strip=True)
+                    result.job_description = _html_element_to_text(element)
                     logger.info(
-                        f"[IndeedParser] Found job description using selector '{selector}': {len(result.job_description)} chars"
+                        f"[IndeedParser] Found job description using selector '{selector}': {len(result.job_description) if result.job_description else 0} chars"
                     )
                     break
             if not result.job_description:
@@ -413,7 +477,9 @@ class GlassdoorParser(BaseJobParser):
                     if isinstance(data, dict) and data.get("@type") == "JobPosting":
                         result.company = data.get("hiringOrganization", {}).get("name")
                         result.job_title = data.get("title")
-                        result.job_description = data.get("description")
+                        result.job_description = _normalize_job_description(
+                            data.get("description")
+                        )
                         if result.has_minimum_data():
                             result.is_complete = True
                             return result
@@ -449,7 +515,7 @@ class GlassdoorParser(BaseJobParser):
             for selector in desc_selectors:
                 element = soup.select_one(selector)
                 if element:
-                    result.job_description = element.get_text(strip=True)
+                    result.job_description = _html_element_to_text(element)
                     break
 
             result.is_complete = result.has_minimum_data()
@@ -480,7 +546,9 @@ class GenericParser(BaseJobParser):
                                 "name"
                             )
                             result.job_title = data.get("title")
-                            result.job_description = data.get("description")
+                            result.job_description = _normalize_job_description(
+                            data.get("description")
+                        )
                         elif isinstance(data, list):
                             for item in data:
                                 if item.get("@type") == "JobPosting":
@@ -488,7 +556,9 @@ class GenericParser(BaseJobParser):
                                         "hiringOrganization", {}
                                     ).get("name")
                                     result.job_title = item.get("title")
-                                    result.job_description = item.get("description")
+                                    result.job_description = _normalize_job_description(
+                                        item.get("description")
+                                    )
                                     break
 
                         if result.has_minimum_data():
@@ -508,7 +578,9 @@ class GenericParser(BaseJobParser):
 
             og_description = soup.find("meta", property="og:description")
             if og_description and og_description.get("content"):
-                result.job_description = og_description["content"]
+                result.job_description = _normalize_job_description(
+                    og_description["content"]
+                )
 
             # 3. Try common meta tags
             meta_company = soup.find("meta", {"name": "company"}) or soup.find(
@@ -529,7 +601,9 @@ class GenericParser(BaseJobParser):
 
             meta_description = soup.find("meta", {"name": "description"})
             if meta_description and meta_description.get("content"):
-                result.job_description = meta_description["content"]
+                result.job_description = _normalize_job_description(
+                    meta_description["content"]
+                )
 
             # 4. Try common CSS class patterns
             if not result.company:
@@ -568,11 +642,9 @@ class GenericParser(BaseJobParser):
                 ]
                 for element in desc_patterns:
                     if element:
-                        text = element.get_text(strip=True)
-                        if (
-                            text and len(text) > 100
-                        ):  # Description should be substantial
-                            result.job_description = text[:5000]  # Limit length
+                        text = _html_element_to_text(element)
+                        if text and len(text) > 100:
+                            result.job_description = text[:5000]
                             break
 
             result.is_complete = result.has_minimum_data()
@@ -1253,7 +1325,7 @@ def _apply_llm_job_json(result: JobExtractionResult, data: Dict) -> None:
     result.job_title = _clean_optional_field(
         data.get("job_title") or data.get("jobTitle", "Not specified")
     )
-    result.job_description = _clean_optional_field(
+    result.job_description = _normalize_job_description(
         data.get("full_description") or data.get("jobDescription", "Not specified")
     )
     hiring_manager = data.get("hiring_manager", "") or ""
