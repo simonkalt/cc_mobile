@@ -77,9 +77,6 @@ def _clean_optional_field(value: Optional[str]) -> Optional[str]:
 _BLOCK_TAGS_WITH_BREAKS = (
     "p",
     "div",
-    "li",
-    "ul",
-    "ol",
     "h1",
     "h2",
     "h3",
@@ -87,7 +84,11 @@ _BLOCK_TAGS_WITH_BREAKS = (
     "h5",
     "h6",
     "tr",
+    "ul",
+    "ol",
 )
+
+_LINE_BREAK_TAGS = ("li",)
 
 
 def _clean_description_text(value: Optional[str]) -> Optional[str]:
@@ -96,8 +97,23 @@ def _clean_description_text(value: Optional[str]) -> Optional[str]:
     from html import unescape
 
     text = unescape(value.strip())
-    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
-    text = "\n".join(line for line in lines if line)
+    text = re.sub(r"\r\n?", "\n", text)
+
+    paragraphs = []
+    current_lines = []
+    for raw_line in text.split("\n"):
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if not line:
+            if current_lines:
+                paragraphs.append("\n".join(current_lines))
+                current_lines = []
+            continue
+        current_lines.append(line)
+
+    if current_lines:
+        paragraphs.append("\n".join(current_lines))
+
+    text = "\n\n".join(paragraphs)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not text or text.lower() in ("not specified", "n/a", "none"):
         return None
@@ -112,6 +128,8 @@ def _html_element_to_text(element) -> Optional[str]:
     for br in root.find_all("br"):
         br.replace_with("\n")
     for tag in root.find_all(list(_BLOCK_TAGS_WITH_BREAKS)):
+        tag.append("\n\n")
+    for tag in root.find_all(list(_LINE_BREAK_TAGS)):
         tag.append("\n")
     return _clean_description_text(root.get_text())
 
