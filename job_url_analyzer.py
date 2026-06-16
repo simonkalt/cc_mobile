@@ -65,6 +65,147 @@ class BaseJobParser:
         raise NotImplementedError("Subclasses must implement parse()")
 
 
+def _clean_optional_field(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = re.sub(r"\s+", " ", value.strip())
+    if not text or text.lower() in ("not specified", "n/a", "none"):
+        return None
+    return text
+
+
+_HIRING_MANAGER_REJECT = frozenset(
+    {
+        "for this",
+        "this role",
+        "the team",
+        "our team",
+        "linkedin",
+        "recruiter",
+        "hiring manager",
+        "see who",
+        "contact",
+    }
+)
+
+
+def _is_plausible_person_name(name: str) -> bool:
+    cleaned = _clean_optional_field(name)
+    if not cleaned or len(cleaned) < 3:
+        return False
+    if cleaned.lower() in _HIRING_MANAGER_REJECT:
+        return False
+    if not re.match(
+        r"^[A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]+)+$",
+        cleaned,
+    ):
+        return False
+    return True
+
+
+def _find_linkedin_section_heading(soup: BeautifulSoup, *labels: str):
+    labels_lower = {label.lower() for label in labels}
+    for tag in soup.find_all(["h2", "h3", "h4", "strong", "span", "p", "div"]):
+        text = tag.get_text(strip=True)
+        if text and text.lower() in labels_lower:
+            return tag
+    return None
+
+
+def _linkedin_section_container(heading):
+    if heading is None:
+        return None
+    for ancestor in heading.parents:
+        if ancestor.name in ("section", "article"):
+            return ancestor
+        if ancestor.name == "div":
+            classes = " ".join(ancestor.get("class") or [])
+            if any(token in classes for token in ("section", "container", "module")):
+                return ancestor
+    return heading.parent
+
+
+def _parse_linkedin_og_title(soup: BeautifulSoup) -> Tuple[Optional[str], Optional[str]]:
+    meta = soup.find("meta", property="og:title") or soup.find(
+        "meta", attrs={"name": "og:title"}
+    )
+    if not meta or not meta.get("content"):
+        return None, None
+
+    content = meta["content"]
+    if "&" in content:
+        from html import unescape
+
+        content = unescape(content)
+
+    match = re.match(
+        r"^(.+?)\s+hiring\s+(.+?)\s+in\s+.+\|\s*LinkedIn\s*$",
+        content,
+        re.I,
+    )
+    if not match:
+        return None, None
+
+    return _clean_optional_field(match.group(1)), _clean_optional_field(match.group(2))
+
+
+def _first_selector_text(soup: BeautifulSoup, selectors) -> Optional[str]:
+    for selector in selectors:
+        element = soup.select_one(selector)
+        if element:
+            text = _clean_optional_field(element.get_text(strip=True))
+            if text:
+                return text
+    return None
+
+
+def _extract_linkedin_company_from_about_section(soup: BeautifulSoup) -> Optional[str]:
+    heading = _find_linkedin_section_heading(soup, "About the company")
+    container = _linkedin_section_container(heading)
+    if container is None:
+        return None
+
+    for anchor in container.select('a[href*="/company/"]'):
+        name = _clean_optional_field(anchor.get_text(strip=True))
+        if name and name.lower() != "about the company":
+            return name
+
+    return _first_selector_text(
+        container,
+        [
+            ".jobs-company__company-name",
+            ".artdeco-entity-lockup__title",
+            "h3",
+            "h4",
+            "strong",
+        ],
+    )
+
+
+def _extract_linkedin_hiring_team_member(soup: BeautifulSoup) -> Optional[str]:
+    heading = _find_linkedin_section_heading(
+        soup, "Meet the hiring team", "Meet the team"
+    )
+    container = _linkedin_section_container(heading)
+    if container is None:
+        return None
+
+    for selector in [
+        ".hirer-card__hirer-information",
+        ".jobs-poster__name",
+        '[data-testid="job-poster-name"]',
+        ".artdeco-entity-lockup__title",
+        ".base-main-card__title",
+        'a[href*="/in/"] span',
+    ]:
+        for element in container.select(selector):
+            name = _clean_optional_field(element.get_text(strip=True))
+            if name and _is_plausible_person_name(name):
+                return name
+
+    return None
+
+
 class LinkedInParser(BaseJobParser):
     """Parser for LinkedIn job postings"""
 
@@ -79,55 +220,66 @@ class LinkedInParser(BaseJobParser):
                 try:
                     data = json.loads(script.string)
                     if isinstance(data, dict) and data.get("@type") == "JobPosting":
-                        result.company = data.get("hiringOrganization", {}).get("name")
-                        result.job_title = data.get("title")
-                        result.job_description = data.get("description")
+                        result.company = _clean_optional_field(
+                            data.get("hiringOrganization", {}).get("name")
+                        )
+                        result.job_title = _clean_optional_field(data.get("title"))
+                        result.job_description = _clean_optional_field(
+                            data.get("description")
+                        )
                         if result.has_minimum_data():
                             result.is_complete = True
+                            result.hiring_manager = (
+                                _extract_linkedin_hiring_team_member(soup) or None
+                            )
                             return result
                 except (json.JSONDecodeError, AttributeError):
                     continue
 
-            # Try CSS selectors
-            # Company name
-            company_selectors = [
-                '[data-testid="job-poster-name"]',
-                'a[data-tracking-control-name="job_poster_name"]',
-                ".job-details-jobs-unified-top-card__company-name",
-                ".jobs-unified-top-card__company-name",
-            ]
-            for selector in company_selectors:
-                element = soup.select_one(selector)
-                if element:
-                    result.company = element.get_text(strip=True)
-                    break
+            og_company, og_title = _parse_linkedin_og_title(soup)
 
-            # Job title
-            title_selectors = [
-                "h1.job-title",
-                'h1[data-testid="job-title"]',
-                ".jobs-unified-top-card__job-title",
-                "h1.jobs-unified-top-card__job-title",
-            ]
-            for selector in title_selectors:
-                element = soup.select_one(selector)
-                if element:
-                    result.job_title = element.get_text(strip=True)
-                    break
+            result.company = (
+                _extract_linkedin_company_from_about_section(soup)
+                or _first_selector_text(
+                    soup,
+                    [
+                        "a.topcard__org-name-link",
+                        ".topcard__org-name-link",
+                        ".job-details-jobs-unified-top-card__company-name",
+                        ".job-details-jobs-unified-top-card__company-name a",
+                        ".jobs-unified-top-card__company-name",
+                        'a[data-tracking-control-name="public_jobs_topcard-org-name"]',
+                    ],
+                )
+                or og_company
+            )
 
-            # Job description
-            desc_selectors = [
-                ".description__text",
-                "#job-details",
-                ".jobs-description__text",
-                '[data-testid="job-description"]',
-            ]
-            for selector in desc_selectors:
-                element = soup.select_one(selector)
-                if element:
-                    result.job_description = element.get_text(strip=True)
-                    break
+            result.job_title = _first_selector_text(
+                soup,
+                [
+                    "h1.top-card-layout__title",
+                    "h1.topcard__title",
+                    ".topcard__title",
+                    "h1.job-title",
+                    'h1[data-testid="job-title"]',
+                    ".job-details-jobs-unified-top-card__job-title",
+                    ".jobs-unified-top-card__job-title",
+                    "h1.jobs-unified-top-card__job-title",
+                ],
+            ) or og_title
 
+            result.job_description = _first_selector_text(
+                soup,
+                [
+                    "div.show-more-less-html__markup",
+                    ".description__text",
+                    "#job-details",
+                    ".jobs-description__text",
+                    '[data-testid="job-description"]',
+                ],
+            )
+
+            result.hiring_manager = _extract_linkedin_hiring_team_member(soup)
             result.is_complete = result.has_minimum_data()
 
         except Exception as e:
@@ -912,36 +1064,36 @@ def extract_from_html(html: str, url: str) -> JobExtractionResult:
     # Set ad_source based on detected site
     result.ad_source = site
 
-    # Try to extract hiring manager (common patterns)
-    try:
-        # Look for hiring manager patterns in the HTML
-        hiring_manager_patterns = [
-            soup.find(string=re.compile(r"hiring manager", re.I)),
-            soup.find(string=re.compile(r"recruiter", re.I)),
-            soup.find(string=re.compile(r"contact.*name", re.I)),
-        ]
+    # LinkedIn hiring manager comes from "Meet the hiring team" in LinkedInParser only.
+    if site != "linkedin":
+        try:
+            hiring_manager_patterns = [
+                soup.find(string=re.compile(r"hiring manager", re.I)),
+                soup.find(string=re.compile(r"recruiter", re.I)),
+                soup.find(string=re.compile(r"contact.*name", re.I)),
+            ]
 
-        for pattern_match in hiring_manager_patterns:
-            if pattern_match:
-                # Try to find the name near the pattern
-                parent = (
-                    pattern_match.parent if hasattr(pattern_match, "parent") else None
-                )
-                if parent:
-                    # Look for name-like text nearby
-                    text = parent.get_text(strip=True)
-                    # Simple heuristic: look for capitalized words after "hiring manager" or "recruiter"
-                    match = re.search(
-                        r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-                        text,
-                        re.I,
+            for pattern_match in hiring_manager_patterns:
+                if pattern_match:
+                    parent = (
+                        pattern_match.parent
+                        if hasattr(pattern_match, "parent")
+                        else None
                     )
-                    if match:
-                        result.hiring_manager = match.group(1).strip()
-                        break
-    except Exception as e:
-        logger.debug(f"Could not extract hiring manager: {e}")
-        # Leave as None/empty string
+                    if parent:
+                        text = parent.get_text(strip=True)
+                        match = re.search(
+                            r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+                            text,
+                            re.I,
+                        )
+                        if match:
+                            candidate = match.group(1).strip()
+                            if _is_plausible_person_name(candidate):
+                                result.hiring_manager = candidate
+                                break
+        except Exception as e:
+            logger.debug(f"Could not extract hiring manager: {e}")
 
     logger.info(
         f"BeautifulSoup extraction from HTML: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
@@ -1029,36 +1181,35 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
             result.method = "captcha-required"
             return result
 
-    # Try to extract hiring manager (common patterns)
-    try:
-        # Look for hiring manager patterns in the HTML
-        hiring_manager_patterns = [
-            soup.find(string=re.compile(r"hiring manager", re.I)),
-            soup.find(string=re.compile(r"recruiter", re.I)),
-            soup.find(string=re.compile(r"contact.*name", re.I)),
-        ]
+    if site != "linkedin":
+        try:
+            hiring_manager_patterns = [
+                soup.find(string=re.compile(r"hiring manager", re.I)),
+                soup.find(string=re.compile(r"recruiter", re.I)),
+                soup.find(string=re.compile(r"contact.*name", re.I)),
+            ]
 
-        for pattern_match in hiring_manager_patterns:
-            if pattern_match:
-                # Try to find the name near the pattern
-                parent = (
-                    pattern_match.parent if hasattr(pattern_match, "parent") else None
-                )
-                if parent:
-                    # Look for name-like text nearby
-                    text = parent.get_text(strip=True)
-                    # Simple heuristic: look for capitalized words after "hiring manager" or "recruiter"
-                    match = re.search(
-                        r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-                        text,
-                        re.I,
+            for pattern_match in hiring_manager_patterns:
+                if pattern_match:
+                    parent = (
+                        pattern_match.parent
+                        if hasattr(pattern_match, "parent")
+                        else None
                     )
-                    if match:
-                        result.hiring_manager = match.group(1).strip()
-                        break
-    except Exception as e:
-        logger.debug(f"Could not extract hiring manager: {e}")
-        # Leave as None/empty string
+                    if parent:
+                        text = parent.get_text(strip=True)
+                        match = re.search(
+                            r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+                            text,
+                            re.I,
+                        )
+                        if match:
+                            candidate = match.group(1).strip()
+                            if _is_plausible_person_name(candidate):
+                                result.hiring_manager = candidate
+                                break
+        except Exception as e:
+            logger.debug(f"Could not extract hiring manager: {e}")
 
     logger.info(
         f"BeautifulSoup extraction result: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
@@ -1073,10 +1224,10 @@ HTML Content:
 {html_content}
 
 Please extract the following information and return ONLY valid JSON (no markdown, no code blocks):
-1. company: The company name (not from URL, but from the actual job posting content)
+1. company: The company name from the job posting (for LinkedIn, prefer the "About the company" section; otherwise use the top card or page metadata)
 2. job_title: The complete job title/position name
 3. full_description: The full job description including responsibilities, requirements, and qualifications
-4. hiring_manager: The name of the hiring manager or recruiter if mentioned (return empty string "" if not found)
+4. hiring_manager: The hiring team member name only if listed under "Meet the hiring team" (return empty string "" if not found)
 
 Return format (JSON only):
 {{
@@ -1086,7 +1237,7 @@ Return format (JSON only):
     "hiring_manager": "Hiring Manager Name" or ""
 }}
 
-If any information cannot be extracted, use "Not specified" as the value (except hiring_manager which should be empty string "" if not found)."""
+If company, job_title, or full_description cannot be extracted, use "Not specified". Leave hiring_manager as "" when no hiring team member is clearly named."""
 
 
 def _parse_llm_job_json(content: str) -> Dict:
@@ -1098,12 +1249,17 @@ def _parse_llm_job_json(content: str) -> Dict:
 
 
 def _apply_llm_job_json(result: JobExtractionResult, data: Dict) -> None:
-    result.company = data.get("company", "Not specified")
-    result.job_title = data.get("job_title") or data.get("jobTitle", "Not specified")
-    result.job_description = data.get("full_description") or data.get(
-        "jobDescription", "Not specified"
+    result.company = _clean_optional_field(data.get("company", "Not specified"))
+    result.job_title = _clean_optional_field(
+        data.get("job_title") or data.get("jobTitle", "Not specified")
     )
-    result.hiring_manager = data.get("hiring_manager", "") or ""
+    result.job_description = _clean_optional_field(
+        data.get("full_description") or data.get("jobDescription", "Not specified")
+    )
+    hiring_manager = data.get("hiring_manager", "") or ""
+    result.hiring_manager = (
+        hiring_manager if _is_plausible_person_name(hiring_manager) else None
+    )
     result.is_complete = result.has_minimum_data()
 
 
