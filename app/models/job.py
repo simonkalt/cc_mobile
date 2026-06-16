@@ -9,4 +9,5 @@ class JobURLAnalysisRequest(BaseModel):
     url: HttpUrl
     user_id: Optional[str] = None
     user_email: Optional[str] = None
+    html_content: Optional[str] = None
 

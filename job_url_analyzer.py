@@ -1,20 +1,13 @@
 """
-Job URL Analyzer - Hybrid BeautifulSoup + Grok Implementation
+Job URL Analyzer - Hybrid BeautifulSoup + Claude Haiku Implementation
 
 This module implements a hybrid approach to extract job information from URLs:
 1. First attempts BeautifulSoup parsing (fast, free)
-2. Falls back to Grok AI if BeautifulSoup fails (handles complex cases)
-
-Usage:
-    from job_url_analyzer import analyze_job_url
-
-    result = await analyze_job_url(
-        url="https://www.linkedin.com/jobs/view/123456",
-        user_id="507f1f77bcf86cd799439011"
-    )
+2. Falls back to Claude Haiku 4.5 if BeautifulSoup fails (handles complex cases)
 """
 
 import json
+import os
 import re
 import logging
 from typing import Dict, Optional, Tuple
@@ -23,21 +16,11 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
-# Configure logging first
+# Configure logging
 logger = logging.getLogger(__name__)
 
-# Try to import OpenAI for ChatGPT (optional)
-try:
-    from openai import OpenAI
-
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    logger.warning(
-        "OpenAI not available - ChatGPT extraction will be skipped. Install openai to enable ChatGPT extraction."
-    )
-
-token_limit = 100000
+# Always use Claude Haiku 4.5 for LLM HTML parsing (override via env if needed).
+JOB_URL_LLM_MODEL = os.getenv("JOB_URL_LLM_MODEL", "claude-haiku-4-5")
 
 
 class JobExtractionResult:
@@ -49,7 +32,7 @@ class JobExtractionResult:
         self.job_description: Optional[str] = None
         self.hiring_manager: Optional[str] = None
         self.ad_source: Optional[str] = None
-        self.method: Optional[str] = None  # 'beautifulsoup' or 'grok'
+        self.method: Optional[str] = None  # 'beautifulsoup-*' or JOB_URL_LLM_MODEL
         self.is_complete: bool = False
 
     def to_dict(self) -> Dict:
@@ -86,338 +69,8 @@ class LinkedInParser(BaseJobParser):
     """Parser for LinkedIn job postings"""
 
     def parse(self, soup: BeautifulSoup, url: str) -> JobExtractionResult:
-        """
-        LinkedIn parser - SIMPLIFIED: Now relies on Grok LLM for extraction.
-        This method returns an empty result to force fallback to Grok extraction.
-        Original BeautifulSoup extraction logic is commented out below for potential reversion.
-        """
         result = JobExtractionResult()
         result.method = "beautifulsoup-linkedin"
-        result.ad_source = "linkedin"  # Set ad_source since we know it's LinkedIn
-
-        # Return empty result to trigger ChatGPT fallback
-        # The LLM will handle all extraction via extract_with_chatgpt()
-        return result
-
-        # ============================================================================
-        # COMMENTED OUT: Original BeautifulSoup extraction logic (for potential reversion)
-        # ============================================================================
-        # try:
-        #     # Try JSON-LD structured data first
-        #     json_ld_scripts = soup.find_all("script", type="application/ld+json")
-        #     logger.info(
-        #         f"[LinkedInParser] Found {len(json_ld_scripts)} JSON-LD scripts"
-        #     )
-        #     for script in json_ld_scripts:
-        #         try:
-        #             data = json.loads(script.string)
-        #             if isinstance(data, dict) and data.get("@type") == "JobPosting":
-        #                 logger.info("[LinkedInParser] Found JobPosting in JSON-LD")
-        #                 result.company = data.get("hiringOrganization", {}).get("name")
-        #                 result.job_title = data.get("title")
-        #                 result.job_description = data.get("description")
-        #                 logger.info(
-        #                     f"[LinkedInParser] JSON-LD extracted - Company: '{result.company}', Title: '{result.job_title}', Description: {len(result.job_description) if result.job_description else 0} chars"
-        #                 )
-        #                 if result.has_minimum_data():
-        #                     result.is_complete = True
-        #                     logger.info(
-        #                         "[LinkedInParser] JSON-LD extraction successful, returning result"
-        #                     )
-        #                     return result
-        #         except (json.JSONDecodeError, AttributeError) as e:
-        #             logger.debug(f"[LinkedInParser] JSON-LD parse error: {e}")
-        #             continue
-        #
-        #     # Try CSS selectors
-        #     # Company name
-        #     logger.info("[LinkedInParser] Trying CSS selectors for company name...")
-        #     company_selectors = [
-        #         '[data-testid="job-poster-name"]',
-        #         'a[data-tracking-control-name="job_poster_name"]',
-        #         ".job-details-jobs-unified-top-card__company-name",
-        #         ".jobs-unified-top-card__company-name",
-        #     ]
-        #     for selector in company_selectors:
-        #         element = soup.select_one(selector)
-        #         if element:
-        #             result.company = element.get_text(strip=True)
-        #             logger.info(
-        #                 f"[LinkedInParser] Found company using selector '{selector}': '{result.company}'"
-        #             )
-        #             break
-        #     if not result.company:
-        #         logger.warning(
-        #             "[LinkedInParser] Could not find company name with any selector"
-        #         )
-        #
-        #     # Job title
-        #     logger.info("[LinkedInParser] Trying CSS selectors for job title...")
-        #     title_selectors = [
-        #         "h1.job-title",
-        #         'h1[data-testid="job-title"]',
-        #         ".jobs-unified-top-card__job-title",
-        #         "h1.jobs-unified-top-card__job-title",
-        #     ]
-        #     for selector in title_selectors:
-        #         element = soup.select_one(selector)
-        #         if element:
-        #             result.job_title = element.get_text(strip=True)
-        #             logger.info(
-        #                 f"[LinkedInParser] Found job title using selector '{selector}': '{result.job_title}'"
-        #             )
-        #             break
-        #     if not result.job_title:
-        #         logger.warning(
-        #             "[LinkedInParser] Could not find job title with any selector"
-        #         )
-        #
-        #     # Job description - LinkedIn uses "About the job" section
-        #     # Try multiple strategies to find the full job description
-        #     # IMPORTANT: We want the actual readable text, not metadata or structured data
-        #
-        #     desc_selectors = [
-        #         # Modern LinkedIn selectors - these should contain the actual description text
-        #         '[data-testid="job-description"]',
-        #         ".jobs-description-content__text",
-        #         ".jobs-box__html-content",
-        #         ".jobs-description__text",
-        #         # Look for "About the job" section specifically
-        #         'section[aria-labelledby*="job-details"]',
-        #         'div[data-testid="job-details"]',
-        #         # Generic fallbacks
-        #         ".description__text",
-        #         "#job-details",
-        #     ]
-        #
-        #     # First try direct selectors - but filter out script/JSON-LD content
-        #     for selector in desc_selectors:
-        #         try:
-        #             element = soup.select_one(selector)
-        #             if element:
-        #                 # Skip if this is a script tag or contains JSON-LD
-        #                 if element.name == "script" or "application/ld+json" in str(
-        #                     element
-        #                 ):
-        #                     continue
-        #
-        #                 # Get text but exclude script and style tags
-        #                 for script in element(["script", "style", "noscript"]):
-        #                     script.decompose()
-        #
-        #                 text = element.get_text(separator="\n", strip=True)
-        #                 # Ensure we got substantial content and it's not just metadata
-        #                 if (
-        #                     text and len(text) > 200
-        #                 ):  # Increased threshold to avoid metadata
-        #                     # Check if it looks like actual description (has sentences, not just keywords)
-        #                     if (
-        #                         any(char in text for char in [".", "!", "?"])
-        #                         or len(text.split()) > 30
-        #                     ):
-        #                         result.job_description = text
-        #                         logger.info(
-        #                             f"[LinkedInParser] Found description using selector '{selector}': {len(text)} chars"
-        #                         )
-        #                         break
-        #         except Exception as e:
-        #             logger.debug(f"[LinkedInParser] Selector '{selector}' failed: {e}")
-        #             continue
-        #
-        #     # If not found, try finding "About the job" heading and get following content
-        #     if not result.job_description:
-        #         logger.info(
-        #             "[LinkedInParser] Trying to find 'About the job' section..."
-        #         )
-        #         # Find heading containing "About the job" - try multiple approaches
-        #         headings = soup.find_all(
-        #             ["h2", "h3", "h4"], string=re.compile(r"about the job", re.I)
-        #         )
-        #         if not headings:
-        #             # Try finding by aria-label or other attributes
-        #             headings = soup.find_all(
-        #                 ["h2", "h3", "h4"],
-        #                 attrs={"aria-label": re.compile(r"about", re.I)},
-        #             )
-        #
-        #         # Also try finding by text content in any element
-        #         if not headings:
-        #             all_elements = soup.find_all(["h2", "h3", "h4", "div", "span"])
-        #             for elem in all_elements:
-        #                 if elem.string and re.search(
-        #                     r"about the job", elem.string, re.I
-        #                 ):
-        #                     headings.append(elem)
-        #                     break
-        #
-        #         for heading in headings:
-        #             # Get the next sibling div or section
-        #             next_sibling = heading.find_next_sibling(["div", "section"])
-        #             if next_sibling:
-        #                 # Remove script/style tags
-        #                 for script in next_sibling(["script", "style", "noscript"]):
-        #                     script.decompose()
-        #                 text = next_sibling.get_text(separator="\n", strip=True)
-        #                 if (
-        #                     text
-        #                     and len(text) > 200
-        #                     and (
-        #                         any(char in text for char in [".", "!", "?"])
-        #                         or len(text.split()) > 30
-        #                     )
-        #                 ):
-        #                     result.job_description = text
-        #                     logger.info(
-        #                         f"[LinkedInParser] Found description after 'About the job' heading: {len(text)} chars"
-        #                     )
-        #                     break
-        #
-        #             # Also try parent's next sibling
-        #             parent = heading.parent
-        #             if parent:
-        #                 next_parent = parent.find_next_sibling(["div", "section"])
-        #                 if next_parent:
-        #                     for script in next_parent(["script", "style", "noscript"]):
-        #                         script.decompose()
-        #                     text = next_parent.get_text(separator="\n", strip=True)
-        #                     if (
-        #                         text
-        #                         and len(text) > 200
-        #                         and (
-        #                             any(char in text for char in [".", "!", "?"])
-        #                             or len(text.split()) > 30
-        #                         )
-        #                     ):
-        #                         result.job_description = text
-        #                         logger.info(
-        #                             f"[LinkedInParser] Found description in parent's next sibling: {len(text)} chars"
-        #                         )
-        #                         break
-        #
-        #             # Try finding the description container within the same parent
-        #             if parent:
-        #                 desc_container = parent.find(
-        #                     ["div", "section"],
-        #                     class_=re.compile(r"description|content|text", re.I),
-        #                 )
-        #                 if desc_container:
-        #                     for script in desc_container(
-        #                         ["script", "style", "noscript"]
-        #                     ):
-        #                         script.decompose()
-        #                     text = desc_container.get_text(separator="\n", strip=True)
-        #                     if (
-        #                         text
-        #                         and len(text) > 200
-        #                         and (
-        #                             any(char in text for char in [".", "!", "?"])
-        #                             or len(text.split()) > 30
-        #                         )
-        #                     ):
-        #                         result.job_description = text
-        #                         logger.info(
-        #                             f"[LinkedInParser] Found description in parent container: {len(text)} chars"
-        #                         )
-        #                         break
-        #
-        #     if not result.job_description:
-        #         logger.warning(
-        #             "[LinkedInParser] Could not find job description with any selector"
-        #     )
-        #
-        #     # Try to extract hiring manager from "Meet the hiring team" section
-        #     try:
-        #         logger.info(
-        #             "[LinkedInParser] Looking for 'Meet the hiring team' section..."
-        #         )
-        #         # Find heading or text containing "Meet the hiring team"
-        #         hiring_team_heading = soup.find(
-        #             string=re.compile(r"meet the hiring team", re.I)
-        #         )
-        #         if not hiring_team_heading:
-        #             hiring_team_heading = soup.find(
-        #                 string=re.compile(r"hiring team", re.I)
-        #             )
-        #
-        #         if hiring_team_heading:
-        #             logger.info("[LinkedInParser] Found 'Meet the hiring team' section")
-        #             # Get parent element
-        #             parent = (
-        #                 hiring_team_heading.parent
-        #                 if hasattr(hiring_team_heading, "parent")
-        #                 else None
-        #             )
-        #             if not parent:
-        #                 # Try finding the element
-        #                 parent = soup.find(
-        #                     string=re.compile(r"meet the hiring team", re.I)
-        #                 )
-        #                 if parent and hasattr(parent, "parent"):
-        #                     parent = parent.parent
-        #
-        #             if parent:
-        #                 # Look for name patterns in the same section
-        #                 # LinkedIn typically shows names in links or specific divs
-        #                 name_elements = parent.find_all(
-        #                     ["a", "span", "div"],
-        #                     class_=re.compile(r"name|profile|person", re.I),
-        #                 )
-        #                 for elem in name_elements:
-        #                     text = elem.get_text(strip=True)
-        #                     # Look for name-like patterns (capitalized words)
-        #                     name_match = re.search(
-        #                         r"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", text
-        #                     )
-        #                     if (
-        #                         name_match and len(name_match.group(1).split()) <= 4
-        #                     ):  # Reasonable name length
-        #                         result.hiring_manager = name_match.group(1).strip()
-        #                         logger.info(
-        #                             f"[LinkedInParser] Found hiring manager: '{result.hiring_manager}'"
-        #                         )
-        #                         break
-        #
-        #                 # If not found in class-based search, try finding links with profile URLs
-        #                 if not result.hiring_manager:
-        #                     profile_links = parent.find_all(
-        #                         "a", href=re.compile(r"/in/|/profile/", re.I)
-        #                     )
-        #                     for link in profile_links:
-        #                         text = link.get_text(strip=True)
-        #                         if (
-        #                             text
-        #                             and len(text.split()) <= 4
-        #                             and re.match(r"^[A-Z]", text)
-        #                         ):
-        #                             result.hiring_manager = text
-        #                             logger.info(
-        #                                 f"[LinkedInParser] Found hiring manager from profile link: '{result.hiring_manager}'"
-        #                             )
-        #                             break
-        #     except Exception as e:
-        #         logger.debug(f"[LinkedInParser] Could not extract hiring manager: {e}")
-        #
-        #     result.is_complete = result.has_minimum_data()
-        #
-        #     logger.info(
-        #         f"[LinkedInParser] Final extraction - Company: '{result.company or 'None'}', Title: '{result.job_title or 'None'}', Description: {len(result.job_description) if result.job_description else 0} chars"
-        #     )
-        #     logger.info(
-        #         f"[LinkedInParser] Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
-        #     )
-        #
-        # except Exception as e:
-        #     logger.error(f"LinkedIn parser error: {e}", exc_info=True)
-        #
-        # return result
-
-
-class IndeedParser(BaseJobParser):
-    """Parser for Indeed job postings"""
-
-    def parse(self, soup: BeautifulSoup, url: str) -> JobExtractionResult:
-        result = JobExtractionResult()
-        result.method = "beautifulsoup-indeed"
 
         try:
             # Try JSON-LD structured data first
@@ -435,7 +88,89 @@ class IndeedParser(BaseJobParser):
                 except (json.JSONDecodeError, AttributeError):
                     continue
 
+            # Try CSS selectors
             # Company name
+            company_selectors = [
+                '[data-testid="job-poster-name"]',
+                'a[data-tracking-control-name="job_poster_name"]',
+                ".job-details-jobs-unified-top-card__company-name",
+                ".jobs-unified-top-card__company-name",
+            ]
+            for selector in company_selectors:
+                element = soup.select_one(selector)
+                if element:
+                    result.company = element.get_text(strip=True)
+                    break
+
+            # Job title
+            title_selectors = [
+                "h1.job-title",
+                'h1[data-testid="job-title"]',
+                ".jobs-unified-top-card__job-title",
+                "h1.jobs-unified-top-card__job-title",
+            ]
+            for selector in title_selectors:
+                element = soup.select_one(selector)
+                if element:
+                    result.job_title = element.get_text(strip=True)
+                    break
+
+            # Job description
+            desc_selectors = [
+                ".description__text",
+                "#job-details",
+                ".jobs-description__text",
+                '[data-testid="job-description"]',
+            ]
+            for selector in desc_selectors:
+                element = soup.select_one(selector)
+                if element:
+                    result.job_description = element.get_text(strip=True)
+                    break
+
+            result.is_complete = result.has_minimum_data()
+
+        except Exception as e:
+            logger.error(f"LinkedIn parser error: {e}")
+
+        return result
+
+
+class IndeedParser(BaseJobParser):
+    """Parser for Indeed job postings"""
+
+    def parse(self, soup: BeautifulSoup, url: str) -> JobExtractionResult:
+        result = JobExtractionResult()
+        result.method = "beautifulsoup-indeed"
+        logger.info(f"[IndeedParser] Starting extraction for URL: {url}")
+
+        try:
+            # Try JSON-LD structured data first
+            json_ld_scripts = soup.find_all("script", type="application/ld+json")
+            logger.info(f"[IndeedParser] Found {len(json_ld_scripts)} JSON-LD scripts")
+            for script in json_ld_scripts:
+                try:
+                    data = json.loads(script.string)
+                    if isinstance(data, dict) and data.get("@type") == "JobPosting":
+                        logger.info("[IndeedParser] Found JobPosting in JSON-LD")
+                        result.company = data.get("hiringOrganization", {}).get("name")
+                        result.job_title = data.get("title")
+                        result.job_description = data.get("description")
+                        logger.info(
+                            f"[IndeedParser] JSON-LD extracted - Company: '{result.company}', Title: '{result.job_title}', Description: {len(result.job_description) if result.job_description else 0} chars"
+                        )
+                        if result.has_minimum_data():
+                            result.is_complete = True
+                            logger.info(
+                                "[IndeedParser] JSON-LD extraction successful, returning result"
+                            )
+                            return result
+                except (json.JSONDecodeError, AttributeError) as e:
+                    logger.debug(f"[IndeedParser] JSON-LD parse error: {e}")
+                    continue
+
+            # Company name
+            logger.info("[IndeedParser] Trying CSS selectors for company name...")
             company_selectors = [
                 '[data-testid="job-poster-name"]',
                 '[data-testid="inlineHeader-companyName"]',
@@ -446,9 +181,17 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.company = element.get_text(strip=True)
+                    logger.info(
+                        f"[IndeedParser] Found company using selector '{selector}': '{result.company}'"
+                    )
                     break
+            if not result.company:
+                logger.warning(
+                    "[IndeedParser] Could not find company name with any selector"
+                )
 
             # Job title
+            logger.info("[IndeedParser] Trying CSS selectors for job title...")
             title_selectors = [
                 "h1.jobTitle",
                 'h1[data-testid="job-title"]',
@@ -458,9 +201,17 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.job_title = element.get_text(strip=True)
+                    logger.info(
+                        f"[IndeedParser] Found job title using selector '{selector}': '{result.job_title}'"
+                    )
                     break
+            if not result.job_title:
+                logger.warning(
+                    "[IndeedParser] Could not find job title with any selector"
+                )
 
             # Job description
+            logger.info("[IndeedParser] Trying CSS selectors for job description...")
             desc_selectors = [
                 "#jobDescriptionText",
                 '[data-testid="job-description"]',
@@ -470,9 +221,23 @@ class IndeedParser(BaseJobParser):
                 element = soup.select_one(selector)
                 if element:
                     result.job_description = element.get_text(strip=True)
+                    logger.info(
+                        f"[IndeedParser] Found job description using selector '{selector}': {len(result.job_description)} chars"
+                    )
                     break
+            if not result.job_description:
+                logger.warning(
+                    "[IndeedParser] Could not find job description with any selector"
+                )
 
             result.is_complete = result.has_minimum_data()
+
+            logger.info(
+                f"[IndeedParser] Final extraction - Company: '{result.company or 'None'}', Title: '{result.job_title or 'None'}', Description: {len(result.job_description) if result.job_description else 0} chars"
+            )
+            logger.info(
+                f"[IndeedParser] Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
+            )
 
         except Exception as e:
             logger.error(f"Indeed parser error: {e}", exc_info=True)
@@ -676,6 +441,8 @@ def detect_site(url: str) -> str:
         return "indeed"
     elif "glassdoor.com" in domain:
         return "glassdoor"
+    elif "ziprecruiter.com" in domain:
+        return "ziprecruiter"
     else:
         return "generic"
 
@@ -796,13 +563,12 @@ def fetch_html(
     url: str, timeout: int = 10
 ) -> Tuple[Optional[str], Optional[str], Optional[bool]]:
     """
-    Fetch HTML content from URL using requests
+    Fetch HTML content from URL
 
     Returns:
         Tuple of (html_content, error_message, captcha_detected)
         captcha_detected is True if CAPTCHA is detected, False otherwise, None on error
     """
-    # Use requests to fetch HTML
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -914,6 +680,187 @@ def fetch_html(
         return None, f"Unexpected error fetching URL: {str(e)}", None
 
 
+LINKEDIN_AUTHWALL_SIGNALS = [
+    "authwall",
+    "sign in to see",
+    "sign in to view",
+    "join linkedin",
+    "login-form",
+    "session_key",
+    "checkpoint/challenge",
+    "global-nav__guest",
+    "guest_homepage",
+]
+
+LOGIN_SIGNUP_SIGNALS = [
+    "sign in",
+    "log in",
+    "create account",
+    "continue with google",
+    "email or phone",
+]
+
+
+def _extract_html_title(html: str) -> Optional[str]:
+    if not html:
+        return None
+    match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    title = re.sub(r"\s+", " ", match.group(1)).strip()
+    return title[:300] if title else None
+
+
+def _has_linkedin_job_posting_json_ld(html: str) -> bool:
+    if not html:
+        return False
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        for script in soup.find_all("script", type="application/ld+json"):
+            raw = script.string or script.get_text()
+            if not raw:
+                continue
+            data = json.loads(raw)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict) and item.get("@type") == "JobPosting":
+                    return True
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return False
+
+
+def inspect_job_page_html(
+    html: Optional[str],
+    url: str,
+    *,
+    captcha_detected: Optional[bool] = None,
+    fetch_error: Optional[str] = None,
+    http_status: Optional[int] = None,
+    final_url: Optional[str] = None,
+) -> Dict:
+    """
+    Summarize fetched HTML to diagnose auth walls, CAPTCHA, and missing job content.
+    """
+    html_lower = (html or "").lower()
+    html_length = len(html or "")
+
+    job_content_indicators = [
+        "job description",
+        "jobsearch-jobdescriptiontext",
+        "jobs-unified-top-card",
+        "job-details-jobs-unified-top-card",
+        "description__text",
+        "show-more-less-html",
+    ]
+    matched_job_signals = [
+        s for s in job_content_indicators if s in html_lower
+    ]
+    matched_linkedin_auth = [
+        s for s in LINKEDIN_AUTHWALL_SIGNALS if s in html_lower
+    ]
+    matched_login = [s for s in LOGIN_SIGNUP_SIGNALS if s in html_lower]
+
+    has_json_ld_job = _has_linkedin_job_posting_json_ld(html or "")
+    captcha = (
+        captcha_detected
+        if captcha_detected is not None
+        else detect_captcha(html or "")
+    )
+
+    if fetch_error:
+        page_kind = "fetch_error"
+    elif not html:
+        page_kind = "empty_html"
+    elif matched_job_signals or has_json_ld_job:
+        page_kind = "job_content_present"
+    elif "linkedin.com" in url.lower() and matched_linkedin_auth:
+        page_kind = "linkedin_authwall"
+    elif captcha:
+        page_kind = "captcha_or_bot_check"
+    elif matched_login:
+        page_kind = "login_or_signup"
+    else:
+        page_kind = "unknown"
+
+    preview_len = int(os.getenv("JOB_URL_DEBUG_PREVIEW_CHARS", "2500"))
+    preview = (html or "")[:preview_len]
+
+    return {
+        "requested_url": url,
+        "final_url": final_url or url,
+        "http_status": http_status,
+        "fetch_error": fetch_error,
+        "html_length": html_length,
+        "title": _extract_html_title(html or ""),
+        "page_kind": page_kind,
+        "captcha_detected": captcha,
+        "has_job_posting_json_ld": has_json_ld_job,
+        "matched_job_content_signals": matched_job_signals,
+        "matched_linkedin_auth_signals": matched_linkedin_auth,
+        "matched_login_signals": matched_login[:8],
+        "html_preview": preview,
+        "html_preview_truncated": html_length > preview_len,
+    }
+
+
+def debug_fetch_job_url(url: str, timeout: int = 15) -> Dict:
+    """
+    Fetch a job URL and return diagnostic metadata + HTML preview (for debugging).
+    Does not call the LLM.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=True,
+        )
+        if response.encoding:
+            html = response.text
+        else:
+            html = response.content.decode("utf-8", errors="ignore")
+
+        captcha_detected = detect_captcha(html)
+        inspection = inspect_job_page_html(
+            html,
+            url,
+            captcha_detected=captcha_detected,
+            http_status=response.status_code,
+            final_url=str(response.url),
+        )
+        inspection["redirect_chain"] = [str(r.url) for r in response.history]
+        return inspection
+
+    except requests.exceptions.Timeout:
+        return inspect_job_page_html(
+            None,
+            url,
+            fetch_error="Request timeout",
+        )
+    except requests.exceptions.RequestException as e:
+        return inspect_job_page_html(
+            None,
+            url,
+            fetch_error=str(e),
+        )
+    except Exception as e:
+        return inspect_job_page_html(
+            None,
+            url,
+            fetch_error=f"Unexpected error: {e}",
+        )
+
+
 def extract_from_html(html: str, url: str) -> JobExtractionResult:
     """
     Extract job information from provided HTML content using BeautifulSoup
@@ -951,7 +898,16 @@ def extract_from_html(html: str, url: str) -> JobExtractionResult:
     }
 
     parser = parsers.get(site, GenericParser())
+    logger.info(f"Using {site} parser for extraction...")
     result = parser.parse(soup, url)
+
+    # Log extraction details
+    logger.info(
+        f"Parser result - Company: {result.company or 'None'}, Title: {result.job_title or 'None'}, Description length: {len(result.job_description) if result.job_description else 0}"
+    )
+    logger.info(
+        f"Parser result - Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
+    )
 
     # Set ad_source based on detected site
     result.ad_source = site
@@ -987,6 +943,9 @@ def extract_from_html(html: str, url: str) -> JobExtractionResult:
         logger.debug(f"Could not extract hiring manager: {e}")
         # Leave as None/empty string
 
+    logger.info(
+        f"BeautifulSoup extraction from HTML: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
+    )
     return result
 
 
@@ -998,6 +957,7 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
         JobExtractionResult object
     """
     # Fetch HTML
+    logger.info(f"[extract_with_beautifulsoup] Fetching HTML from URL: {url}")
     html, error, captcha_detected = fetch_html(url)
 
     if error or not html:
@@ -1005,6 +965,13 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
         result = JobExtractionResult()
         result.method = "beautifulsoup-failed"
         return result
+
+    logger.info(
+        f"[extract_with_beautifulsoup] HTML fetched successfully - Length: {len(html)} chars, CAPTCHA detected: {captcha_detected}"
+    )
+    logger.debug(
+        f"[extract_with_beautifulsoup] HTML preview (first 500 chars): {html[:500]}"
+    )
 
     # Parse HTML
     try:
@@ -1017,6 +984,7 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
 
     # Detect site and use appropriate parser
     site = detect_site(url)
+    logger.info(f"Detected site: {site} for URL: {url}")
 
     parsers = {
         "linkedin": LinkedInParser(),
@@ -1026,7 +994,16 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     }
 
     parser = parsers.get(site, GenericParser())
+    logger.info(f"Using {site} parser for extraction...")
     result = parser.parse(soup, url)
+
+    # Log extraction details
+    logger.info(
+        f"Parser result - Company: {result.company or 'None'}, Title: {result.job_title or 'None'}, Description length: {len(result.job_description) if result.job_description else 0}"
+    )
+    logger.info(
+        f"Parser result - Has minimum data: {result.has_minimum_data()}, Is complete: {result.is_complete}"
+    )
 
     # Set ad_source based on detected site
     result.ad_source = site
@@ -1050,47 +1027,38 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
                 f"❌ CAPTCHA detected and no valid job data extracted - NEW CAPTCHA required (show modal)"
             )
             result.method = "captcha-required"
-    return result
+            return result
 
     # Try to extract hiring manager (common patterns)
-    # Note: LinkedIn hiring manager extraction is handled in LinkedInParser
-    # This is a fallback for other sites or if LinkedInParser didn't find it
-    if not result.hiring_manager:
-        try:
-            # Look for hiring manager patterns in the HTML
-            hiring_manager_patterns = [
-                soup.find(string=re.compile(r"meet the hiring team", re.I)),
-                soup.find(string=re.compile(r"hiring manager", re.I)),
-                soup.find(string=re.compile(r"recruiter", re.I)),
-                soup.find(string=re.compile(r"contact.*name", re.I)),
-            ]
+    try:
+        # Look for hiring manager patterns in the HTML
+        hiring_manager_patterns = [
+            soup.find(string=re.compile(r"hiring manager", re.I)),
+            soup.find(string=re.compile(r"recruiter", re.I)),
+            soup.find(string=re.compile(r"contact.*name", re.I)),
+        ]
 
-            for pattern_match in hiring_manager_patterns:
-                if pattern_match:
-                    # Try to find the name near the pattern
-                    parent = (
-                        pattern_match.parent
-                        if hasattr(pattern_match, "parent")
-                        else None
+        for pattern_match in hiring_manager_patterns:
+            if pattern_match:
+                # Try to find the name near the pattern
+                parent = (
+                    pattern_match.parent if hasattr(pattern_match, "parent") else None
+                )
+                if parent:
+                    # Look for name-like text nearby
+                    text = parent.get_text(strip=True)
+                    # Simple heuristic: look for capitalized words after "hiring manager" or "recruiter"
+                    match = re.search(
+                        r"(?:hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+                        text,
+                        re.I,
                     )
-                    if parent:
-                        # Look for name-like text nearby
-                        text = parent.get_text(strip=True)
-                        # Simple heuristic: look for capitalized words after "hiring manager", "recruiter", or "meet the hiring team"
-                        match = re.search(
-                            r"(?:meet the hiring team|hiring manager|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-                            text,
-                            re.I,
-                        )
-                        if match:
-                            result.hiring_manager = match.group(1).strip()
-                            logger.info(
-                                f"[extract_with_beautifulsoup] Found hiring manager: '{result.hiring_manager}'"
-                            )
-                            break
-        except Exception as e:
-            logger.debug(f"Could not extract hiring manager: {e}")
-            # Leave as None/empty string
+                    if match:
+                        result.hiring_manager = match.group(1).strip()
+                        break
+    except Exception as e:
+        logger.debug(f"Could not extract hiring manager: {e}")
+        # Leave as None/empty string
 
     logger.info(
         f"BeautifulSoup extraction result: method={result.method}, complete={result.is_complete}, ad_source={result.ad_source}"
@@ -1098,150 +1066,100 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     return result
 
 
-def extract_with_chatgpt(
-    html: str, openai_client: Optional[OpenAI] = None
-) -> JobExtractionResult:
-    """
-    Extract job information using ChatGPT (fallback method)
-
-    Args:
-        html: HTML content to analyze
-        openai_client: Optional OpenAI client instance (will create if not provided)
-
-    Returns:
-        JobExtractionResult object
-    """
-    result = JobExtractionResult()
-    result.method = "chatgpt"
-
-    if not OPENAI_AVAILABLE:
-        logger.error("OpenAI not available - cannot use ChatGPT extraction")
-        return result
-
-    try:
-        # Limit HTML size to avoid token limits
-        html_content = html[:token_limit] if len(html) > token_limit else html
-
-        # Create OpenAI client if not provided
-        if openai_client is None:
-            import os
-
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                logger.error("OPENAI_API_KEY not configured")
-                return result
-            openai_client = OpenAI(api_key=api_key)
-
-        # Create simplified prompt for Grok - let the LLM figure it out
-        prompt = f"""Scan the provided HTML content and retrieve the following fields: "Company Name", "Job Title", "Hiring Manager", "Ad Source", and "Job Description". The job description should include all responsibilities, requirements, qualifications, and details. It should be the full job description text including all responsibilities, requirements, qualifications, and details. The hiring manager should be the name of the person who is hiring for the job. The ad source should be the source of the job posting. The company name should be the name of the company that is hiring for the job. The job title should be the title of the job. The hiring manager may be called a human resources manager, recruiter, hiring manager, or "meet the hiring team". 
+def _build_job_html_extraction_prompt(html_content: str) -> str:
+    return f"""Analyze the following HTML content from a job posting webpage and extract structured information.
 
 HTML Content:
 {html_content}
 
-Extract the following information and return ONLY valid JSON (no markdown, no code blocks):
+Please extract the following information and return ONLY valid JSON (no markdown, no code blocks):
+1. company: The company name (not from URL, but from the actual job posting content)
+2. job_title: The complete job title/position name
+3. full_description: The full job description including responsibilities, requirements, and qualifications
+4. hiring_manager: The name of the hiring manager or recruiter if mentioned (return empty string "" if not found)
 
 Return format (JSON only):
 {{
     "company": "Company Name",
     "job_title": "Job Title",
-    "full_description": "Complete job description text including all responsibilities, requirements, qualifications, and details",
-    "hiring_manager": "Hiring Manager Name" or "",
-    "ad_source": "linkedin" or "indeed" or "glassdoor" or "generic"
+    "full_description": "Full job description text...",
+    "hiring_manager": "Hiring Manager Name" or ""
 }}
 
-IMPORTANT EXTRACTION INSTRUCTIONS:
+If any information cannot be extracted, use "Not specified" as the value (except hiring_manager which should be empty string "" if not found)."""
 
-1. company: Extract the company name from the job posting (not from the URL)
 
-2. job_title: Extract the complete job title/position name
+def _parse_llm_job_json(content: str) -> Dict:
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*\n", "", text)
+        text = re.sub(r"\n```\s*$", "", text)
+    return json.loads(text)
 
-3. full_description: Extract the complete, full job description text. For LinkedIn job postings, this is typically found in the "About the job" section. Include all responsibilities, requirements, qualifications, and any other job details.
-   
-   CRITICAL - EXPANDABLE TEXT BOXES: LinkedIn hides the bulk of the job description in expandable text boxes using <span> elements. Before extracting the description, you MUST:
-   
-   a) Look for <span> elements with expandable/collapsed content. These often have:
-      - Attributes like aria-expanded="false" or data-state="collapsed"
-      - Classes containing "expand", "collapse", "truncate", or "show-more"
-      - Text content that appears truncated or ends with "..."
-      - Sibling elements with "more" buttons or expand controls
-   
-   b) Find the FULL text content within these expandable spans. The HTML structure typically contains:
-      - A visible truncated preview (what users see before clicking "more")
-      - The full expanded text (often in the same element or a sibling element)
-      - Both versions may be present in the HTML simultaneously
-   
-   c) Extract the COMPLETE text from expandable spans, including:
-      - All text within <span> elements that contain the full description
-      - Text in data attributes (data-full-text, data-content, etc.)
-      - Text in hidden divs or elements with display:none that contain the full content
-      - Multiple span elements that together form the complete description
-   
-   d) Look for patterns like:
-      - <span class="...">[truncated text]</span> followed by <span class="...">[full text]</span>
-      - <span aria-expanded="false">[preview]</span> with full text in a data attribute
-      - Nested spans where inner spans contain the full text
-   
-   Extract the LONGEST and MOST COMPLETE version of the description available in the HTML. Do not stop at the truncated preview - always look for the expanded/full version within span elements or their data attributes.
 
-4. hiring_manager: CRITICAL - For LinkedIn job postings, look for a section titled "Meet the hiring team" or "Hiring team". In this section, extract the name of the person shown (this could be a hiring manager, recruiter, or team member). The name is typically displayed as:
-   - Text near "Meet the hiring team" heading
-   - Profile names or links in that section
-   - Names associated with profile pictures or cards in that area
-   - Look for capitalized names (First Last format) in the "Meet the hiring team" section
-   If you find the "Meet the hiring team" section but no name is displayed, return empty string "". If the section doesn't exist, return empty string "".
+def _apply_llm_job_json(result: JobExtractionResult, data: Dict) -> None:
+    result.company = data.get("company", "Not specified")
+    result.job_title = data.get("job_title") or data.get("jobTitle", "Not specified")
+    result.job_description = data.get("full_description") or data.get(
+        "jobDescription", "Not specified"
+    )
+    result.hiring_manager = data.get("hiring_manager", "") or ""
+    result.is_complete = result.has_minimum_data()
 
-5. ad_source: Determine the job board source based on the URL or page content:
-   - "linkedin" if URL contains linkedin.com
-   - "indeed" if URL contains indeed.com
-   - "glassdoor" if URL contains glassdoor.com
-   - "generic" for any other source
 
-Extraction Guidelines:
-- Extract all fields accurately from the HTML content
-- For hiring_manager: Return empty string "" if not found
-- For ad_source: Return "linkedin", "indeed", "glassdoor", or "generic" based on the URL or page content
-- For company, job_title, and full_description: Extract the actual values from the page content
-- Ensure full_description includes the complete job description with all responsibilities, requirements, and qualifications"""
+def extract_with_claude_haiku(
+    html: str, anthropic_client=None
+) -> JobExtractionResult:
+    """
+    Extract job information using Claude Haiku 4.5 (LLM fallback).
 
-        # Call OpenAI ChatGPT API - using gpt-5.5 for extraction
-        model_name = "gpt-5.5"
-        max_completion_tokens_value = 128_000
-        response = openai_client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
+    Args:
+        html: HTML content to analyze
+        anthropic_client: Optional Anthropic client instance
+
+    Returns:
+        JobExtractionResult object
+    """
+    result = JobExtractionResult()
+    result.method = JOB_URL_LLM_MODEL
+
+    content = ""
+    try:
+        html_content = html[:50000] if len(html) > 50000 else html
+
+        if anthropic_client is None:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                logger.error("ANTHROPIC_API_KEY not configured")
+                return result
+            import anthropic
+
+            anthropic_client = anthropic.Anthropic(api_key=api_key)
+
+        prompt = _build_job_html_extraction_prompt(html_content)
+
+        response = anthropic_client.messages.create(
+            model=JOB_URL_LLM_MODEL,
+            max_tokens=4096,
             temperature=0.1,
-            max_completion_tokens=max_completion_tokens_value,
-            response_format={"type": "json_object"},  # Force JSON response
+            messages=[{"role": "user", "content": prompt}],
         )
 
-        # Parse response
-        raw_response = response.choices[0].message.content.strip()
-        content = raw_response
+        content = response.content[0].text
+        data = _parse_llm_job_json(content)
+        _apply_llm_job_json(result, data)
 
-        # Remove markdown code blocks if present
-        if content.startswith("```"):
-            content = re.sub(r"^```(?:json)?\s*\n", "", content)
-            content = re.sub(r"\n```\s*$", "", content)
-
-        # Parse JSON
-        data = json.loads(content)
-
-        result.company = data.get("company", "Not specified")
-        result.job_title = data.get("job_title") or data.get(
-            "jobTitle", "Not specified"
+        logger.info(
+            "Claude Haiku extraction completed: model=%s complete=%s",
+            JOB_URL_LLM_MODEL,
+            result.is_complete,
         )
-        result.job_description = data.get("full_description") or data.get(
-            "jobDescription", "Not specified"
-        )
-        result.hiring_manager = data.get("hiring_manager", "") or ""
-        result.ad_source = data.get("ad_source", "generic") or "generic"
-        result.is_complete = result.has_minimum_data()
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse ChatGPT JSON response: {e}")
-        logger.debug(f"ChatGPT response received ({len(content)} characters)")
+        logger.error("Failed to parse Claude Haiku JSON response: %s", e)
+        logger.debug("Claude Haiku response content: %s", content[:500])
     except Exception as e:
-        logger.error(f"ChatGPT extraction error: {e}")
+        logger.error("Claude Haiku extraction error: %s", e)
 
     return result
 
@@ -1250,20 +1168,20 @@ async def analyze_job_url(
     url: str,
     user_id: Optional[str] = None,
     user_email: Optional[str] = None,
-    use_chatgpt_fallback: bool = True,
-    openai_client: Optional[OpenAI] = None,
+    use_llm_fallback: bool = True,
+    anthropic_client=None,
     html_content: Optional[str] = None,
 ) -> Dict:
     """
-    Analyze job URL using GPT model to extract all required fields.
+    Analyze job URL using hybrid BeautifulSoup + Claude Haiku approach
 
     Args:
         url: Job posting URL
         user_id: Optional user ID for logging
         user_email: Optional user email for logging
-        use_chatgpt_fallback: Deprecated - kept for compatibility, always uses GPT
-        openai_client: Optional OpenAI client instance
-        html_content: Optional HTML content - if provided, skips fetching
+        use_llm_fallback: Whether to use Claude Haiku if BeautifulSoup fails
+        anthropic_client: Optional Anthropic client instance
+        html_content: Optional HTML content (from CAPTCHA completion) - if provided, skips fetching
 
     Returns:
         Dictionary matching API response format
@@ -1276,34 +1194,146 @@ async def analyze_job_url(
     if not url.startswith(("http://", "https://")):
         raise ValueError("Invalid URL format. URL must start with http:// or https://")
 
-    # Detect ad_source from URL
+    # Detect ad_source from URL (needed for both methods)
     ad_source = detect_site(url)
 
-    # Step 1: Fetch HTML from URL (or use provided HTML)
+    # Step 1: Try BeautifulSoup first (fast, free)
+    # If HTML content is provided, use it directly (from CAPTCHA completion)
     if html_content:
-        html = html_content
-        error = None
+        logger.info("Using provided HTML content for extraction...")
+        result = extract_from_html(html_content, url)
     else:
-        html, error, _ = fetch_html(url)
+        logger.info("Attempting BeautifulSoup extraction...")
+        result = extract_with_beautifulsoup(url)
 
-    # Step 2: Always use GPT model to extract all fields
-    if html and not error:
-        result = extract_with_chatgpt(html, openai_client)
+    # Check if CAPTCHA is required (only if extraction failed AND HTML was not provided)
+    # If HTML was provided, it's already from a verified page, so don't return captcha_required
+    if result.method == "captcha-required":
+        if html_content:
+            # HTML was provided, so CAPTCHA is already completed - don't return captcha_required
+            logger.warning(
+                "Extraction failed even with provided HTML content - resetting method and continuing"
+            )
+            # Reset method to indicate failure, not CAPTCHA requirement
+            result.method = "beautifulsoup-failed"
+            # Continue with Claude Haiku fallback instead of returning early
+        else:
+            # No HTML provided, so CAPTCHA is actually required
+            logger.info(
+                "CAPTCHA required and extraction failed - returning special response"
+            )
+            return {
+                "success": False,
+                "captcha_required": True,
+                "url": url,
+                "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+                "company": "Not specified",
+                "job_title": "Not specified",
+                "ad_source": ad_source,
+                "full_description": "Not specified",
+                "hiring_manager": "",
+                "extractionMethod": "error",
+            }
+
+    # Step 2: If BeautifulSoup didn't get complete data, try Claude Haiku 4.5
+    if not result.is_complete and use_llm_fallback:
+        logger.info(
+            "BeautifulSoup extraction incomplete, falling back to %s...",
+            JOB_URL_LLM_MODEL,
+        )
+
+        # Use provided HTML if available, otherwise fetch it
+        if html_content:
+            html = html_content
+            error = None
+            captcha_detected = False
+        else:
+            # Fetch HTML for LLM fallback (if not already fetched)
+            html, error, captcha_detected = fetch_html(url)
+
+        # Check for CAPTCHA again before using LLM (only if we fetched)
+        if captcha_detected:
+            logger.warning(
+                "CAPTCHA detected during LLM fallback, but attempting extraction anyway..."
+            )
+
+        if html and not error:
+            llm_result = extract_with_claude_haiku(html, anthropic_client)
+
+            # Set ad_source for LLM result
+            llm_result.ad_source = ad_source
+
+            # If CAPTCHA was detected but LLM got valid data, CAPTCHA was already completed
+            if captcha_detected and llm_result.has_minimum_data():
+                logger.info(
+                    "✅ Successfully extracted job data with %s despite CAPTCHA detection",
+                    JOB_URL_LLM_MODEL,
+                )
+                result = llm_result
+            elif llm_result.is_complete or (
+                not result.has_minimum_data() and llm_result.has_minimum_data()
+            ):
+                llm_result.ad_source = result.ad_source or ad_source
+                result = llm_result
+                logger.info("Using Claude Haiku extraction results")
+            elif (
+                captcha_detected
+                and not llm_result.has_minimum_data()
+                and not html_content
+            ):
+                logger.warning(
+                    "❌ CAPTCHA detected and Claude Haiku extraction also failed - CAPTCHA required"
+                )
+                result.method = "captcha-required"
+                return {
+                    "success": False,
+                    "captcha_required": True,
+                    "url": url,
+                    "message": "CAPTCHA or human verification required. The website is blocking automated access.",
+                    "company": "Not specified",
+                    "job_title": "Not specified",
+                    "ad_source": ad_source,
+                    "full_description": "Not specified",
+                    "hiring_manager": "",
+                    "extractionMethod": "error",
+                }
+            elif not llm_result.has_minimum_data() and html_content:
+                logger.warning(
+                    "❌ Claude Haiku extraction failed even with provided HTML content"
+                )
+                if llm_result.has_minimum_data():
+                    result = llm_result
+                if result.method == "captcha-required":
+                    result.method = "llm-failed"
+            else:
+                # Combine: use LLM values where BS has "Not specified"
+                if (
+                    result.company == "Not specified"
+                    and llm_result.company != "Not specified"
+                ):
+                    result.company = llm_result.company
+                if (
+                    result.job_title == "Not specified"
+                    and llm_result.job_title != "Not specified"
+                ):
+                    result.job_title = llm_result.job_title
+                if (
+                    result.job_description == "Not specified"
+                    and llm_result.job_description != "Not specified"
+                ):
+                    result.job_description = llm_result.job_description
+                if not result.hiring_manager and llm_result.hiring_manager:
+                    result.hiring_manager = llm_result.hiring_manager
+                if llm_result.has_minimum_data():
+                    result.method = llm_result.method
+                    result.is_complete = result.has_minimum_data()
+                logger.info("Combined BeautifulSoup and Claude Haiku extraction results")
+        else:
+            logger.warning(f"Failed to fetch HTML for LLM fallback: {error}")
+
+    # Ensure ad_source is set
+    if not result.ad_source:
         result.ad_source = ad_source
-    else:
-        logger.error(f"Failed to fetch HTML: {error}")
-        # Return error response
-        return {
-            "success": False,
-            "url": url,
-            "message": f"Failed to fetch page content: {error or 'Unknown error'}",
-            "company": "Not specified",
-            "job_title": "Not specified",
-            "ad_source": ad_source,
-            "full_description": "Not specified",
-            "hiring_manager": "",
-            "extractionMethod": "error",
-        }
 
     # Prepare response
     response_data = result.to_dict()
@@ -1313,10 +1343,47 @@ async def analyze_job_url(
     has_valid_data = result.has_minimum_data()
     response_data["success"] = has_valid_data
 
-    # Add error message if extraction failed
-    if not has_valid_data:
+    # If HTML was provided, never return captcha_required (HTML is already verified)
+    # This is a safety check - we should have already handled this above, but ensure it here too
+    if html_content:
+        # Remove any captcha_required flag that might have been set
+        if "captcha_required" in response_data:
+            logger.warning(
+                "Removing captcha_required flag since HTML was provided from verified page"
+            )
+            del response_data["captcha_required"]
+        # If extraction failed, add a helpful message but don't set captcha_required
+        if not has_valid_data:
+            response_data["message"] = (
+                "Unable to extract job data from the provided HTML. The page may not contain a valid job posting, or the structure may have changed."
+            )
+    elif not has_valid_data:
         response_data["message"] = (
             "Unable to extract job data from the page. The page may not contain a valid job posting, or the structure may have changed."
         )
+
+    # Detailed logging for debugging
+    logger.info("=" * 80)
+    logger.info("FINAL EXTRACTION RESULT")
+    logger.info("=" * 80)
+    logger.info(f"URL: {url}")
+    logger.info(f"Method: {result.method}")
+    logger.info(f"Ad Source: {result.ad_source}")
+    logger.info(f"Success: {has_valid_data}")
+    logger.info(
+        f"Company: {result.company or 'None'} (valid: {bool(result.company and result.company != 'Not specified')})"
+    )
+    logger.info(
+        f"Job Title: {result.job_title or 'None'} (valid: {bool(result.job_title and result.job_title != 'Not specified')})"
+    )
+    logger.info(
+        f"Description: {'Present' if result.job_description else 'None'} (length: {len(result.job_description) if result.job_description else 0}, valid: {bool(result.job_description and result.job_description != 'Not specified')})"
+    )
+    logger.info(f"Hiring Manager: {result.hiring_manager or 'None'}")
+    logger.info(f"Has Minimum Data: {result.has_minimum_data()}")
+    logger.info(f"HTML Provided: {bool(html_content)}")
+    logger.info(f"Response Success: {response_data.get('success')}")
+    logger.info(f"Response Message: {response_data.get('message', 'None')}")
+    logger.info("=" * 80)
 
     return response_data

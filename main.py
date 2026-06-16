@@ -601,6 +601,7 @@ class JobURLAnalysisRequest(BaseModel):
     url: str  # URL to the job posting page
     user_id: Optional[str] = None
     user_email: Optional[str] = None
+    html_content: Optional[str] = None
 
 
 def post_to_llm(prompt: str, model: str = "gpt-5.5"):
@@ -2846,12 +2847,13 @@ async def analyze_job_url(request: JobURLAnalysisRequest):
     try:
         # Use hybrid analyzer if available, otherwise fall back to ChatGPT-only
         if JOB_URL_ANALYZER_AVAILABLE:
-            logger.info("Using hybrid BeautifulSoup + ChatGPT analyzer")
+            logger.info("Using hybrid BeautifulSoup + Claude Haiku analyzer")
             result = await analyze_job_url_hybrid(
                 url=request.url,
                 user_id=request.user_id,
                 user_email=request.user_email,
-                use_chatgpt_fallback=True,
+                use_llm_fallback=True,
+                html_content=request.html_content,
             )
             logger.info(
                 f"Job URL analysis completed successfully using {result.get('extractionMethod', 'unknown')}"
