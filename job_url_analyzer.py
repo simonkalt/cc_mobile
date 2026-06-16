@@ -185,9 +185,15 @@ def _is_plausible_person_name(name: str) -> bool:
 
 def _find_linkedin_section_heading(soup: BeautifulSoup, *labels: str):
     labels_lower = {label.lower() for label in labels}
+    partial_phrases = ("meet the hiring team", "meet the team")
     for tag in soup.find_all(["h2", "h3", "h4", "strong", "span", "p", "div"]):
         text = tag.get_text(strip=True)
-        if text and text.lower() in labels_lower:
+        if not text:
+            continue
+        lower = text.lower()
+        if lower in labels_lower:
+            return tag
+        if len(text) < 80 and any(phrase in lower for phrase in partial_phrases):
             return tag
     return None
 
@@ -262,11 +268,7 @@ def _extract_linkedin_company_from_about_section(soup: BeautifulSoup) -> Optiona
     )
 
 
-def _extract_linkedin_hiring_team_member(soup: BeautifulSoup) -> Optional[str]:
-    heading = _find_linkedin_section_heading(
-        soup, "Meet the hiring team", "Meet the team"
-    )
-    container = _linkedin_section_container(heading)
+def _extract_person_name_from_container(container) -> Optional[str]:
     if container is None:
         return None
 
@@ -274,14 +276,42 @@ def _extract_linkedin_hiring_team_member(soup: BeautifulSoup) -> Optional[str]:
         ".hirer-card__hirer-information",
         ".jobs-poster__name",
         '[data-testid="job-poster-name"]',
+        "h3.base-main-card__title",
         ".artdeco-entity-lockup__title",
         ".base-main-card__title",
-        'a[href*="/in/"] span',
     ]:
         for element in container.select(selector):
             name = _clean_optional_field(element.get_text(strip=True))
             if name and _is_plausible_person_name(name):
                 return name
+
+    for anchor in container.select('a[href*="/in/"]'):
+        sr = anchor.select_one(".sr-only")
+        if sr:
+            name = _clean_optional_field(sr.get_text(strip=True))
+            if name and _is_plausible_person_name(name):
+                return name
+
+    return None
+
+
+def _extract_linkedin_hiring_team_member(soup: BeautifulSoup) -> Optional[str]:
+    heading = _find_linkedin_section_heading(
+        soup, "Meet the hiring team", "Meet the team"
+    )
+    name = _extract_person_name_from_container(_linkedin_section_container(heading))
+    if name:
+        return name
+
+    for selector in (
+        ".message-the-recruiter",
+        '[data-testid="job-poster-card"]',
+        ".jobs-poster-card",
+        ".jobs-poster",
+    ):
+        name = _extract_person_name_from_container(soup.select_one(selector))
+        if name:
+            return name
 
     return None
 
@@ -1317,7 +1347,7 @@ Please extract the following information and return ONLY valid JSON (no markdown
 1. company: The company name from the job posting (for LinkedIn, prefer the "About the company" section; otherwise use the top card or page metadata)
 2. job_title: The complete job title/position name
 3. full_description: The full job description including responsibilities, requirements, and qualifications
-4. hiring_manager: The hiring team member name only if listed under "Meet the hiring team" (return empty string "" if not found)
+4. hiring_manager: The hiring team member name only if listed under "Meet the hiring team" or the job poster / recruiter card (return empty string "" if not found)
 
 Return format (JSON only):
 {{
