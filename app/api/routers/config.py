@@ -6,12 +6,18 @@ import json
 import os
 from typing import Optional
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict
 
 from app.core.config import settings
+from app.core.auth import get_current_user
+from app.models.user import UserResponse
 from app.utils.registration_notice import load_registration_data_use_notice
 from app.services.app_version_policy_service import build_layer_b_payload
+from app.services.client_settings_service import (
+    get_job_share_import_sites,
+    patch_job_share_import_sites,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +30,31 @@ class AppUpdatePolicyResponse(BaseModel):
     update_message: Optional[str] = None
     store_android_url: str
     store_ios_url: Optional[str] = None
+
+
+class JobShareImportSitesPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    linkedin: Optional[bool] = None
+    indeed: Optional[bool] = None
+    glassdoor: Optional[bool] = None
+    ziprecruiter: Optional[bool] = None
+    generic: Optional[bool] = None
+
+
+class JobShareImportSitesResponse(BaseModel):
+    jobShareImportSites: dict
+
+
+async def require_super_user(
+    current_user: UserResponse = Depends(get_current_user),
+) -> UserResponse:
+    if not current_user.super_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+    return current_user
 
 
 @router.get("/client-settings")
@@ -43,7 +74,24 @@ def get_client_settings():
         "privacyPolicyUrl": settings.PUBLIC_PRIVACY_POLICY_URL,
         "termsOfServiceUrl": settings.PUBLIC_TERMS_OF_SERVICE_URL,
         "registrationDataUseNotice": load_registration_data_use_notice(),
+        "jobShareImportSites": get_job_share_import_sites(),
     }
+
+
+@router.patch(
+    "/client-settings/job-share-sites",
+    response_model=JobShareImportSitesResponse,
+)
+def patch_job_share_import_sites_endpoint(
+    body: JobShareImportSitesPatch,
+    _super_user: UserResponse = Depends(require_super_user),
+):
+    """
+    Superuser only — merge job share import site toggles into global client settings.
+    """
+    partial = body.model_dump(exclude_none=True)
+    merged = patch_job_share_import_sites(partial)
+    return JobShareImportSitesResponse(jobShareImportSites=merged)
 
 
 @router.get("/app-update-policy", response_model=AppUpdatePolicyResponse)

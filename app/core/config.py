@@ -167,6 +167,11 @@ class Settings:
     APP_UPDATE_POLICY_CACHE_TTL_SECONDS: int = int(
         os.getenv("APP_UPDATE_POLICY_CACHE_TTL_SECONDS", "60")
     )
+
+    # Global client-settings document (job share import toggles, etc.)
+    CLIENT_SETTINGS_COLLECTION: str = (
+        (os.getenv("CLIENT_SETTINGS_COLLECTION") or "").strip() or "client_settings"
+    )
     
     # API Keys
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")

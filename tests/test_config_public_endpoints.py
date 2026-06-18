@@ -21,6 +21,7 @@ class TestConfigPublicEndpoints(unittest.TestCase):
         self.assertIn("privacyPolicyUrl", data)
         self.assertIn("termsOfServiceUrl", data)
         self.assertIn("registrationDataUseNotice", data)
+        self.assertIn("jobShareImportSites", data)
         policy = data["passwordPolicy"]
         self.assertEqual(policy["minLength"], 8)
         self.assertTrue(policy["requireUppercase"])
