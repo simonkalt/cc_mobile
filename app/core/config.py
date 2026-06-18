@@ -63,6 +63,41 @@ def _default_docx_service_base_url(debug_enabled: bool) -> str:
     return "http://192.168.0.8:5000"
 
 
+def _verification_email_fail_open_default() -> bool:
+    """
+    When true, verification codes are stored even if Zoho outbound email fails.
+
+    Explicit VERIFICATION_EMAIL_FAIL_OPEN=true|false always wins.
+    When unset, enable on non-production deploys (UAT/staging/local) so OAuth
+    registration can be tested without blocking on email delivery.
+    """
+    explicit = _strip_env_value(os.getenv("VERIFICATION_EMAIL_FAIL_OPEN") or "")
+    if explicit.lower() == "true":
+        return True
+    if explicit.lower() == "false":
+        return False
+
+    deploy_env = (
+        os.getenv("DEPLOYMENT_ENV")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("APP_ENV")
+        or os.getenv("EXPO_PUBLIC_BUILD_TYPE")
+        or ""
+    ).strip().lower()
+    if deploy_env in {"uat", "staging", "stage", "preview", "development", "dev", "local"}:
+        return True
+
+    render_url = (
+        os.getenv("RENDER_EXTERNAL_URL")
+        or os.getenv("RENDER_SERVICE_NAME")
+        or ""
+    ).lower()
+    if "uat" in render_url:
+        return True
+
+    return os.getenv("DEBUG", "False").lower() == "true"
+
+
 class Settings:
     """Application settings loaded from environment variables"""
     
@@ -71,9 +106,7 @@ class Settings:
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     # When true, store verification codes even if outbound email fails (UAT / local testing).
-    VERIFICATION_EMAIL_FAIL_OPEN: bool = (
-        os.getenv("VERIFICATION_EMAIL_FAIL_OPEN", "False").lower() == "true"
-    )
+    VERIFICATION_EMAIL_FAIL_OPEN: bool = _verification_email_fail_open_default()
 
     # Google Analytics (GA4) — injected into website/index.html when serving /
     GOOGLE_ANALYTICS_TAG: Optional[str] = os.getenv("GOOGLE_ANALYTICS_TAG")

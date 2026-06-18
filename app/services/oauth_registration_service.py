@@ -119,7 +119,7 @@ def send_oauth_registration_verification_code(
         _verification_email_delivery_fail_open,
     )
 
-    send_and_store_verification_code_email(
+    _, email_delivered = send_and_store_verification_code_email(
         user_id=user_id,
         email=email,
         purpose=OAUTH_REGISTRATION_PURPOSE,
@@ -127,18 +127,20 @@ def send_oauth_registration_verification_code(
         delivery_method=delivery_method,
     )
     logger.info(
-        "OAuth registration verification sent user_id=%s method=%s",
+        "OAuth registration verification sent user_id=%s method=%s email_delivered=%s",
         user_id,
         delivery_method,
+        email_delivered,
     )
     result = {
         "success": True,
         "message": "Verification code sent successfully",
+        "emailDelivered": email_delivered,
     }
-    if delivery_method == "email" and _verification_email_delivery_fail_open():
+    if delivery_method == "email" and not email_delivered:
         result["emailDeliveryWarning"] = (
-            "Email delivery may be unavailable in this environment. "
-            "If you do not receive a message, check server logs or try resend."
+            "Email delivery is unavailable in this environment. "
+            "Your verification code was saved — check server logs or tap Resend."
         )
     return result
 

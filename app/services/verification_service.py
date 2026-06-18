@@ -258,20 +258,13 @@ def send_and_store_verification_code_email(
     purpose: str,
     registration_data: Optional[dict] = None,
     delivery_method: str = "email"
-) -> str:
+) -> tuple[str, bool]:
     """
     Generate, send, and store verification code via email
     Uses Redis for registration flow, MongoDB for existing users
     
-    Args:
-        user_id: User ID (None for registration flow)
-        email: Email address to send code to
-        purpose: Purpose of verification
-        registration_data: Registration data dictionary (for finish_registration)
-        delivery_method: "email" or "sms"
-        
     Returns:
-        Generated verification code
+        (code, email_delivered) — email_delivered is False when fail-open stored without send
     """
     # Generate code - use real random code for email (SMTP is configured)
     # SMS still uses hardcoded "000000" until Twilio is approved
@@ -282,6 +275,8 @@ def send_and_store_verification_code_email(
         code = generate_verification_code()  # Still "000000" for SMS
         logger.info(f"Using SMS verification code: {code}")
     
+    email_delivered = True
+
     # For registration flow, use Redis
     if purpose == "finish_registration" and registration_data:
         if settings.ENFORCE_STRONG_PASSWORDS:
@@ -340,6 +335,7 @@ def send_and_store_verification_code_email(
                 user_id,
                 purpose,
             )
+        email_delivered = email_sent
 
         # Store code in MongoDB
         store_verification_code(user_id, code, purpose, email=email)
@@ -371,15 +367,22 @@ def send_and_store_verification_code_email(
         else:
             # Send email for registration
             logger.info(f"Sending email verification code to {email} for registration (code: {code})")
-            if not send_verification_code_email(email, code, purpose):
+            email_delivered = send_verification_code_email(email, code, purpose)
+            if not email_delivered and not _verification_email_delivery_fail_open():
                 logger.error(f"Failed to send email verification code to {email}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to send verification code"
+                    detail="Failed to send verification code",
                 )
-            logger.info(f"✓ Email verification code sent successfully to {email}")
+            if not email_delivered:
+                logger.warning(
+                    "Email delivery failed for registration %s; continuing (fail-open)",
+                    email,
+                )
+            else:
+                logger.info(f"✓ Email verification code sent successfully to {email}")
     
-    return code
+    return code, email_delivered
 
 
 def verify_code_from_redis(email: str, code: str, purpose: str) -> Optional[dict]:

@@ -21,7 +21,7 @@ class TestOAuthRegistrationSendCode(unittest.TestCase):
             "email": "test@example.com",
             "oauthRegistrationPending": True,
         }
-        mock_send.return_value = "123456"
+        mock_send.return_value = ("123456", False)
 
         result = send_oauth_registration_verification_code(
             "693326c07fcdaab8e81cdd2f",
@@ -29,7 +29,8 @@ class TestOAuthRegistrationSendCode(unittest.TestCase):
         )
 
         self.assertTrue(result["success"])
-        mock_send.assert_called_once()
+        self.assertFalse(result["emailDelivered"])
+        self.assertIn("emailDeliveryWarning", result)
 
 
 if __name__ == "__main__":
