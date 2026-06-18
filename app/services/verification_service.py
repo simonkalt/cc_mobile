@@ -40,6 +40,15 @@ def _verification_email_delivery_fail_open() -> bool:
     return bool(settings.VERIFICATION_EMAIL_FAIL_OPEN)
 
 
+def _as_utc_aware(value: Optional[datetime]) -> Optional[datetime]:
+    """MongoDB/PyMongo often returns naive UTC datetimes — normalize before compare."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 # forgot_password send-code: identical response when the account is missing (anti-enumeration)
 ANTI_ENUM_SEND_CODE_MESSAGE = (
     "If an account exists for this email or phone number, a verification code has been sent."
@@ -162,7 +171,7 @@ def verify_code(user_id: str, code: str, purpose: str) -> bool:
             return False
         
         # Check if expired
-        expires_at = verification_data.get("expires_at")
+        expires_at = _as_utc_aware(verification_data.get("expires_at"))
         if expires_at and datetime.now(UTC) > expires_at:
             logger.warning(f"Verification code expired for user {user_id}")
             return False
