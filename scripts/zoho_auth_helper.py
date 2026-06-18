@@ -2,7 +2,9 @@
 """
 Zoho OAuth helper for local development.
 
-Uses .env vars to:
+Loads Zoho credentials from repo-root `.env` then `.secrets` (same as the API).
+
+Uses those vars to:
 1) print an authorization URL
 2) exchange an authorization code for refresh/access tokens
 3) test refresh token flow
@@ -15,14 +17,72 @@ import argparse
 import json
 import os
 import sys
-from urllib.parse import urlencode
+from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
-from dotenv import load_dotenv
+
+_SCRIPT_ROOT = Path(__file__).resolve().parent.parent
+if str(_SCRIPT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_ROOT))
+
+from app.core.env_loader import load_project_env, resolve_secrets_path
 
 
-ACCOUNTS_BASE = "https://accounts.zoho.com"
+DEFAULT_ACCOUNTS_BASE = "https://accounts.zoho.com"
 MAIL_BASE = "https://mail.zoho.com"
+
+
+def _accounts_base() -> str:
+    return (
+        os.getenv("ZOHO_ACCOUNTS_BASE")
+        or os.getenv("ZOHO_ACCOUNTS_URL")
+        or DEFAULT_ACCOUNTS_BASE
+    ).strip().rstrip("/")
+
+
+def _parse_authorization_code(raw: str) -> str:
+    """Accept a bare code or a full callback URL (?code=...)."""
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if "code=" not in value:
+        return value
+    if value.startswith("http://") or value.startswith("https://"):
+        query = parse_qs(urlparse(value).query)
+        return (query.get("code") or [""])[0].strip()
+    if value.startswith("?"):
+        query = parse_qs(value.lstrip("?"))
+        return (query.get("code") or [""])[0].strip()
+    if "code=" in value:
+        fragment = value.split("code=", 1)[1]
+        return fragment.split("&", 1)[0].strip()
+    return value
+
+
+def _explain_token_error(body: dict, *, redirect_uri: str) -> None:
+    err = (body or {}).get("error")
+    if not err:
+        return
+    print(f"Zoho OAuth error: {err}")
+    if err == "invalid_code":
+        print(
+            "Common causes:\n"
+            "  • Code expired (~60 seconds) — get a fresh URL, authorize again, exchange immediately\n"
+            "  • Code already used — authorization codes are single-use\n"
+            "  • redirect_uri mismatch — must exactly match the authorize URL and Zoho console\n"
+            f"    (this run used: {redirect_uri})\n"
+            "  • Wrong Zoho data center — set ZOHO_ACCOUNTS_BASE if you use .eu / .in / .com.au\n"
+            "  • client_id / client_secret do not match the app that issued the code"
+        )
+    elif err == "invalid_client":
+        print("Check ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET in .env / .secrets.")
+    elif err == "invalid_redirect_uri":
+        print(
+            "Register this exact redirect URI in the Zoho API console and use the same "
+            f"value in --redirect-uri / ZOHO_REDIRECT_URI:\n  {redirect_uri}"
+        )
+    print("")
 
 
 def _require(name: str) -> str:
@@ -32,7 +92,7 @@ def _require(name: str) -> str:
     return value
 
 
-def _auth_url(client_id: str, redirect_uri: str, scopes: str) -> str:
+def _auth_url(client_id: str, redirect_uri: str, scopes: str, accounts_base: str) -> str:
     query = urlencode(
         {
             "scope": scopes,
@@ -43,14 +103,18 @@ def _auth_url(client_id: str, redirect_uri: str, scopes: str) -> str:
             "redirect_uri": redirect_uri,
         }
     )
-    return f"{ACCOUNTS_BASE}/oauth/v2/auth?{query}"
+    return f"{accounts_base}/oauth/v2/auth?{query}"
 
 
 def _exchange_code(
-    client_id: str, client_secret: str, redirect_uri: str, code: str
+    client_id: str,
+    client_secret: str,
+    redirect_uri: str,
+    code: str,
+    accounts_base: str,
 ) -> dict:
     resp = requests.post(
-        f"{ACCOUNTS_BASE}/oauth/v2/token",
+        f"{accounts_base}/oauth/v2/token",
         data={
             "grant_type": "authorization_code",
             "client_id": client_id,
@@ -60,12 +124,19 @@ def _exchange_code(
         },
         timeout=20,
     )
-    return {"status": resp.status_code, "body": resp.json()}
+    body: dict
+    try:
+        body = resp.json()
+    except Exception:
+        body = {"raw": resp.text}
+    return {"status": resp.status_code, "body": body}
 
 
-def _refresh_token(client_id: str, client_secret: str, refresh_token: str) -> dict:
+def _refresh_token(
+    client_id: str, client_secret: str, refresh_token: str, accounts_base: str
+) -> dict:
     resp = requests.post(
-        f"{ACCOUNTS_BASE}/oauth/v2/token",
+        f"{accounts_base}/oauth/v2/token",
         data={
             "grant_type": "refresh_token",
             "client_id": client_id,
@@ -74,7 +145,12 @@ def _refresh_token(client_id: str, client_secret: str, refresh_token: str) -> di
         },
         timeout=20,
     )
-    return {"status": resp.status_code, "body": resp.json()}
+    body: dict
+    try:
+        body = resp.json()
+    except Exception:
+        body = {"raw": resp.text}
+    return {"status": resp.status_code, "body": body}
 
 
 def _list_accounts(access_token: str) -> dict:
@@ -92,7 +168,17 @@ def _list_accounts(access_token: str) -> dict:
 
 
 def main() -> None:
-    load_dotenv()
+    load_project_env(_SCRIPT_ROOT)
+    secrets_path = resolve_secrets_path(_SCRIPT_ROOT)
+    env_path = _SCRIPT_ROOT / ".env"
+    loaded = []
+    if env_path.is_file():
+        loaded.append(str(env_path))
+    if secrets_path:
+        loaded.append(str(secrets_path))
+    if loaded:
+        print(f"Loaded env from: {', '.join(loaded)}")
+        print("")
 
     parser = argparse.ArgumentParser(description="Zoho OAuth helper")
     parser.add_argument(
@@ -108,7 +194,7 @@ def main() -> None:
     parser.add_argument(
         "--code",
         default="",
-        help="Authorization code returned by Zoho callback",
+        help="Authorization code, or full callback URL containing ?code=",
     )
     parser.add_argument(
         "--access-token",
@@ -123,6 +209,8 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    accounts_base = _accounts_base()
+    redirect_uri = args.redirect_uri.strip()
 
     try:
         client_id = _require("ZOHO_CLIENT_ID")
@@ -131,27 +219,40 @@ def main() -> None:
         print(str(e))
         sys.exit(1)
 
+    print(f"ZOHO accounts base: {accounts_base}")
+    print(f"redirect_uri: {redirect_uri}")
+    print(f"client_id prefix: {client_id[:12]}...")
+    print("")
+
     if args.mode in {"url", "all"}:
-        print("Authorize URL:")
-        print(_auth_url(client_id, args.redirect_uri, args.scopes))
+        print("Authorize URL (open immediately; exchange the code within ~60 seconds):")
+        print(_auth_url(client_id, redirect_uri, args.scopes, accounts_base))
         print("")
 
     if args.mode in {"exchange", "all"}:
-        code = args.code.strip()
+        code = _parse_authorization_code(args.code)
         if not code:
-            print("--code is required for exchange mode.")
+            print("--code is required for exchange mode (bare code or callback URL).")
             if args.mode == "exchange":
                 sys.exit(1)
         else:
-            result = _exchange_code(client_id, client_secret, args.redirect_uri, code)
+            print(f"Exchanging authorization code (length {len(code)})...")
+            result = _exchange_code(
+                client_id, client_secret, redirect_uri, code, accounts_base
+            )
             print("Code exchange result:")
             print(json.dumps(result, indent=2))
             print("")
-            refresh = (result.get("body") or {}).get("refresh_token")
+            body = result.get("body") or {}
+            if body.get("error"):
+                _explain_token_error(body, redirect_uri=redirect_uri)
+            refresh = body.get("refresh_token")
             if refresh:
-                print("Copy this into .env as ZOHO_REFRESH_TOKEN:")
+                print("Copy this into .env or .secrets as ZOHO_REFRESH_TOKEN:")
                 print(refresh)
                 print("")
+            elif args.mode == "exchange":
+                sys.exit(1)
 
     if args.mode in {"refresh", "all"}:
         refresh_token = (os.getenv("ZOHO_REFRESH_TOKEN") or "").strip()
@@ -160,9 +261,14 @@ def main() -> None:
             if args.mode == "refresh":
                 sys.exit(1)
         else:
-            result = _refresh_token(client_id, client_secret, refresh_token)
+            result = _refresh_token(
+                client_id, client_secret, refresh_token, accounts_base
+            )
             print("Refresh-token result:")
             print(json.dumps(result, indent=2))
+            body = result.get("body") or {}
+            if body.get("error"):
+                _explain_token_error(body, redirect_uri=redirect_uri)
             print("")
 
     if args.mode in {"accounts", "all"}:
@@ -170,7 +276,9 @@ def main() -> None:
         if not token:
             refresh_token = (os.getenv("ZOHO_REFRESH_TOKEN") or "").strip()
             if refresh_token:
-                refreshed = _refresh_token(client_id, client_secret, refresh_token)
+                refreshed = _refresh_token(
+                    client_id, client_secret, refresh_token, accounts_base
+                )
                 token = ((refreshed.get("body") or {}).get("access_token") or "").strip()
                 print("Using access token from refresh result.")
             else:
