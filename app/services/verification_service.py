@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 # Verification code expiration time (10 minutes)
 VERIFICATION_CODE_EXPIRY_MINUTES = 10
 
+
+def _verification_email_delivery_fail_open() -> bool:
+    """When true, store codes even if outbound email fails (UAT / local testing)."""
+    return bool(settings.VERIFICATION_EMAIL_FAIL_OPEN)
+
+
 # forgot_password send-code: identical response when the account is missing (anti-enumeration)
 ANTI_ENUM_SEND_CODE_MESSAGE = (
     "If an account exists for this email or phone number, a verification code has been sent."
@@ -313,13 +319,19 @@ def send_and_store_verification_code_email(
             logger.warning(f"Failed to store verification session in Redis for {email}")
     elif user_id:
         # For existing users, use MongoDB
-        # Send email (stub - just logs for now)
-        if not send_verification_code_email(email, code, purpose):
+        email_sent = send_verification_code_email(email, code, purpose)
+        if not email_sent and not _verification_email_delivery_fail_open():
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send verification code"
+                detail="Failed to send verification code",
             )
-        
+        if not email_sent:
+            logger.warning(
+                "Email delivery failed for user %s purpose=%s; storing code anyway (fail-open)",
+                user_id,
+                purpose,
+            )
+
         # Store code in MongoDB
         store_verification_code(user_id, code, purpose, email=email)
     else:
