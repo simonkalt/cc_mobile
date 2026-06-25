@@ -104,6 +104,9 @@ document.addEventListener("alpine:init", () => {
     },
 
     switchSection(section) {
+      if (section !== "articles") {
+        Alpine.store("articleEditor").close();
+      }
       this.section = section;
       if (section === "users") {
         Alpine.store("users").load();
