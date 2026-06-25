@@ -43,7 +43,44 @@ async function api(path, opts = {}) {
     throw { status: resp.status, detail: body.detail || "Request failed" };
   }
 
+  if (resp.status === 204) return null;
   return resp.json();
+}
+
+async function apiArticles(path, opts = {}) {
+  const url = window.location.origin + "/api/admin/articles" + path;
+  const headers = { ...opts.headers };
+  const token = getToken();
+  if (token) headers["Authorization"] = "Bearer " + token;
+  if (!(opts.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const resp = await fetch(url, { ...opts, headers });
+
+  if (resp.status === 401 || resp.status === 403) {
+    const body = await resp.json().catch(() => ({}));
+    clearToken();
+    window.dispatchEvent(new CustomEvent("admin:logout"));
+    throw { status: resp.status, detail: body.detail || "Unauthorized" };
+  }
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw { status: resp.status, detail: body.detail || "Request failed" };
+  }
+
+  if (resp.status === 204) return null;
+  return resp.json();
+}
+
+function slugifyTitle(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-");
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +91,7 @@ document.addEventListener("alpine:init", () => {
   /* ---- Auth store ---- */
   Alpine.store("auth", {
     view: getToken() ? "grid" : "login", // login | twofa | grid
+    section: "users", // users | articles
     email: "",
     password: "",
     deliveryMethod: "sms",
@@ -63,6 +101,15 @@ document.addEventListener("alpine:init", () => {
 
     get isLoggedIn() {
       return !!getToken();
+    },
+
+    switchSection(section) {
+      this.section = section;
+      if (section === "users") {
+        Alpine.store("users").load();
+      } else if (section === "articles") {
+        Alpine.store("articles").load();
+      }
     },
 
     async login() {
@@ -96,6 +143,7 @@ document.addEventListener("alpine:init", () => {
         });
         setToken(data.access_token);
         this.view = "grid";
+        this.section = "users";
         Alpine.store("users").load();
       } catch (e) {
         this.error = e.detail || "Verification failed";
@@ -124,6 +172,7 @@ document.addEventListener("alpine:init", () => {
     logout() {
       clearToken();
       this.view = "login";
+      this.section = "users";
       this.email = "";
       this.password = "";
       this.userId = null;
@@ -214,6 +263,233 @@ document.addEventListener("alpine:init", () => {
     selectRow(id) {
       this.selectedId = id;
       Alpine.store("detail").open(id);
+    },
+  });
+
+  /* ---- Articles store ---- */
+  Alpine.store("articles", {
+    items: [],
+    total: 0,
+    page: 1,
+    perPage: 25,
+    pages: 1,
+    loading: false,
+    statusFilter: "",
+
+    get rangeText() {
+      if (this.total === 0) return "No records";
+      const start = (this.page - 1) * this.perPage + 1;
+      const end = Math.min(this.page * this.perPage, this.total);
+      return `${start}\u2013${end} of ${this.total}`;
+    },
+
+    async load() {
+      this.loading = true;
+      try {
+        const params = new URLSearchParams({
+          page: this.page,
+          per_page: this.perPage,
+          sort: "publishedAt",
+          order: "desc",
+        });
+        if (this.statusFilter) params.set("status", this.statusFilter);
+        const data = await apiArticles("?" + params.toString());
+        this.items = data.articles;
+        this.total = data.total;
+        this.pages = data.pages;
+        this.page = data.page;
+      } catch (e) {
+        console.error("Articles load failed:", e.detail || e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    applyFilter() {
+      this.page = 1;
+      this.load();
+    },
+
+    prevPage() {
+      if (this.page > 1) {
+        this.page--;
+        this.load();
+      }
+    },
+
+    nextPage() {
+      if (this.page < this.pages) {
+        this.page++;
+        this.load();
+      }
+    },
+
+    async remove(id) {
+      if (!confirm("Delete this article and its HTML file?")) return;
+      try {
+        await apiArticles("/" + id, { method: "DELETE" });
+        this.load();
+      } catch (e) {
+        alert(e.detail || "Delete failed");
+      }
+    },
+  });
+
+  /* ---- Article editor store ---- */
+  Alpine.store("articleEditor", {
+    visible: false,
+    saving: false,
+    isEdit: false,
+    articleId: null,
+    slugTouched: false,
+    error: "",
+    form: {
+      title: "",
+      slug: "",
+      author: "sAImon Software",
+      summary: "",
+      status: "draft",
+      htmlBody: "",
+      tagsText: "",
+      publishedAtLocal: "",
+      sourceType: "html",
+    },
+
+    _blankForm() {
+      return {
+        title: "",
+        slug: "",
+        author: "sAImon Software",
+        summary: "",
+        status: "draft",
+        htmlBody: "",
+        tagsText: "",
+        publishedAtLocal: "",
+        sourceType: "html",
+      };
+    },
+
+    openCreate() {
+      this.isEdit = false;
+      this.articleId = null;
+      this.slugTouched = false;
+      this.error = "";
+      this.form = this._blankForm();
+      this.visible = true;
+    },
+
+    async openEdit(id) {
+      this.isEdit = true;
+      this.articleId = id;
+      this.slugTouched = true;
+      this.error = "";
+      this.visible = true;
+      try {
+        const data = await apiArticles("/" + id);
+        this.form = {
+          title: data.title,
+          slug: data.slug,
+          author: data.author,
+          summary: data.summary,
+          status: data.status,
+          htmlBody: data.htmlBody || "",
+          tagsText: (data.tags || []).join(", "),
+          publishedAtLocal: data.publishedAt
+            ? new Date(data.publishedAt).toISOString().slice(0, 16)
+            : "",
+          sourceType: data.sourceType || "html",
+        };
+      } catch (e) {
+        this.error = e.detail || "Failed to load article";
+      }
+    },
+
+    close() {
+      this.visible = false;
+      this.error = "";
+    },
+
+    syncSlugFromTitle() {
+      if (this.slugTouched) return;
+      this.form.slug = slugifyTitle(this.form.title);
+    },
+
+    _tagsArray() {
+      return this.form.tagsText
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+    },
+
+    _payload() {
+      const payload = {
+        title: this.form.title,
+        slug: this.form.slug,
+        author: this.form.author,
+        summary: this.form.summary,
+        status: this.form.status,
+        htmlBody: this.form.htmlBody,
+        tags: this._tagsArray(),
+        sourceType: this.form.sourceType,
+      };
+      if (this.form.publishedAtLocal) {
+        payload.publishedAt = new Date(this.form.publishedAtLocal).toISOString();
+      }
+      return payload;
+    },
+
+    async save() {
+      this.error = "";
+      this.saving = true;
+      try {
+        if (this.isEdit) {
+          await apiArticles("/" + this.articleId, {
+            method: "PUT",
+            body: JSON.stringify(this._payload()),
+          });
+        } else {
+          await apiArticles("", {
+            method: "POST",
+            body: JSON.stringify(this._payload()),
+          });
+        }
+        this.visible = false;
+        Alpine.store("articles").load();
+      } catch (e) {
+        this.error = e.detail || "Save failed";
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    async uploadHtml(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = "";
+      if (!file) return;
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const data = await apiArticles("/upload-html", { method: "POST", body: fd });
+        this.form.htmlBody = data.htmlBody;
+        this.form.sourceType = data.sourceType;
+      } catch (e) {
+        this.error = e.detail || "HTML upload failed";
+      }
+    },
+
+    async uploadPdf(event) {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = "";
+      if (!file) return;
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const data = await apiArticles("/upload-pdf", { method: "POST", body: fd });
+        this.form.htmlBody = data.htmlBody;
+        this.form.sourceType = data.sourceType;
+      } catch (e) {
+        this.error = e.detail || "PDF upload failed";
+      }
     },
   });
 

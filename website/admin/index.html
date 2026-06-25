@@ -99,14 +99,25 @@
 
       <!-- Header -->
       <div class="admin-header">
-        <h1>User Management</h1>
+        <div>
+          <h1>Admin Portal</h1>
+          <div class="admin-nav-tabs">
+            <button type="button" class="admin-tab"
+                    :class="{ active: $store.auth.section === 'users' }"
+                    @click="$store.auth.switchSection('users')">Users</button>
+            <button type="button" class="admin-tab"
+                    :class="{ active: $store.auth.section === 'articles' }"
+                    @click="$store.auth.switchSection('articles')">Articles</button>
+          </div>
+        </div>
         <div class="admin-header-actions">
           <span class="admin-user-badge" x-text="$store.auth.email"></span>
           <button class="btn btn-ghost btn-sm" @click="$store.auth.logout()">Sign Out</button>
         </div>
       </div>
 
-      <!-- Table card -->
+      <!-- Users section -->
+      <template x-if="$store.auth.section === 'users'">
       <div class="card card-full">
 
         <!-- Toolbar: search + filter -->
@@ -527,6 +538,149 @@
             </div>
           </div>
         </div>
+      </template>
+
+      </template><!-- /users section -->
+
+      <!-- Articles section -->
+      <template x-if="$store.auth.section === 'articles'">
+        <div class="card card-full">
+          <div class="toolbar">
+            <select x-model="$store.articles.statusFilter" @change="$store.articles.applyFilter()">
+              <option value="">All statuses</option>
+              <option value="published">Published</option>
+              <option value="draft">Draft</option>
+              <option value="archived">Archived</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" @click="$store.articles.load()"
+                    :disabled="$store.articles.loading">Refresh</button>
+            <button class="btn btn-primary btn-sm" @click="$store.articleEditor.openCreate()">New Article</button>
+          </div>
+
+          <div x-show="$store.articles.loading" style="text-align:center; padding:30px">
+            <span class="spinner" style="width:28px; height:28px"></span>
+          </div>
+
+          <div class="table-wrapper" x-show="!$store.articles.loading">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Author</th>
+                  <th>Status</th>
+                  <th>Published</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="a in $store.articles.items" :key="a.id">
+                  <tr>
+                    <td x-text="a.title"></td>
+                    <td x-text="a.author"></td>
+                    <td><span class="badge" x-text="a.status"></span></td>
+                    <td x-text="formatDate(a.publishedAt)"></td>
+                    <td class="actions-cell">
+                      <button class="btn btn-secondary btn-sm" @click="$store.articleEditor.openEdit(a.id)">Edit</button>
+                      <template x-if="a.status === 'published'">
+                        <a class="btn btn-ghost btn-sm" :href="'/news/' + a.slug" target="_blank" rel="noopener">View</a>
+                      </template>
+                      <button class="btn btn-ghost btn-sm" @click="$store.articles.remove(a.id)">Delete</button>
+                    </td>
+                  </tr>
+                </template>
+                <template x-if="$store.articles.items.length === 0 && !$store.articles.loading">
+                  <tr><td colspan="5" style="text-align:center; padding:40px; color:#999">No articles found</td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="paging" x-show="$store.articles.total > 0">
+            <button @click="$store.articles.prevPage()" :disabled="$store.articles.page <= 1">&laquo; Prev</button>
+            <span x-text="$store.articles.rangeText"></span>
+            <button @click="$store.articles.nextPage()" :disabled="$store.articles.page >= $store.articles.pages">Next &raquo;</button>
+          </div>
+        </div>
+
+        <template x-if="$store.articleEditor.visible">
+          <div class="modal-backdrop" @click.self="$store.articleEditor.close()">
+            <div class="modal modal-wide">
+              <div class="modal-header">
+                <h3 x-text="$store.articleEditor.isEdit ? 'Edit Article' : 'New Article'"></h3>
+                <button class="modal-close" @click="$store.articleEditor.close()">&times;</button>
+              </div>
+              <div class="modal-body">
+                <template x-if="$store.articleEditor.error">
+                  <div class="alert alert-error" x-text="$store.articleEditor.error"></div>
+                </template>
+                <div class="form-grid-two">
+                  <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" x-model="$store.articleEditor.form.title"
+                           @input="$store.articleEditor.syncSlugFromTitle()" />
+                  </div>
+                  <div class="form-group">
+                    <label>Slug</label>
+                    <input type="text" x-model="$store.articleEditor.form.slug"
+                           @input="$store.articleEditor.slugTouched = true" />
+                  </div>
+                  <div class="form-group">
+                    <label>Author</label>
+                    <input type="text" x-model="$store.articleEditor.form.author" />
+                  </div>
+                  <div class="form-group">
+                    <label>Status</label>
+                    <select x-model="$store.articleEditor.form.status">
+                      <option value="draft">Draft</option>
+                      <option value="published">Published</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </div>
+                  <div class="form-group form-group-full">
+                    <label>Summary</label>
+                    <textarea rows="3" x-model="$store.articleEditor.form.summary"></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" x-model="$store.articleEditor.form.tagsText" />
+                  </div>
+                  <div class="form-group">
+                    <label>Published date</label>
+                    <input type="datetime-local" x-model="$store.articleEditor.form.publishedAtLocal" />
+                  </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 16px;">
+                  <label>HTML body</label>
+                  <textarea rows="12" x-model="$store.articleEditor.form.htmlBody"
+                            placeholder="Paste HTML content or upload a file below"></textarea>
+                </div>
+
+                <div class="upload-row">
+                  <label class="btn btn-secondary btn-sm">
+                    Upload HTML
+                    <input type="file" accept=".html,.htm" hidden
+                           @change="$store.articleEditor.uploadHtml($event)" />
+                  </label>
+                  <label class="btn btn-secondary btn-sm">
+                    Upload PDF
+                    <input type="file" accept=".pdf,application/pdf" hidden
+                           @change="$store.articleEditor.uploadPdf($event)" />
+                  </label>
+                </div>
+
+                <div class="modal-actions">
+                  <button class="btn btn-secondary btn-sm" @click="$store.articleEditor.close()">Cancel</button>
+                  <button class="btn btn-primary btn-sm" @click="$store.articleEditor.save()"
+                          :disabled="$store.articleEditor.saving">
+                    <template x-if="$store.articleEditor.saving"><span class="spinner"></span></template>
+                    <span x-show="!$store.articleEditor.saving">Save</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
       </template>
 
     </div><!-- /admin-container -->

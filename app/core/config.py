@@ -341,6 +341,12 @@ class Settings:
         "MONGODB_SUBSCRIPTION_PRODUCT_CATALOG_COLLECTION",
         "subscription_product_catalog",
     )
+    MONGODB_ARTICLES_COLLECTION: str = os.getenv("MONGODB_ARTICLES_COLLECTION", "articles")
+    ARTICLES_DIR: str = (os.getenv("ARTICLES_DIR") or "").strip()
+    PUBLIC_WEBSITE_URL: str = (
+        (os.getenv("PUBLIC_WEBSITE_URL") or "").strip() or "https://www.saimonsoft.com"
+    )
+    NEWS_RSS_MAX_ITEMS: int = _env_int("NEWS_RSS_MAX_ITEMS", "50")
 
     # JWT Configuration
     JWT_ENABLED: bool = os.getenv("JWT_ENABLED", "true").lower() == "true"

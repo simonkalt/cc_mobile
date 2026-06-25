@@ -268,14 +268,17 @@ try:
 
     website_path = None
     documents_path = None
+    articles_path = None
 
     # Check current working directory first
     if os.path.exists(os.path.join(cwd, "website")):
         website_path = os.path.join(cwd, "website")
         documents_path = os.path.join(cwd, "documents")
+        articles_path = os.path.join(cwd, "articles")
     elif os.path.exists(os.path.join(file_dir, "website")):
         website_path = os.path.join(file_dir, "website")
         documents_path = os.path.join(file_dir, "documents")
+        articles_path = os.path.join(file_dir, "articles")
 
     if website_path and os.path.exists(website_path):
         app.mount("/website", StaticFiles(directory=website_path, html=True), name="website")
@@ -293,6 +296,15 @@ try:
         print(f"✓ Successfully mounted documents static files from: {documents_path}")
     else:
         print(f"✗ Documents directory not found. Checked: {cwd}/documents, {file_dir}/documents")
+
+    if articles_path and os.path.exists(articles_path):
+        app.mount("/articles", StaticFiles(directory=articles_path), name="articles")
+        print(f"✓ Successfully mounted articles static files from: {articles_path}")
+    else:
+        articles_path = articles_path or os.path.join(cwd, "articles")
+        os.makedirs(articles_path, exist_ok=True)
+        app.mount("/articles", StaticFiles(directory=articles_path), name="articles")
+        print(f"✓ Created and mounted articles directory at: {articles_path}")
 except Exception as e:
     print(f"Error mounting static files: {e}")
 
@@ -396,6 +408,12 @@ try:
 
     from app.api.routers import admin
     app.include_router(admin.router)
+
+    from app.api.routers import admin_articles
+    app.include_router(admin_articles.router)
+
+    from app.api.routers import articles as articles_public
+    app.include_router(articles_public.router)
 except ImportError as e:
     logger.warning(f"Some routers could not be imported: {e}")
 except Exception as e:
@@ -1058,6 +1076,34 @@ def support_page():
     if os.path.exists(path):
         return FileResponse(path, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Support page not found"})
+
+
+@app.get("/news", include_in_schema=False)
+@app.get("/news/", include_in_schema=False)
+def news_index_page():
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "news", "index.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "News page not found"})
+
+
+@app.get("/news/{slug}", include_in_schema=False)
+def news_article_page(slug: str):
+    from app.services.article_service import get_article_by_slug, get_article_html_absolute_path
+
+    if slug == "rss.xml":
+        return JSONResponse(status_code=404, content={"detail": "Article not found"})
+
+    try:
+        article = get_article_by_slug(slug, published_only=True)
+    except Exception:
+        return JSONResponse(status_code=404, content={"detail": "Article not found"})
+
+    abs_path = get_article_html_absolute_path(article.htmlPath)
+    if os.path.exists(abs_path):
+        return FileResponse(abs_path, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Article file not found"})
 
 
 @app.get("/subscribed")

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>News | sAImon Software</title>
+    <meta name="description" content="Product news and updates from sAImon Software." />
+    <link rel="icon" href="/website/images/1.png" type="image/png" />
+    <link rel="alternate" type="application/rss+xml" title="sAImon Software News" href="/news/rss.xml" />
+    <link rel="stylesheet" href="/website/styles.css" />
+    <link rel="stylesheet" href="/website/news/news.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1 class="ai-logo-container">
+          s<img src="/website/images/ai-hero.gif" alt="AI" class="ai-logo" />mon
+          Software
+        </h1>
+        <p class="tagline">AI-Powered Solutions for Your Career</p>
+      </header>
+
+      <div class="main-content">
+        <div class="news-hero">
+          <h2>News</h2>
+          <p>Product updates, feature highlights, and announcements from sAImon Software.</p>
+          <a class="news-rss-link" href="/news/rss.xml">Subscribe via RSS</a>
+        </div>
+
+        <div id="newsStatus" class="news-status-message">Loading articles…</div>
+        <div id="newsGrid" class="news-grid" hidden></div>
+      </div>
+
+      <footer>
+        <div class="footer-links">
+          <a href="/website/docs/terms-of-service.html">Terms of Service</a>
+          <a href="/website/docs/privacy-policy.html">Privacy Policy</a>
+          <a href="/delete-account.html">Delete account</a>
+          <a href="/support.html">Support</a>
+          <a href="/news">News</a>
+        </div>
+        <p class="copyright">
+          &copy; 2024 sAImon Software. All rights reserved.
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        const statusEl = document.getElementById("newsStatus");
+        const gridEl = document.getElementById("newsGrid");
+
+        function formatDate(value) {
+          if (!value) return "";
+          const d = new Date(value);
+          if (Number.isNaN(d.getTime())) return "";
+          return d.toLocaleDateString("en-US", {
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          });
+        }
+
+        function escapeHtml(text) {
+          return String(text)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+
+        fetch("/api/articles?sort=publishedAt&order=desc&per_page=50")
+          .then(function (resp) {
+            if (!resp.ok) throw new Error("Failed to load articles");
+            return resp.json();
+          })
+          .then(function (data) {
+            const articles = data.articles || [];
+            if (!articles.length) {
+              statusEl.textContent = "No articles published yet. Check back soon.";
+              return;
+            }
+            statusEl.hidden = true;
+            gridEl.hidden = false;
+            gridEl.innerHTML = articles
+              .map(function (article) {
+                const date = formatDate(article.publishedAt);
+                const meta = [article.author, date].filter(Boolean).join(" · ");
+                return (
+                  '<article class="news-summary-card">' +
+                  "<h3><a href=\"/news/" +
+                  encodeURIComponent(article.slug) +
+                  '">' +
+                  escapeHtml(article.title) +
+                  "</a></h3>" +
+                  (meta ? '<div class="news-card-meta">' + escapeHtml(meta) + "</div>" : "") +
+                  "<p>" +
+                  escapeHtml(article.summary) +
+                  "</p>" +
+                  '<a class="news-card-link" href="/news/' +
+                  encodeURIComponent(article.slug) +
+                  '">Read article</a>' +
+                  "</article>"
+                );
+              })
+              .join("");
+          })
+          .catch(function () {
+            statusEl.textContent = "Unable to load articles right now.";
+          });
+      })();
+    </script>
+  </body>
+</html>

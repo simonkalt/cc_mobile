@@ -51,6 +51,54 @@ body {
   opacity: 0.9;
 }
 
+.admin-nav-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.admin-tab {
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.admin-tab.active {
+  background: #fff;
+  color: #667eea;
+}
+
+.modal-wide {
+  max-width: 920px;
+  width: 95vw;
+}
+
+.form-grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.form-group-full {
+  grid-column: 1 / -1;
+}
+
+.upload-row {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0 20px;
+}
+
+.actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* ---- Cards (shared) ---- */
 
 .card {
