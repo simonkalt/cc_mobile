@@ -49,6 +49,7 @@ def _android_instant_deep_link_html(
 <html><head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Return to app</title>
 <script>
 (function () {{
   var target = {target_json};
@@ -67,7 +68,11 @@ def _android_instant_deep_link_html(
   setTimeout(goScheme, 700);
 }})();
 </script>
-</head><body></body></html>"""
+</head>
+<body style="margin:0;background:#fff;color:#111;font-family:system-ui,sans-serif;text-align:center;padding:2rem;">
+  <p style="font-size:1.05rem;">Sign-in complete.</p>
+  <p><a id="open" href="{target}" style="font-size:1.1rem;color:#1565c0;">Return to Job Cover Letters</a></p>
+</body></html>"""
 
 
 def _mobile_oauth_bridge_html(
