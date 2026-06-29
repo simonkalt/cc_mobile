@@ -13,6 +13,7 @@ from app.utils.pdf_utils import read_pdf_markdown_from_bytes
 
 _ARTICLE_BODY_MARKER = '<div class="news-article-body">'
 _FOOTER_LINKS = """
+          <a href="/">Home</a>
           <a href="/website/docs/terms-of-service.html">Terms of Service</a>
           <a href="/website/docs/privacy-policy.html">Privacy Policy</a>
           <a href="/delete-account.html">Delete account</a>
@@ -125,6 +126,7 @@ def wrap_article_html(
 
       <footer>
         <div class="footer-links">
+          <a href="/">Home</a>
           <a href="/website/docs/terms-of-service.html">Terms of Service</a>
           <a href="/website/docs/privacy-policy.html">Privacy Policy</a>
           <a href="/delete-account.html">Delete account</a>
