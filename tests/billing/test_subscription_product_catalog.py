@@ -177,6 +177,105 @@ class TestAppleCatalogEndpoint:
         assert data["products"][0]["productId"] == "MONTHLY001"
         assert data["products"][1]["productId"] == "ANNUAL001"
 
+    def test_catalog_hides_test_products_for_non_super_user(
+        self, client_with_catalog, catalog_collection, monkeypatch
+    ):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "APP_STORE_USE_SANDBOX", False)
+        catalog_collection.update_one(
+            {"_id": "apple_ios_production"},
+            {
+                "$push": {
+                    "products": {
+                        "productId": "TEST_MONTHLY001",
+                        "planKey": "test_monthly",
+                        "rank": 0,
+                        "enabled": True,
+                        "label": "Test Monthly",
+                    }
+                }
+            },
+        )
+
+        resp = client_with_catalog.get("/api/subscriptions/apple/catalog")
+        assert resp.status_code == 200
+        product_ids = [p["productId"] for p in resp.json()["products"]]
+        assert "TEST_MONTHLY001" not in product_ids
+        assert "MONTHLY001" in product_ids
+
+    def test_catalog_shows_test_products_for_super_user(
+        self, fake_user, mongomock_users, catalog_collection, monkeypatch
+    ):
+        from datetime import datetime, timezone
+
+        from app.core.config import settings
+        from app.main import app
+        from app.core.auth import get_current_user
+        from app.models.user import UserResponse
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setattr(settings, "APP_STORE_USE_SANDBOX", False)
+        catalog_collection.update_one(
+            {"_id": "apple_ios_production"},
+            {
+                "$push": {
+                    "products": {
+                        "productId": "TEST_MONTHLY001",
+                        "planKey": "test_monthly",
+                        "rank": 0,
+                        "enabled": True,
+                        "label": "Test Monthly",
+                    }
+                }
+            },
+        )
+
+        now = datetime.now(timezone.utc)
+        super_user = UserResponse(
+            id=fake_user.id,
+            name=fake_user.name,
+            email=fake_user.email,
+            isActive=True,
+            isEmailVerified=True,
+            roles=["user"],
+            super_user=True,
+            dateCreated=now,
+            dateUpdated=now,
+        )
+
+        async def _override_auth():
+            return super_user
+
+        app.dependency_overrides[get_current_user] = _override_auth
+        router = _collection_router(mongomock_users, catalog_collection)
+        patches = [
+            patch("app.db.mongodb.is_connected", return_value=True),
+            patch("app.db.mongodb.get_collection", side_effect=router),
+            patch(
+                "app.services.subscription_product_catalog_service.is_connected",
+                return_value=True,
+            ),
+            patch(
+                "app.services.subscription_product_catalog_service.get_collection",
+                side_effect=router,
+            ),
+        ]
+        for p in patches:
+            p.start()
+        try:
+            with TestClient(app) as tc:
+                resp = tc.get("/api/subscriptions/apple/catalog")
+        finally:
+            for p in patches:
+                p.stop()
+            app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        product_ids = [p["productId"] for p in resp.json()["products"]]
+        assert "TEST_MONTHLY001" in product_ids
+        assert "MONTHLY001" in product_ids
+
 
 class TestSubscriptionApplePlanFields:
     def test_apple_plan_key_and_rank_on_get_subscription(

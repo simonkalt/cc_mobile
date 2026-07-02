@@ -530,13 +530,17 @@ def apple_subscription_product_catalog(
     iOS / Apple subscription product tiers from MongoDB ``subscription_product_catalog``
     (``planKey``, ``rank``, labels). Same source as ``applePlanKey`` / ``applePlanRank`` on
     ``GET /api/subscriptions/{user_id}`` when ``billingProvider`` is Apple.
+
+    Products whose label or productId contains ``Test`` are only visible to super_user accounts
+    (same intent as Stripe plans/products with tier >= 100).
     """
     from app.services.subscription_product_catalog_service import (
         ios_apple_catalog_environment_label,
         list_ios_apple_catalog_products,
     )
 
-    rows = list_ios_apple_catalog_products()
+    is_super = bool(getattr(current_user, "super_user", False))
+    rows = list_ios_apple_catalog_products(super_user=is_super)
     products = [
         AppleCatalogProductItem(
             productId=p.get("productId"),

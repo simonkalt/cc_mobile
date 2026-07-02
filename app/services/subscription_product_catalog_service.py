@@ -323,16 +323,29 @@ def resolve_stripe_product(
     return None, None
 
 
-def list_ios_apple_catalog_products() -> List[Dict[str, Any]]:
+def _apple_product_is_superuser_only(product: Dict[str, Any]) -> bool:
+    """Products with 'Test' in label or productId are visible only to super_user accounts."""
+    for field in ("label", "productId"):
+        if "test" in str(product.get(field) or "").lower():
+            return True
+    return False
+
+
+def list_ios_apple_catalog_products(*, super_user: bool = False) -> List[Dict[str, Any]]:
     """
     Products for ``GET /api/subscriptions/apple/catalog``, sorted by ``rank`` then ``productId``.
     Each item: productId, planKey, rank, enabled, label (optional).
+
+    Products whose label or productId contains ``Test`` (case-insensitive) are only
+    included when ``super_user`` is True — same intent as Stripe tier >= 100 filtering.
     """
     doc = get_ios_apple_catalog_document()
     if not doc:
         return []
     raw = [p for p in (doc.get("products") or []) if isinstance(p, dict)]
     items = [p for p in raw if p.get("enabled") is not False]
+    if not super_user:
+        items = [p for p in items if not _apple_product_is_superuser_only(p)]
     try:
         items.sort(
             key=lambda x: (
