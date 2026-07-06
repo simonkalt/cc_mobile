@@ -17,7 +17,7 @@ Marketing **News** articles: HTML files on disk under `articles/`, metadata in M
 | `htmlPath` | string | Relative path, e.g. `articles/my-post.html` |
 | `sourceType` | string | `html` or `pdf` |
 | `tags` | string[] | Optional |
-| `featuredImage` | string | Optional |
+| `featuredImage` | string | Optional site path or URL for listing card + social preview |
 | `createdBy` | string | Admin user id |
 
 Indexes: unique on `slug`; compound on `status + publishedAt`.
@@ -72,6 +72,7 @@ All require admin JWT (`Authorization: Bearer …`) after login + 2FA via `/admi
   "status": "published",
   "htmlBody": "<p>Article content HTML</p>",
   "tags": ["product"],
+  "featuredImage": "/website/news/images/my-article/hero.png",
   "publishedAt": "2026-06-25T12:00:00Z",
   "sourceType": "html"
 }

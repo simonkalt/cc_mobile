@@ -87,8 +87,18 @@
               .map(function (article) {
                 const date = formatDate(article.publishedAt);
                 const meta = [article.author, date].filter(Boolean).join(" · ");
+                const imageHtml = article.featuredImage
+                  ? '<a class="news-card-image-link" href="/news/' +
+                    encodeURIComponent(article.slug) +
+                    '"><img class="news-card-image" src="' +
+                    escapeHtml(article.featuredImage) +
+                    '" alt="' +
+                    escapeHtml(article.title) +
+                    '" loading="lazy" /></a>'
+                  : "";
                 return (
                   '<article class="news-summary-card">' +
+                  imageHtml +
                   "<h3><a href=\"/news/" +
                   encodeURIComponent(article.slug) +
                   '">' +

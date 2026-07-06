@@ -356,6 +356,7 @@ document.addEventListener("alpine:init", () => {
       tagsText: "",
       publishedAtLocal: "",
       sourceType: "html",
+      featuredImage: "",
     },
 
     _blankForm() {
@@ -369,6 +370,7 @@ document.addEventListener("alpine:init", () => {
         tagsText: "",
         publishedAtLocal: "",
         sourceType: "html",
+        featuredImage: "",
       };
     },
 
@@ -401,6 +403,7 @@ document.addEventListener("alpine:init", () => {
             ? new Date(data.publishedAt).toISOString().slice(0, 16)
             : "",
           sourceType: data.sourceType || "html",
+          featuredImage: data.featuredImage || "",
         };
       } catch (e) {
         this.error = e.detail || "Failed to load article";
@@ -435,6 +438,12 @@ document.addEventListener("alpine:init", () => {
         tags: this._tagsArray(),
         sourceType: this.form.sourceType,
       };
+      const featured = this.form.featuredImage.trim();
+      if (featured) {
+        payload.featuredImage = featured;
+      } else if (this.isEdit) {
+        payload.featuredImage = null;
+      }
       if (this.form.publishedAtLocal) {
         payload.publishedAt = new Date(this.form.publishedAtLocal).toISOString();
       }

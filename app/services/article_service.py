@@ -99,17 +99,23 @@ def write_article_html_file(
     summary: str,
     body_html: str,
     published_at: Optional[datetime],
+    featured_image: Optional[str] = None,
 ) -> str:
     articles_dir = get_articles_dir()
     os.makedirs(articles_dir, exist_ok=True)
     html_path = _html_path_for_slug(slug)
     abs_path = _absolute_html_path(html_path)
+    base_url = (getattr(settings, "PUBLIC_WEBSITE_URL", None) or "").strip()
+    if not base_url:
+        base_url = "https://www.saimonsoft.com"
     content = wrap_article_html(
         title=title,
         author=author,
         body_html=body_html,
         published_at=published_at,
         summary=summary,
+        featured_image=featured_image,
+        canonical_url=f"{base_url.rstrip('/')}/news/{slug}",
     )
     with open(abs_path, "w", encoding="utf-8") as fh:
         fh.write(content)
@@ -232,6 +238,7 @@ def create_article(payload: ArticleCreateRequest, *, created_by: Optional[str] =
         summary=payload.summary,
         body_html=payload.htmlBody,
         published_at=published_at,
+        featured_image=payload.featuredImage,
     )
 
     doc = {
@@ -305,6 +312,7 @@ def update_article(article_id: str, payload: ArticleUpdateRequest) -> ArticleDet
         summary=summary,
         body_html=body_html,
         published_at=published_at,
+        featured_image=featured,
     )
 
     if html_path != old_html_path and os.path.isfile(_absolute_html_path(old_html_path)):

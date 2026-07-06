@@ -77,6 +77,13 @@ def extract_body_from_html(full_html: str) -> str:
     return full_html[start:end].strip()
 
 
+def _absolute_asset_url(path: str, base_url: str) -> str:
+    if path.startswith(("http://", "https://")):
+        return path
+    base = base_url.rstrip("/")
+    return f"{base}/{path.lstrip('/')}"
+
+
 def wrap_article_html(
     *,
     title: str,
@@ -84,6 +91,8 @@ def wrap_article_html(
     body_html: str,
     published_at: Optional[datetime] = None,
     summary: Optional[str] = None,
+    featured_image: Optional[str] = None,
+    canonical_url: Optional[str] = None,
 ) -> str:
     published_label = _format_published_date(published_at)
     meta_bits = [f'<span class="news-meta-author">By {html.escape(author)}</span>']
@@ -94,13 +103,40 @@ def wrap_article_html(
     meta_html = "\n          ".join(meta_bits)
     description = html.escape(summary or title)
 
+    og_tags = ""
+    if featured_image:
+        from app.core.config import settings
+
+        base_url = (getattr(settings, "PUBLIC_WEBSITE_URL", None) or "").strip()
+        if not base_url:
+            base_url = "https://www.saimonsoft.com"
+        og_image = html.escape(_absolute_asset_url(featured_image, base_url))
+        og_tags = f"""
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="{html.escape(title)}" />
+    <meta property="og:description" content="{description}" />
+    <meta property="og:image" content="{og_image}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{html.escape(title)}" />
+    <meta name="twitter:description" content="{description}" />
+    <meta name="twitter:image" content="{og_image}" />"""
+        if canonical_url:
+            og_tags += f'\n    <meta property="og:url" content="{html.escape(canonical_url)}" />'
+
+    featured_html = ""
+    if featured_image:
+        featured_html = f"""
+        <figure class="news-article-featured">
+          <img src="{html.escape(featured_image)}" alt="{html.escape(title)}" loading="eager" />
+        </figure>"""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{html.escape(title)} | sAImon Software News</title>
-    <meta name="description" content="{description}" />
+    <meta name="description" content="{description}" />{og_tags}
     <link rel="icon" href="/website/images/1.png" type="image/png" />
     <link rel="stylesheet" href="/website/styles.css" />
     <link rel="stylesheet" href="/website/news/news.css" />
@@ -118,7 +154,7 @@ def wrap_article_html(
       <div class="main-content news-article">
         <a class="news-back-link" href="/news">&larr; Back to News</a>
         <div class="news-meta">{meta_html}</div>
-        <h2 class="news-article-title">{html.escape(title)}</h2>
+        <h2 class="news-article-title">{html.escape(title)}</h2>{featured_html}
         <div class="news-article-body">
         {body_html}
         </div>
