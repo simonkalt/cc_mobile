@@ -233,7 +233,70 @@
 
       </div><!-- /card -->
 
+      </template><!-- /users section -->
 
+      <!-- Articles section -->
+      <template x-if="$store.auth.section === 'articles'">
+        <div class="card card-full">
+          <div class="toolbar">
+            <select x-model="$store.articles.statusFilter" @change="$store.articles.applyFilter()">
+              <option value="">All statuses</option>
+              <option value="published">Published</option>
+              <option value="draft">Draft</option>
+              <option value="archived">Archived</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" @click="$store.articles.load()"
+                    :disabled="$store.articles.loading">Refresh</button>
+            <button class="btn btn-primary btn-sm" @click="$store.articleEditor.openCreate()">New Article</button>
+          </div>
+
+          <div x-show="$store.articles.loading" style="text-align:center; padding:30px">
+            <span class="spinner" style="width:28px; height:28px"></span>
+          </div>
+
+          <div class="table-wrapper" x-show="!$store.articles.loading">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Author</th>
+                  <th>Status</th>
+                  <th>Published</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="a in $store.articles.items" :key="a.id">
+                  <tr>
+                    <td x-text="a.title"></td>
+                    <td x-text="a.author"></td>
+                    <td><span class="badge" x-text="a.status"></span></td>
+                    <td x-text="formatDate(a.publishedAt)"></td>
+                    <td class="actions-cell">
+                      <button class="btn btn-secondary btn-sm" @click="$store.articleEditor.openEdit(a.id)">Edit</button>
+                      <template x-if="a.status === 'published'">
+                        <a class="btn btn-ghost btn-sm" :href="'/news/' + a.slug" target="_blank" rel="noopener">View</a>
+                      </template>
+                      <button class="btn btn-ghost btn-sm" @click="$store.articles.remove(a.id)">Delete</button>
+                    </td>
+                  </tr>
+                </template>
+                <template x-if="$store.articles.items.length === 0 && !$store.articles.loading">
+                  <tr><td colspan="5" style="text-align:center; padding:40px; color:#999">No articles found</td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="paging" x-show="$store.articles.total > 0">
+            <button @click="$store.articles.prevPage()" :disabled="$store.articles.page <= 1">&laquo; Prev</button>
+            <span x-text="$store.articles.rangeText"></span>
+            <button @click="$store.articles.nextPage()" :disabled="$store.articles.page >= $store.articles.pages">Next &raquo;</button>
+          </div>
+        </div>
+      </template>
+
+      <!-- User detail modal (outside section x-if — Alpine requires single root per template) -->
       <!-- ============================================================== -->
       <!-- DETAIL MODAL                                                   -->
       <!-- ============================================================== -->
@@ -536,69 +599,6 @@
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      </template>
-
-      </template><!-- /users section -->
-
-      <!-- Articles section -->
-      <template x-if="$store.auth.section === 'articles'">
-        <div class="card card-full">
-          <div class="toolbar">
-            <select x-model="$store.articles.statusFilter" @change="$store.articles.applyFilter()">
-              <option value="">All statuses</option>
-              <option value="published">Published</option>
-              <option value="draft">Draft</option>
-              <option value="archived">Archived</option>
-            </select>
-            <button class="btn btn-secondary btn-sm" @click="$store.articles.load()"
-                    :disabled="$store.articles.loading">Refresh</button>
-            <button class="btn btn-primary btn-sm" @click="$store.articleEditor.openCreate()">New Article</button>
-          </div>
-
-          <div x-show="$store.articles.loading" style="text-align:center; padding:30px">
-            <span class="spinner" style="width:28px; height:28px"></span>
-          </div>
-
-          <div class="table-wrapper" x-show="!$store.articles.loading">
-            <table class="admin-table">
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Author</th>
-                  <th>Status</th>
-                  <th>Published</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <template x-for="a in $store.articles.items" :key="a.id">
-                  <tr>
-                    <td x-text="a.title"></td>
-                    <td x-text="a.author"></td>
-                    <td><span class="badge" x-text="a.status"></span></td>
-                    <td x-text="formatDate(a.publishedAt)"></td>
-                    <td class="actions-cell">
-                      <button class="btn btn-secondary btn-sm" @click="$store.articleEditor.openEdit(a.id)">Edit</button>
-                      <template x-if="a.status === 'published'">
-                        <a class="btn btn-ghost btn-sm" :href="'/news/' + a.slug" target="_blank" rel="noopener">View</a>
-                      </template>
-                      <button class="btn btn-ghost btn-sm" @click="$store.articles.remove(a.id)">Delete</button>
-                    </td>
-                  </tr>
-                </template>
-                <template x-if="$store.articles.items.length === 0 && !$store.articles.loading">
-                  <tr><td colspan="5" style="text-align:center; padding:40px; color:#999">No articles found</td></tr>
-                </template>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="paging" x-show="$store.articles.total > 0">
-            <button @click="$store.articles.prevPage()" :disabled="$store.articles.page <= 1">&laquo; Prev</button>
-            <span x-text="$store.articles.rangeText"></span>
-            <button @click="$store.articles.nextPage()" :disabled="$store.articles.page >= $store.articles.pages">Next &raquo;</button>
           </div>
         </div>
       </template>
