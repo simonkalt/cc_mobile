@@ -71,10 +71,11 @@ from app.utils.grok_client import (
     grok_chat_completions,
     is_grok_model,
 )
-from app.utils.llm_token_limits import (
-    max_output_tokens_for_model,
-    resolve_openai_model,
-    uses_openai_max_completion_tokens,
+from app.utils.llm_utils import post_to_llm as _shared_post_to_llm
+from app.utils.openrouter_client import (
+    openrouter_chat,
+    openrouter_configured,
+    use_openrouter,
 )
 
 # Try to import ollama, make it optional
@@ -623,66 +624,8 @@ class JobURLAnalysisRequest(BaseModel):
 
 
 def post_to_llm(prompt: str, model: str = "gpt-5.5"):
-    return_response = None
-    if model == "gpt-4.1" or model == "gpt-5.5" or model.startswith("gpt-"):
-        openai_model = resolve_openai_model(model)
-        client = OpenAI(api_key=openai_api_key)
-        openai_max_tokens = max_output_tokens_for_model(openai_model)
-        if uses_openai_max_completion_tokens(openai_model):
-            response = client.chat.completions.create(
-                model=openai_model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-                max_completion_tokens=openai_max_tokens,
-            )
-        else:
-            response = client.chat.completions.create(
-                model=openai_model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=openai_max_tokens,
-            )
-        return_response = response.choices[0].message.content
-    elif model in ("claude-sonnet-4-6", "claude-sonnet-4-20250514"):
-        client = anthropic.Anthropic(api_key=anthropic_api_key)
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            system="You are a helpful assistant.",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_output_tokens_for_model("claude-sonnet-4-6"),
-            temperature=1,
-        )
-        return_response = response.content[0].text.replace("```json", "").replace("```", "")
-    elif model in ("claude-haiku-4-5", "claude-haiku-4-5-20251001"):
-        client = anthropic.Anthropic(api_key=anthropic_api_key)
-        response = client.messages.create(
-            model="claude-haiku-4-5",
-            system="You are a helpful assistant.",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_output_tokens_for_model("claude-haiku-4-5"),
-            temperature=1,
-        )
-        return_response = response.content[0].text.replace("```json", "").replace("```", "")
-    elif model == "gemini-2.5-flash":
-        client = genai.Client(api_key=gemini_api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-        )
-        return_response = response.text
-    elif is_grok_model(model):
-        return_response = grok_chat_completions(
-            [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt},
-            ],
-        )
-
-    return return_response
+    """Delegate to shared OpenRouter-aware helper (keeps main.py call sites stable)."""
+    return _shared_post_to_llm(prompt, model)
 
 
 def read_pdf_from_bytes(pdf_bytes: bytes) -> str:
@@ -2785,18 +2728,32 @@ Important:
 - If any information is not found, use "Not specified" as the value
 """
 
-        logger.info("Calling Grok API to extract job information")
-        grok_response = grok_chat_completions(
-            [
-                {
-                    "role": "system",
-                    "content": "You are an expert at extracting structured information from job postings. Always return valid JSON only.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            timeout=120,
-        )
+        logger.info("Calling LLM to extract job information")
+        if use_openrouter() and openrouter_configured():
+            grok_response = openrouter_chat(
+                app_model=GROK_MODEL_ID,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert at extracting structured information from job postings. Always return valid JSON only.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                timeout=120,
+            )
+        else:
+            grok_response = grok_chat_completions(
+                [
+                    {
+                        "role": "system",
+                        "content": "You are an expert at extracting structured information from job postings. Always return valid JSON only.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                timeout=120,
+            )
 
         logger.info(f"Grok response received ({len(grok_response)} characters)")
 

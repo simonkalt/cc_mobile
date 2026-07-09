@@ -61,6 +61,12 @@ from app.utils.grok_client import (
     is_grok_model,
     resolve_grok_api_key_from_dotenv,
 )
+from app.utils.openrouter_client import (
+    canonicalize_app_model,
+    openrouter_chat,
+    openrouter_configured,
+    use_openrouter,
+)
 from app.services.user_service import (
     get_user_by_id,
     get_user_by_email,
@@ -1427,11 +1433,47 @@ Apply them exactly. They take priority over any conflicting earlier instructions
 
     r = ""
 
+    def _build_chat_messages() -> list:
+        msgs = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": critical_instructions.strip()},
+            {"role": "user", "content": message},
+            {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
+            {"role": "user", "content": f"Company Name: {company_name}"},
+            {"role": "user", "content": f"Ad Source: {ad_source}"},
+        ]
+        if additional_instructions_text:
+            msgs.append({"role": "user", "content": additional_instructions_text.strip()})
+            logger.debug("Additional instructions appended to chat messages")
+        return msgs
+
     try:
         if timing:
             timing.checkpoint("llm_call_start")
-        # Map model names to display names for compatibility
-        if llm == "Gemini" or llm == "gemini-2.5-flash":
+
+        is_llama = llm == "Llama" or llm == ollama_model or llm == "llama3.2"
+        cloud_via_openrouter = (
+            not is_llama and use_openrouter() and openrouter_configured()
+        )
+
+        if cloud_via_openrouter:
+            app_model = canonicalize_app_model(llm)
+            messages = _build_chat_messages()
+            _log_prompt_length(llm, messages=messages)
+            _write_llm_prompt_log(llm, messages=messages)
+            r = openrouter_chat(
+                app_model=app_model,
+                messages=messages,
+                max_tokens=max_output_tokens_for_model(app_model),
+            )
+            logger.info(
+                "OpenRouter response length: %s characters (app_model=%s)",
+                len(r or ""),
+                app_model,
+            )
+
+        # Map model names to display names for compatibility (direct providers)
+        elif llm == "Gemini" or llm == "gemini-2.5-flash":
             # Include personality instruction prominently at the start
             msg = (
                 f"{system_message}{critical_instructions}. {message}. "
@@ -1470,25 +1512,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 llm if llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2") else gpt_model,
                 fallback=gpt_model,
             )
-            messages = [
-                {"role": "system", "content": system_message},
-                {
-                    "role": "user",
-                    "content": critical_instructions.strip(),
-                },  # Add personality instruction as separate, prominent message
-            ]
-            messages.extend(
-                [
-                    {"role": "user", "content": message},
-                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
-                    {"role": "user", "content": f"Company Name: {company_name}"},
-                    {"role": "user", "content": f"Ad Source: {ad_source}"},
-                ]
-            )
-            # Append additional instructions last as a separate message
-            if additional_instructions_text:
-                messages.append({"role": "user", "content": additional_instructions_text.strip()})
-                logger.debug("Additional instructions appended to ChatGPT messages")
+            messages = _build_chat_messages()
             # Keep completion cap bounded for letter generation latency.
             _log_prompt_length(llm, messages=messages)
             _write_llm_prompt_log(llm, messages=messages)
@@ -1516,32 +1540,12 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                     bool(xai_api_key),
                 )
                 raise ValueError("XAI API not available or API key not set")
-            messages_list = [
-                {"role": "system", "content": system_message},
-                {
-                    "role": "user",
-                    "content": critical_instructions.strip(),
-                },  # Add personality instruction as separate, prominent message
-            ]
-            messages_list.extend(
-                [
-                    {"role": "user", "content": message},
-                    {"role": "user", "content": f"Hiring Manager: {hiring_manager}"},
-                    {"role": "user", "content": f"Company Name: {company_name}"},
-                    {"role": "user", "content": f"Ad Source: {ad_source}"},
-                ]
-            )
-            # Append additional instructions last
-            if additional_instructions_text:
-                messages_list.append(
-                    {"role": "user", "content": additional_instructions_text.strip()}
-                )
-                logger.debug("Additional instructions appended to Grok messages")
+            messages_list = _build_chat_messages()
             _log_prompt_length(llm, messages=messages_list)
             _write_llm_prompt_log(llm, messages=messages_list)
             r = grok_chat_completions(messages_list)
 
-        elif llm == "Llama" or llm == ollama_model or llm == "llama3.2":
+        elif is_llama:
             if not OLLAMA_AVAILABLE:
                 raise ImportError(
                     "ollama library is not installed. Please install it with: pip install ollama"

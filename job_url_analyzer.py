@@ -1402,33 +1402,54 @@ def extract_with_claude_haiku(
     content = ""
     try:
         html_content = html[:50000] if len(html) > 50000 else html
-
-        if anthropic_client is None:
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                logger.error("ANTHROPIC_API_KEY not configured")
-                return result
-            import anthropic
-
-            anthropic_client = anthropic.Anthropic(api_key=api_key)
-
         prompt = _build_job_html_extraction_prompt(html_content)
 
-        response = anthropic_client.messages.create(
-            model=JOB_URL_LLM_MODEL,
-            max_tokens=4096,
-            temperature=0.1,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        # Prefer OpenRouter when enabled; otherwise use Anthropic SDK
+        used_openrouter = False
+        try:
+            from app.utils.openrouter_client import (
+                openrouter_chat,
+                openrouter_configured,
+                use_openrouter,
+            )
 
-        content = response.content[0].text
+            if use_openrouter() and openrouter_configured():
+                content = openrouter_chat(
+                    app_model=JOB_URL_LLM_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096,
+                    temperature=0.1,
+                )
+                used_openrouter = True
+        except Exception as or_exc:
+            logger.warning("OpenRouter job extraction failed, falling back to Anthropic: %s", or_exc)
+
+        if not used_openrouter:
+            if anthropic_client is None:
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+                if not api_key:
+                    logger.error("ANTHROPIC_API_KEY not configured")
+                    return result
+                import anthropic
+
+                anthropic_client = anthropic.Anthropic(api_key=api_key)
+
+            response = anthropic_client.messages.create(
+                model=JOB_URL_LLM_MODEL,
+                max_tokens=4096,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            content = response.content[0].text
+
         data = _parse_llm_job_json(content)
         _apply_llm_job_json(result, data)
 
         logger.info(
-            "Claude Haiku extraction completed: model=%s complete=%s",
+            "Claude Haiku extraction completed: model=%s complete=%s via=%s",
             JOB_URL_LLM_MODEL,
             result.is_complete,
+            "openrouter" if used_openrouter else "anthropic",
         )
 
     except json.JSONDecodeError as e:

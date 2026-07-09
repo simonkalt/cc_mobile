@@ -212,6 +212,7 @@ class Settings:
     GOOGLE_API_KEY: Optional[str] = os.getenv("GOOGLE_API_KEY")
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
     XAI_API_KEY: Optional[str] = os.getenv("XAI_API_KEY")
+    OPENROUTER_API_KEY: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN")
     
     # AWS S3
@@ -224,6 +225,12 @@ class Settings:
     LLM_CONFIG_PATH: Path = Path(__file__).parent.parent.parent / "llms-config.json"
     # Canonical model list + default for new users (see llm-models-registry.json; override via LLM_MODELS_REGISTRY_PATH)
     LLM_MODELS_REGISTRY_PATH: Path = Path(__file__).parent.parent.parent / "llm-models-registry.json"
+    # "openrouter" (default) routes cloud models via OpenRouter; "direct" keeps per-provider SDKs
+    LLM_PROVIDER: str = (os.getenv("LLM_PROVIDER") or "openrouter").strip().lower()
+    OPENROUTER_BASE_URL: str = (
+        (os.getenv("OPENROUTER_BASE_URL") or "").strip()
+        or "https://openrouter.ai/api/v1"
+    )
     
     # Google Places API
     GOOGLE_PLACES_API_KEY: Optional[str] = os.getenv("GOOGLE_PLACES_API_KEY")

@@ -3,8 +3,6 @@ LLM communication utilities
 """
 import logging
 import json
-import os
-from pathlib import Path
 from typing import Optional
 
 from app.core.config import settings
@@ -17,6 +15,11 @@ from app.utils.llm_token_limits import (
     max_output_tokens_for_model,
     resolve_openai_model,
     uses_openai_max_completion_tokens,
+)
+from app.utils.openrouter_client import (
+    openrouter_chat,
+    openrouter_configured,
+    use_openrouter,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,19 +93,10 @@ def load_system_prompt() -> str:
         return "You are an expert cover letter writer. Generate a professional cover letter based on the provided information. IMPORTANT: Any returned HTML must not contain backslashes (\\\\) as carriage returns or line breaks - use only whitespace characters (spaces, tabs) for formatting."
 
 
-def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
-    """
-    Send a prompt to an LLM and return the response
-    
-    Args:
-        prompt: The prompt to send
-        model: The model name to use
-        
-    Returns:
-        LLM response text or None if error
-    """
+def _post_to_llm_direct(prompt: str, model: str) -> Optional[str]:
+    """Legacy per-provider path (LLM_PROVIDER=direct)."""
     return_response = None
-    
+
     if model == "gpt-4.1" or model == "gpt-5.5" or model.startswith("gpt-"):
         if not OPENAI_AVAILABLE or not settings.OPENAI_API_KEY:
             logger.error("OpenAI not available or API key not set")
@@ -130,12 +124,12 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
                 max_tokens=openai_max_tokens,
             )
         return_response = response.choices[0].message.content
-        
+
     elif model in ("claude-sonnet-4-6", "claude-sonnet-4-20250514"):
         if not ANTHROPIC_AVAILABLE or not settings.ANTHROPIC_API_KEY:
             logger.error("Anthropic not available or API key not set")
             return None
-            
+
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = client.messages.create(
             model="claude-sonnet-4-6",
@@ -147,12 +141,12 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
         return_response = (
             response.content[0].text.replace("```json", "").replace("```", "")
         )
-        
+
     elif model in ("claude-haiku-4-5", "claude-haiku-4-5-20251001"):
         if not ANTHROPIC_AVAILABLE or not settings.ANTHROPIC_API_KEY:
             logger.error("Anthropic not available or API key not set")
             return None
-            
+
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = client.messages.create(
             model="claude-haiku-4-5",
@@ -164,7 +158,7 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
         return_response = (
             response.content[0].text.replace("```json", "").replace("```", "")
         )
-        
+
     elif model == "gemini-2.5-flash":
         if not GOOGLE_AVAILABLE or not settings.GOOGLE_API_KEY:
             logger.error("Google Generative AI not available or API key not set")
@@ -176,7 +170,7 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
             contents=prompt,
         )
         return_response = response.text
-        
+
     elif is_grok_model(model):
         if not REQUESTS_AVAILABLE:
             logger.error("requests not available for Grok/OCI calls")
@@ -193,6 +187,57 @@ def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
             return None
 
     return return_response
+
+
+def post_to_llm(prompt: str, model: str = "gpt-5.5") -> Optional[str]:
+    """
+    Send a prompt to an LLM and return the response
+    
+    Args:
+        prompt: The prompt to send
+        model: The model name to use
+        
+    Returns:
+        LLM response text or None if error
+    """
+    if model == "llama3.2" or (isinstance(model, str) and "llama" in model.lower()):
+        if not OLLAMA_AVAILABLE:
+            logger.error("ollama not available")
+            return None
+        try:
+            response = ollama.chat(
+                model="llama3.2",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return response["message"]["content"]
+        except Exception as exc:
+            logger.error("Ollama chat failed: %s", exc)
+            return None
+
+    if use_openrouter() and openrouter_configured():
+        try:
+            return openrouter_chat(
+                app_model=model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=max_output_tokens_for_model(normalize_llm_name(model)),
+            )
+        except Exception as exc:
+            logger.error("OpenRouter chat failed: %s", exc)
+            return None
+
+    if use_openrouter() and not openrouter_configured():
+        logger.warning(
+            "LLM_PROVIDER=openrouter but OPENROUTER_API_KEY missing; "
+            "falling back to direct providers"
+        )
+
+    return _post_to_llm_direct(prompt, model)
 
 
 def normalize_llm_name(llm: str) -> str:
@@ -231,4 +276,3 @@ def normalize_llm_name(llm: str) -> str:
     else:
         # Return as-is if no mapping found
         return llm
-
