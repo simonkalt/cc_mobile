@@ -937,33 +937,29 @@ def _inject_gtag_into_index_html(html: str) -> str:
     return html.replace("</head>", snippet + "  </head>", 1)
 
 
+_DEFAULT_PLAY_STORE_URL = (
+    "https://play.google.com/store/apps/details?"
+    "id=com.saimonsoft.customcoverlettermobile.app&hl=en_US"
+)
+_DEFAULT_IOS_APP_STORE_URL = (
+    "https://apps.apple.com/us/app/ai-job-cover-letter-generator/id6759930556"
+)
+
+
 def _inject_store_urls_into_index_html(html: str) -> str:
     """
     Replace __PLAY_STORE_ATTRS__ / __IOS_APP_STORE_ATTRS__ with href + rel for store badges.
-    If env URL is unset, keep prior \"Coming soon\" behavior via onclick.
+    Env PLAY_STORE_URL / IOS_APP_STORE_URL override the published listing defaults.
     """
     import html as html_module
 
-    play = (os.getenv("PLAY_STORE_URL") or "").strip()
-    ios = (os.getenv("IOS_APP_STORE_URL") or "").strip()
+    play = (os.getenv("PLAY_STORE_URL") or _DEFAULT_PLAY_STORE_URL).strip()
+    ios = (os.getenv("IOS_APP_STORE_URL") or _DEFAULT_IOS_APP_STORE_URL).strip()
 
-    if play:
-        safe = html_module.escape(play, quote=True)
-        play_attrs = f'href="{safe}" target="_blank" rel="noopener noreferrer"'
-    else:
-        play_attrs = (
-            'href="#" onclick="alert(\'Coming soon.\'); return false;" role="button" '
-            'aria-disabled="true"'
-        )
-
-    if ios:
-        safe_ios = html_module.escape(ios, quote=True)
-        ios_attrs = f'href="{safe_ios}" target="_blank" rel="noopener noreferrer"'
-    else:
-        ios_attrs = (
-            'href="#" onclick="openIosModal(); return false;" role="button" '
-            'aria-disabled="true"'
-        )
+    safe = html_module.escape(play, quote=True)
+    play_attrs = f'href="{safe}" target="_blank" rel="noopener noreferrer"'
+    safe_ios = html_module.escape(ios, quote=True)
+    ios_attrs = f'href="{safe_ios}" target="_blank" rel="noopener noreferrer"'
 
     return (
         html.replace("__PLAY_STORE_ATTRS__", play_attrs)
