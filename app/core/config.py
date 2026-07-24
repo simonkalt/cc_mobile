@@ -111,9 +111,10 @@ class Settings:
     # Google Analytics (GA4) — injected into website/index.html when serving /
     GOOGLE_ANALYTICS_TAG: Optional[str] = os.getenv("GOOGLE_ANALYTICS_TAG")
 
-    # Marketing site (/) — app store badge links, injected into website/index.html
+    # Marketing site (/) — app store / web badge links, injected into website/index.html
     PLAY_STORE_URL: Optional[str] = os.getenv("PLAY_STORE_URL")
     IOS_APP_STORE_URL: Optional[str] = os.getenv("IOS_APP_STORE_URL")
+    WEB_APP_URL: Optional[str] = os.getenv("WEB_APP_URL")
 
     # Public legal pages (HTML on marketing site). Used by client-settings for registration links, etc.
     PUBLIC_PRIVACY_POLICY_URL: str = (

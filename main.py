@@ -944,26 +944,36 @@ _DEFAULT_PLAY_STORE_URL = (
 _DEFAULT_IOS_APP_STORE_URL = (
     "https://apps.apple.com/us/app/ai-job-cover-letter-generator/id6759930556"
 )
+_DEFAULT_WEB_APP_URL = "/app"
 
 
 def _inject_store_urls_into_index_html(html: str) -> str:
     """
-    Replace __PLAY_STORE_ATTRS__ / __IOS_APP_STORE_ATTRS__ with href + rel for store badges.
-    Env PLAY_STORE_URL / IOS_APP_STORE_URL override the published listing defaults.
+    Replace __PLAY_STORE_ATTRS__ / __IOS_APP_STORE_ATTRS__ / __WEB_APP_ATTRS__
+    with href (+ rel for external store badges).
+    Env PLAY_STORE_URL / IOS_APP_STORE_URL / WEB_APP_URL override defaults.
     """
     import html as html_module
 
     play = (os.getenv("PLAY_STORE_URL") or _DEFAULT_PLAY_STORE_URL).strip()
     ios = (os.getenv("IOS_APP_STORE_URL") or _DEFAULT_IOS_APP_STORE_URL).strip()
+    web = (os.getenv("WEB_APP_URL") or _DEFAULT_WEB_APP_URL).strip()
 
     safe = html_module.escape(play, quote=True)
     play_attrs = f'href="{safe}" target="_blank" rel="noopener noreferrer"'
     safe_ios = html_module.escape(ios, quote=True)
     ios_attrs = f'href="{safe_ios}" target="_blank" rel="noopener noreferrer"'
+    safe_web = html_module.escape(web, quote=True)
+    # Same-origin /app opens in the same tab; absolute external URLs open in a new tab.
+    if web.startswith("http://") or web.startswith("https://"):
+        web_attrs = f'href="{safe_web}" target="_blank" rel="noopener noreferrer"'
+    else:
+        web_attrs = f'href="{safe_web}"'
 
     return (
         html.replace("__PLAY_STORE_ATTRS__", play_attrs)
         .replace("__IOS_APP_STORE_ATTRS__", ios_attrs)
+        .replace("__WEB_APP_ATTRS__", web_attrs)
     )
 
 
