@@ -341,9 +341,17 @@ button.btn {
   box-shadow: 0 8px 22px rgba(30, 90, 138, 0.22);
 }
 
+.channels-light .channel-web:hover {
+  background: var(--accent-hover);
+  border-color: transparent;
+}
+
 .channels-light .channel-web .channel-label,
 .channels-light .channel-web .channel-platform,
-.channels-light .channel-web .channel-note {
+.channels-light .channel-web .channel-note,
+.channels-light .channel-web:hover .channel-label,
+.channels-light .channel-web:hover .channel-platform,
+.channels-light .channel-web:hover .channel-note {
   color: #fff;
 }
 
