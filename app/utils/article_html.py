@@ -12,14 +12,6 @@ import markdown
 from app.utils.pdf_utils import read_pdf_markdown_from_bytes
 
 _ARTICLE_BODY_MARKER = '<div class="news-article-body">'
-_FOOTER_LINKS = """
-          <a href="/">Home</a>
-          <a href="/website/docs/terms-of-service.html">Terms of Service</a>
-          <a href="/website/docs/privacy-policy.html">Privacy Policy</a>
-          <a href="/delete-account.html">Delete account</a>
-          <a href="/support.html">Support</a>
-          <a href="/news">News</a>
-"""
 
 
 def slug_from_title(title: str) -> str:
@@ -138,42 +130,56 @@ def wrap_article_html(
     <title>{html.escape(title)} | sAImon Software News</title>
     <meta name="description" content="{description}" />{og_tags}
     <link rel="icon" href="/website/images/1.png" type="image/png" />
-    <link rel="stylesheet" href="/website/styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/website/site.css" />
     <link rel="stylesheet" href="/website/news/news.css" />
   </head>
   <body>
-    <div class="container">
-      <header>
-        <h1 class="ai-logo-container">
-          s<img src="/website/images/ai-hero.gif" alt="AI" class="ai-logo" />mon
-          Software
-        </h1>
-        <p class="tagline">AI-Powered Solutions for Your Career</p>
-      </header>
+    <nav class="site-nav" aria-label="Primary">
+      <a class="nav-brand" href="/cover-letters">
+        <span class="nav-product">Job Cover Letters – AI</span>
+        <span class="nav-company">by sAImon Software</span>
+      </a>
+      <div class="nav-actions">
+        <a class="nav-link-quiet" href="/">sAImon Software</a>
+        <a class="btn btn-primary" href="/cover-letters">Try for free</a>
+      </div>
+    </nav>
 
-      <div class="main-content news-article">
+    <div class="page-shell">
+      <div class="page-card news-article">
         <a class="news-back-link" href="/news">&larr; Back to News</a>
-        <div class="news-meta">{meta_html}</div>
-        <h2 class="news-article-title">{html.escape(title)}</h2>{featured_html}
+        <div class="news-meta">
+          {meta_html}
+        </div>
+        <h1 class="news-article-title">{html.escape(title)}</h1>{featured_html}
         <div class="news-article-body">
         {body_html}
         </div>
       </div>
-
-      <footer>
-        <div class="footer-links">
-          <a href="/">Home</a>
-          <a href="/website/docs/terms-of-service.html">Terms of Service</a>
-          <a href="/website/docs/privacy-policy.html">Privacy Policy</a>
-          <a href="/delete-account.html">Delete account</a>
-          <a href="/support.html">Support</a>
-          <a href="/news">News</a>
-        </div>
-        <p class="copyright">
-          &copy; 2024 sAImon Software. All rights reserved.
-        </p>
-      </footer>
     </div>
+
+    <footer class="site-footer">
+      <div class="footer-links">
+        <a href="/cover-letters">Cover Letters</a>
+        <a href="/">sAImon Software</a>
+        <a href="/support.html">Support</a>
+        <a href="/news">News</a>
+      </div>
+      <div class="footer-legal">
+        <a href="/website/docs/terms-of-service.html">Terms</a>
+        ·
+        <a href="/website/docs/privacy-policy.html">Privacy</a>
+        ·
+        <a href="/delete-account.html">Delete account</a>
+      </div>
+      <p class="copyright">&copy; 2026 sAImon Software. All rights reserved.</p>
+    </footer>
   </body>
 </html>
 """

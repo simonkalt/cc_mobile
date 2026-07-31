@@ -6,45 +6,65 @@
     <title>News | sAImon Software</title>
     <meta name="description" content="Product news and updates from sAImon Software." />
     <link rel="icon" href="/website/images/1.png" type="image/png" />
-    <link rel="alternate" type="application/rss+xml" title="sAImon Software News" href="/news/rss.xml" />
-    <link rel="stylesheet" href="/website/styles.css" />
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="sAImon Software News"
+      href="/news/rss.xml"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/website/site.css" />
     <link rel="stylesheet" href="/website/news/news.css" />
   </head>
   <body>
-    <div class="container">
-      <header>
-        <h1 class="ai-logo-container">
-          s<img src="/website/images/ai-hero.gif" alt="AI" class="ai-logo" />mon
-          Software
-        </h1>
-        <p class="tagline">AI-Powered Solutions for Your Career</p>
-      </header>
+    <nav class="site-nav" aria-label="Primary">
+      <a class="nav-brand" href="/cover-letters">
+        <span class="nav-product">Job Cover Letters – AI</span>
+        <span class="nav-company">by sAImon Software</span>
+      </a>
+      <div class="nav-actions">
+        <a class="nav-link-quiet" href="/">sAImon Software</a>
+        <a class="btn btn-primary" href="/cover-letters">Try for free</a>
+      </div>
+    </nav>
 
-      <div class="main-content">
-        <div class="news-hero">
-          <h2>News</h2>
-          <p>Product updates, feature highlights, and announcements from sAImon Software.</p>
+    <div class="page-shell">
+      <div class="page-card">
+        <div class="page-hero news-hero">
+          <h1>News</h1>
+          <p>
+            Product updates, feature highlights, and announcements from sAImon
+            Software.
+          </p>
           <a class="news-rss-link" href="/news/rss.xml">Subscribe via RSS</a>
         </div>
 
         <div id="newsStatus" class="news-status-message">Loading articles…</div>
         <div id="newsGrid" class="news-grid" hidden></div>
       </div>
-
-      <footer>
-        <div class="footer-links">
-          <a href="/">Home</a>
-          <a href="/website/docs/terms-of-service.html">Terms of Service</a>
-          <a href="/website/docs/privacy-policy.html">Privacy Policy</a>
-          <a href="/delete-account.html">Delete account</a>
-          <a href="/support.html">Support</a>
-          <a href="/news">News</a>
-        </div>
-        <p class="copyright">
-          &copy; 2024 sAImon Software. All rights reserved.
-        </p>
-      </footer>
     </div>
+
+    <footer class="site-footer">
+      <div class="footer-links">
+        <a href="/cover-letters">Cover Letters</a>
+        <a href="/">sAImon Software</a>
+        <a href="/support.html">Support</a>
+        <a href="/news">News</a>
+      </div>
+      <div class="footer-legal">
+        <a href="/website/docs/terms-of-service.html">Terms</a>
+        ·
+        <a href="/website/docs/privacy-policy.html">Privacy</a>
+        ·
+        <a href="/delete-account.html">Delete account</a>
+      </div>
+      <p class="copyright">&copy; 2026 sAImon Software. All rights reserved.</p>
+    </footer>
 
     <script>
       (function () {
@@ -78,7 +98,8 @@
           .then(function (data) {
             const articles = data.articles || [];
             if (!articles.length) {
-              statusEl.textContent = "No articles published yet. Check back soon.";
+              statusEl.textContent =
+                "No articles published yet. Check back soon.";
               return;
             }
             statusEl.hidden = true;
@@ -100,7 +121,9 @@
                   ? "news-summary-card news-summary-card--with-image"
                   : "news-summary-card";
                 return (
-                  '<article class="' + layoutClass + '">' +
+                  '<article class="' +
+                  layoutClass +
+                  '">' +
                   '<div class="news-card-layout">' +
                   imageHtml +
                   '<div class="news-card-body">' +
@@ -109,7 +132,11 @@
                   '">' +
                   escapeHtml(article.title) +
                   "</a></h3>" +
-                  (meta ? '<div class="news-card-meta">' + escapeHtml(meta) + "</div>" : "") +
+                  (meta
+                    ? '<div class="news-card-meta">' +
+                      escapeHtml(meta) +
+                      "</div>"
+                    : "") +
                   "<p>" +
                   escapeHtml(article.summary) +
                   "</p>" +

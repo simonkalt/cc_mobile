@@ -186,6 +186,9 @@ class TestArticlesFeature(unittest.TestCase):
         )
         self.assertIn("news-article-body", html)
         self.assertIn("<p>Body</p>", html)
+        self.assertIn("/website/site.css", html)
+        self.assertIn("site-nav", html)
+        self.assertIn("site-footer", html)
 
 
 if __name__ == "__main__":
