@@ -977,8 +977,47 @@ def _inject_store_urls_into_index_html(html: str) -> str:
     )
 
 
-# Serve webpage at root (/) so root URL shows website/index.html
-# Requests arriving on support.saimonsoft.com get the support page instead.
+def _cover_letters_landing_variant(request: Request) -> str:
+    """
+    Resolve legacy vs v2 cover-letters landing.
+    Query ?v=legacy|v2 overrides env COVER_LETTERS_LANDING (default: legacy).
+    """
+    raw = (request.query_params.get("v") or "").strip().lower()
+    if raw in ("legacy", "v2"):
+        return raw
+    env = (os.getenv("COVER_LETTERS_LANDING") or "legacy").strip().lower()
+    if env in ("legacy", "v2"):
+        return env
+    return "legacy"
+
+
+def _serve_cover_letters_landing(request: Request):
+    """Serve cover-letters marketing HTML with store URL + gtag injection."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    variant = _cover_letters_landing_variant(request)
+    filename = "index.legacy.html" if variant == "legacy" else "index.html"
+    index_path = os.path.join(project_root, "website", "cover-letters", filename)
+    if not os.path.exists(index_path):
+        # Fallback: old root index if cover-letters files are missing
+        index_path = os.path.join(project_root, "website", "index.html")
+    if os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            html = f.read()
+        html = _inject_gtag_into_index_html(html)
+        html = _inject_store_urls_into_index_html(html)
+        return HTMLResponse(
+            content=html,
+            media_type="text/html",
+            headers={"X-Landing-Variant": variant},
+        )
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Cover letters landing page not found"},
+    )
+
+
+# Interim: product lives at /cover-letters; company hub on / comes later.
+# support.saimonsoft.com keeps serving support on /.
 @app.get("/")
 def read_root(request: Request):
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -989,17 +1028,17 @@ def read_root(request: Request):
         if os.path.exists(support_path):
             return FileResponse(support_path, media_type="text/html")
 
-    index_path = os.path.join(project_root, "website", "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            html = f.read()
-        html = _inject_gtag_into_index_html(html)
-        html = _inject_store_urls_into_index_html(html)
-        return HTMLResponse(content=html, media_type="text/html")
-    # Fallback if website/index.html is missing
-    return JSONResponse(
-        content={"status": f"Simon's API is running with Hugging Face token: {hf_token[:8]}"}
-    )
+    # Preserve query string (ads / UTM) on redirect to /cover-letters
+    qs = request.url.query
+    target = "/cover-letters" + (f"?{qs}" if qs else "")
+    return RedirectResponse(url=target, status_code=301)
+
+
+@app.get("/cover-letters", include_in_schema=False)
+@app.get("/cover-letters/", include_in_schema=False)
+def cover_letters_landing(request: Request):
+    """Job Cover Letters marketing page (legacy or v2 via COVER_LETTERS_LANDING / ?v=)."""
+    return _serve_cover_letters_landing(request)
 
 
 @app.get("/favicon.ico", include_in_schema=False)

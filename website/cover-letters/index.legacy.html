@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Cover Letters - AI</title>
+    <meta name="application-name" content="Job Cover Letters - AI" />
+    <meta name="description" content="Job Cover Letters - AI by sAImon Software: AI-powered cover letters tailored to each job application." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Job Cover Letters - AI" />
+    <meta property="og:title" content="Job Cover Letters - AI" />
+    <meta property="og:description" content="AI-powered cover letters tailored to each job application." />
+    <meta property="og:url" content="https://www.saimonsoft.com/cover-letters" />
+    <meta property="og:image" content="https://www.saimonsoft.com/website/images/1.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Job Cover Letters - AI" />
+    <meta name="twitter:description" content="AI-powered cover letters tailored to each job application." />
+    <meta name="landing-variant" content="legacy" />
+    <link rel="icon" href="/website/images/1.png" type="image/png" />
+    <link rel="stylesheet" href="/website/styles.css" />
+    <!-- Google Analytics (gtag.js): injected server-side from env GOOGLE_ANALYTICS_TAG -->
+  </head>
+  <body data-landing-variant="legacy">
+    <div class="container">
+      <header>
+        <h1 class="ai-logo-container">
+          s<img src="/website/images/ai-hero.gif" alt="AI" class="ai-logo" />mon
+          Software
+        </h1>
+        <p class="tagline">AI-Powered Solutions for Your Career</p>
+      </header>
+
+      <div class="main-content">
+        <h2 class="product-title"><span class="product-subtitle-embossed"><br>Job Cover Letters - AI</span></h2>
+        <p class="product-description">
+          Transform your job applications with AI-powered cover letters tailored
+          to each position.<br />Save time, stand out from the crowd, and land
+          your dream job faster.
+        </p>
+
+        <div class="screenshot-carousel">
+          <div class="carousel-viewport">
+            <div class="carousel-track" id="carouselTrack">
+              <!-- Images will be loaded dynamically -->
+            </div>
+          </div>
+          <button
+            class="carousel-arrow prev"
+            id="prevBtn"
+            aria-label="Previous image"
+          >
+            ‹
+          </button>
+          <button
+            class="carousel-arrow next"
+            id="nextBtn"
+            aria-label="Next image"
+          >
+            ›
+          </button>
+          <div class="carousel-nav" id="carouselNav">
+            <!-- Dots will be loaded dynamically -->
+          </div>
+        </div>
+
+        <!-- Modal for zoomed image -->
+        <div class="carousel-modal" id="carouselModal">
+          <button
+            class="carousel-modal-close"
+            id="modalCloseBtn"
+            aria-label="Close"
+          >
+            ×
+          </button>
+          <img
+            class="carousel-modal-image"
+            id="modalImage"
+            src=""
+            alt="Zoomed screenshot"
+          />
+        </div>
+
+        <div class="features">
+          <div class="feature">
+            <div class="feature-icon">🤖</div>
+            <h3>AI-Powered</h3>
+            <p>
+              Leverage advanced AI to generate personalized cover letters that
+              match your style and the job requirements.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">⚡</div>
+            <h3>Fast & Efficient</h3>
+            <p>
+              Create professional cover letters in minutes, not hours. Focus on
+              what matters most - your career.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">🎯</div>
+            <h3>Tailored to You</h3>
+            <p>
+              Each cover letter is customized to match the specific job posting
+              and your unique background.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">📄</div>
+            <h3>Editable in or outside of the app</h3>
+            <p>
+              Edit the cover letter in the app or outside of the app using a DOCX editor (Word, Google Docs, etc.).
+            </p>
+          </div>
+          
+        </div>
+
+        <div class="cta-section">
+          <span class="cta-label">Get Started</span>
+          <div class="app-store-buttons">
+            <!-- Injected on GET /: PLAY_STORE_URL, IOS_APP_STORE_URL, WEB_APP_URL -->
+            <a
+              class="app-store-button"
+              id="googlePlayBtn"
+              __PLAY_STORE_ATTRS__
+            >
+              <img
+                src="/website/images/footer-google-play.png"
+                alt="Get it on Google Play"
+              />
+            </a>
+            <a
+              class="app-store-button"
+              id="appStoreBtn"
+              __IOS_APP_STORE_ATTRS__
+            >
+              <img
+                src="/website/images/footer-app-store.png"
+                alt="Download on the App Store"
+              />
+            </a>
+            <a
+              class="app-store-button"
+              id="webAppBtn"
+              __WEB_APP_ATTRS__
+            >
+              <img
+                src="/website/images/footer-web.png"
+                alt="Open on the Web"
+              />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <footer>
+        <div class="footer-links">
+          <a href="/cover-letters">Home</a>
+          <a href="/website/docs/terms-of-service.html">Terms of Service</a>
+          <a href="/website/docs/privacy-policy.html">Privacy Policy</a>
+          <a href="/delete-account.html">Delete account</a>
+          <a href="/support.html">Support</a>
+          <a href="/news">News</a>
+        </div>
+        <p class="copyright">
+          &copy; 2026 sAImon Software. All rights reserved.
+        </p>
+      </footer>
+    </div>
+
+    <script>
+      // Image carousel functionality
+      const imageCount = 19; // Images numbered 1-19
+      let currentIndex = 0;
+      const images = [];
+
+      // Load images (PNG-first with JPG fallback for compatibility/caching edge cases)
+      for (let i = 1; i <= imageCount; i++) {
+        images.push(`/website/images/${i}.png`);
+      }
+
+      const carouselNav = document.getElementById("carouselNav");
+      const prevBtn = document.getElementById("prevBtn");
+      const nextBtn = document.getElementById("nextBtn");
+      const carouselTrack = document.getElementById("carouselTrack");
+      const carouselViewport = carouselTrack.parentElement;
+      let isAnimating = false;
+
+      // Touch / pen: horizontal swipe on the viewport (arrows and dots stay unchanged).
+      const SWIPE_THRESHOLD_PX = 48;
+      const SWIPE_SUPPRESS_CLICK_PX = 22;
+      let swipePointerId = null;
+      let swipeStartX = 0;
+      let swipePointerType = "";
+      let swipeSuppressionUntil = 0;
+
+      carouselViewport.addEventListener(
+        "click",
+        (e) => {
+          if (performance.now() < swipeSuppressionUntil) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        },
+        true
+      );
+
+      carouselViewport.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+        swipePointerId = e.pointerId;
+        swipeStartX = e.clientX;
+        swipePointerType = e.pointerType;
+        try {
+          carouselViewport.setPointerCapture(e.pointerId);
+        } catch (_) {}
+      });
+
+      function endSwipeGesture(e) {
+        if (swipePointerId !== e.pointerId) return;
+        const dx = e.clientX - swipeStartX;
+        const type = swipePointerType;
+        swipePointerId = null;
+        swipePointerType = "";
+        try {
+          if (carouselViewport.hasPointerCapture(e.pointerId)) {
+            carouselViewport.releasePointerCapture(e.pointerId);
+          }
+        } catch (_) {}
+
+        if (type !== "touch" && type !== "pen") return;
+        if (Math.abs(dx) >= SWIPE_SUPPRESS_CLICK_PX) {
+          swipeSuppressionUntil = performance.now() + 450;
+        }
+        if (Math.abs(dx) < SWIPE_THRESHOLD_PX) return;
+        if (dx < 0) nextImage();
+        else prevImage();
+      }
+
+      carouselViewport.addEventListener("pointerup", endSwipeGesture);
+      carouselViewport.addEventListener("pointercancel", endSwipeGesture);
+
+      // Create carousel dots
+      images.forEach((_, index) => {
+        const dot = document.createElement("button");
+        dot.className = "carousel-dot" + (index === 0 ? " active" : "");
+        dot.setAttribute("aria-label", `Go to image ${index + 1}`);
+        dot.addEventListener("click", () => goToImage(index));
+        carouselNav.appendChild(dot);
+      });
+
+      function renderCarousel() {
+        carouselTrack.innerHTML = "";
+
+        // Create all image wrappers
+        images.forEach((imageSrc, index) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "carousel-image-wrapper";
+
+          const img = document.createElement("img");
+          img.src = imageSrc;
+          img.alt = `Screenshot ${index + 1}`;
+          img.className = "carousel-image";
+          img.loading = "lazy";
+          img.dataset.fallbackTried = "false";
+          img.onerror = () => {
+            // Fallback to JPG if PNG fails to load on a client cache or stale server asset set.
+            if (
+              img.dataset.fallbackTried === "false" &&
+              imageSrc.toLowerCase().endsWith(".png")
+            ) {
+              img.dataset.fallbackTried = "true";
+              img.src = imageSrc.replace(/\.png$/i, ".jpg");
+            }
+          };
+
+          // Determine position relative to center
+          const distanceFromCenter = index - currentIndex;
+
+          if (distanceFromCenter === 0) {
+            // Center image - make it clickable to zoom
+            wrapper.classList.add("center");
+            img.classList.add("center");
+            img.style.cursor = "zoom-in";
+            img.addEventListener("click", (e) => {
+              e.stopPropagation();
+              openModal(imageSrc);
+            });
+          } else if (Math.abs(distanceFromCenter) <= 2) {
+            // Side images (within 2 positions)
+            img.classList.add("side");
+            img.addEventListener("click", () => goToImage(index));
+          } else {
+            // Off-screen images
+            img.classList.add("off-screen");
+            img.classList.add("side");
+          }
+
+          wrapper.appendChild(img);
+          carouselTrack.appendChild(wrapper);
+        });
+
+        // Update track position
+        updateTrackPosition();
+
+        // Update dots
+        document.querySelectorAll(".carousel-dot").forEach((dot, index) => {
+          dot.classList.toggle("active", index === currentIndex);
+        });
+      }
+
+      function updateTrackPosition() {
+        const viewport = carouselTrack.parentElement;
+        const wrappers = carouselTrack.querySelectorAll(".carousel-image-wrapper");
+        const currentWrapper = wrappers[currentIndex];
+        if (!viewport || !currentWrapper) return;
+
+        const viewportWidth = viewport.offsetWidth;
+        const wrapperCenter =
+          currentWrapper.offsetLeft + currentWrapper.offsetWidth / 2;
+        const trackPosition = viewportWidth / 2 - wrapperCenter;
+        carouselTrack.style.transform = `translateX(${trackPosition}px)`;
+      }
+
+      function goToImage(index) {
+        if (isAnimating || index === currentIndex) return;
+        isAnimating = true;
+        currentIndex = index;
+        updateTrackPosition();
+
+        // Update image classes after transition starts
+        setTimeout(() => {
+          renderCarousel();
+          setTimeout(() => {
+            isAnimating = false;
+          }, 50);
+        }, 50);
+      }
+
+      function nextImage() {
+        if (isAnimating) return;
+        isAnimating = true;
+        currentIndex = (currentIndex + 1) % images.length;
+        updateTrackPosition();
+
+        setTimeout(() => {
+          renderCarousel();
+          setTimeout(() => {
+            isAnimating = false;
+          }, 50);
+        }, 50);
+      }
+
+      function prevImage() {
+        if (isAnimating) return;
+        isAnimating = true;
+        currentIndex = (currentIndex - 1 + images.length) % images.length;
+        updateTrackPosition();
+
+        setTimeout(() => {
+          renderCarousel();
+          setTimeout(() => {
+            isAnimating = false;
+          }, 50);
+        }, 50);
+      }
+
+      prevBtn.addEventListener("click", prevImage);
+      nextBtn.addEventListener("click", nextImage);
+
+      // Keyboard navigation
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft") prevImage();
+        if (e.key === "ArrowRight") nextImage();
+      });
+
+      // Modal functionality
+      const carouselModal = document.getElementById("carouselModal");
+      const modalImage = document.getElementById("modalImage");
+      const modalCloseBtn = document.getElementById("modalCloseBtn");
+
+      function openModal(imageSrc) {
+        modalImage.src = imageSrc;
+        carouselModal.classList.add("active");
+        document.body.style.overflow = "hidden"; // Prevent background scrolling
+      }
+
+      function closeModal() {
+        carouselModal.classList.remove("active");
+        document.body.style.overflow = ""; // Restore scrolling
+      }
+
+      // Close modal when clicking the X button
+      modalCloseBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeModal();
+      });
+
+      // Close modal when clicking outside the image (on the dark background)
+      carouselModal.addEventListener("click", (e) => {
+        if (e.target === carouselModal) {
+          closeModal();
+        }
+      });
+
+      // Close modal with Escape key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && carouselModal.classList.contains("active")) {
+          closeModal();
+        }
+      });
+
+      // Initialize carousel
+      renderCarousel();
+
+      // Re-center on mobile orientation/viewport changes.
+      window.addEventListener("resize", () => {
+        updateTrackPosition();
+      });
+
+      // CTA + variant analytics (gtag injected server-side when configured)
+      (function () {
+        const variant = "legacy";
+        function track(eventName, params) {
+          if (typeof gtag === "function") {
+            gtag("event", eventName, Object.assign({ landing_variant: variant }, params || {}));
+          }
+        }
+        track("landing_view", { page_path: "/cover-letters" });
+        const play = document.getElementById("googlePlayBtn");
+        const ios = document.getElementById("appStoreBtn");
+        const web = document.getElementById("webAppBtn");
+        if (play) play.addEventListener("click", () => track("cta_play_click"));
+        if (ios) ios.addEventListener("click", () => track("cta_ios_click"));
+        if (web) web.addEventListener("click", () => track("cta_web_click"));
+        const depths = [25, 50, 75, 100];
+        const seen = {};
+        function onScroll() {
+          const doc = document.documentElement;
+          const max = doc.scrollHeight - window.innerHeight;
+          if (max <= 0) return;
+          const pct = Math.round((window.scrollY / max) * 100);
+          depths.forEach((d) => {
+            if (pct >= d && !seen[d]) {
+              seen[d] = true;
+              track("scroll_depth", { percent: d });
+            }
+          });
+        }
+        window.addEventListener("scroll", onScroll, { passive: true });
+      })();
+    </script>
+  </body>
+</html>

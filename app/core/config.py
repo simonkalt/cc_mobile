@@ -111,10 +111,12 @@ class Settings:
     # Google Analytics (GA4) — injected into website/index.html when serving /
     GOOGLE_ANALYTICS_TAG: Optional[str] = os.getenv("GOOGLE_ANALYTICS_TAG")
 
-    # Marketing site (/) — app store / web badge links, injected into website/index.html
+    # Marketing site — app store / web badge links, injected into cover-letters HTML
     PLAY_STORE_URL: Optional[str] = os.getenv("PLAY_STORE_URL")
     IOS_APP_STORE_URL: Optional[str] = os.getenv("IOS_APP_STORE_URL")
     WEB_APP_URL: Optional[str] = os.getenv("WEB_APP_URL")
+    # Cover-letters landing kill-switch: "legacy" (default) | "v2". Preview with ?v=legacy|v2
+    COVER_LETTERS_LANDING: Optional[str] = os.getenv("COVER_LETTERS_LANDING")
 
     # Public legal pages (HTML on marketing site). Used by client-settings for registration links, etc.
     PUBLIC_PRIVACY_POLICY_URL: str = (
