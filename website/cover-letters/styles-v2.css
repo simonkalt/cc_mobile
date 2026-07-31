@@ -133,11 +133,12 @@ button.btn {
 .try-free-modal-panel {
   position: relative;
   width: min(560px, 100%);
-  background: var(--paper);
+  background: #fff;
   border-radius: 18px;
   padding: 28px 24px 24px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
   border: 1px solid var(--border);
+  color: var(--ink);
 }
 
 .try-free-modal-panel h2 {
@@ -176,6 +177,17 @@ button.btn {
 
 .try-free-modal .channels {
   max-width: none;
+}
+
+/* Keep channel buttons matching the hero (dark cards on white modal). */
+.try-free-modal .channel:not(.channel-web) {
+  background: var(--forest);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.try-free-modal .channel:not(.channel-web):hover {
+  background: var(--forest-mid);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .btn:hover {
