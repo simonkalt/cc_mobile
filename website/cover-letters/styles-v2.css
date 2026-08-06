@@ -419,18 +419,29 @@ button.btn {
   margin-bottom: 18px;
 }
 
-.letter-spotlight-phone {
+.letter-spotlight-phone-frame {
   justify-self: center;
   align-self: center;
   width: min(260px, 70vw);
-  height: auto;
-  aspect-ratio: 1080 / 2340;
-  object-fit: contain;
+  max-width: 100%;
   border-radius: 24px;
   border: 3px solid var(--forest-mid);
   box-shadow: 0 18px 40px rgba(18, 40, 32, 0.2);
-  cursor: zoom-in;
   background: #0d1a14;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.letter-spotlight-phone {
+  display: block;
+  width: 100%;
+  height: auto !important;
+  max-width: 100%;
+  cursor: zoom-in;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .gallery figure.gallery-letter {
@@ -464,17 +475,28 @@ button.btn {
   pointer-events: none;
 }
 
-.hero-phone {
+.hero-phone-frame {
   justify-self: center;
   align-self: center;
   width: min(280px, 70vw);
-  height: auto;
-  aspect-ratio: 1080 / 2340;
-  object-fit: contain;
+  max-width: 100%;
   border-radius: 28px;
   box-shadow: var(--shadow);
   border: 3px solid rgba(255, 255, 255, 0.18);
   background: #0d1a14;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.hero-phone {
+  display: block;
+  width: 100%;
+  height: auto !important;
+  max-width: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .section {
@@ -894,10 +916,9 @@ button.btn {
     margin-right: auto;
   }
 
-  .hero-phone {
+  .hero-phone-frame {
     order: -1;
     width: min(220px, 55vw);
-    height: auto;
   }
 
   .letter-spotlight-inner {
