@@ -962,6 +962,10 @@ button.btn {
   .channels {
     grid-template-columns: 1fr;
   }
+
+  .channel-badge {
+    align-self: center;
+  }
 }
 
 @media (max-width: 560px) {
