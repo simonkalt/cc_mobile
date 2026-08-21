@@ -1273,6 +1273,12 @@ WHEN TO USE THESE TAGS:
    - Use a subtle color on the opening paragraph
    Choose professional, complementary colors (#1f4e79 navy, #2e7d32 green, #6a1b9a purple, #c0392b red, etc.).
 
+CONTRAST AND LEGIBILITY (mandatory — letters print on white paper):
+- NEVER use white, off-white, cream, pale yellow, or other light font colors (e.g. #fff, #ffffff, #fefefe, #ffffcc, #f5f5f5). Text must stay dark and readable.
+- NEVER put light text on a light highlight. White (or pale) text on yellow highlight is forbidden and unreadable.
+- [highlight] / [highlight:yellow] only tints the background. Keep highlighted text black or dark (omit [color] on those spans, or use a dark hex such as #000000 or #1a1a1a).
+- If you use [color], pick dark, high-contrast colors against white or against any highlight. Do not invert to light-on-dark.
+
 Do not describe style changes in prose -- encode them with the tags above.
 Keep all line breaks and template structure rules unchanged while adding tags.
 === END DOCX INLINE STYLE TAGS ===
@@ -1297,7 +1303,7 @@ Keep all line breaks and template structure rules unchanged while adding tags.
                     typography_instruction = f"""
 === TYPOGRAPHY BASELINE ===
 Use font-family '{font_family}', font-size {font_size}pt, and line-height {line_height} as the baseline for main body text.
-You may creatively vary font size, color, and style for lists, tables, headings, and key phrases using inline HTML (e.g. <span style='font-size:14pt'>, <span style='color:#c00000'>). The baseline applies to the main letter content; lists and tables can use different sizes for visual hierarchy.
+You may creatively vary font size, color, and style for lists, tables, headings, and key phrases using inline HTML (e.g. <span style='font-size:14pt'>, <span style='color:#c00000'>). Keep all text dark and high-contrast on white or on any highlight; never use white or light font colors (especially not on yellow highlight). The baseline applies to the main letter content; lists and tables can use different sizes for visual hierarchy.
 === END TYPOGRAPHY BASELINE ===
 """
                     critical_instructions = critical_instructions + typography_instruction
