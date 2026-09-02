@@ -5,15 +5,33 @@ The DOCX builder maps each input line (including blank lines) 1:1 to a Word
 paragraph with zero extra spacing, so the LLM's newlines directly control
 vertical layout.  The only post-processing that remains here is:
 
+* Literal ``\\n`` unescape – some models emit the two-character sequence
+  backslash-n instead of a real line feed; convert those before splitting.
 * List compaction  – remove blank lines between consecutive bullet/number items.
-* Triple-newline collapse – safety net for non-template letters where the LLM
-  occasionally emits excessive blank lines.
+* Triple-newline collapse – any run of 3+ newlines becomes exactly two
+  (one blank line), whether or not a template is in use.
 """
 
 from __future__ import annotations
 
 import re
 from typing import List, Optional
+
+
+def _unescape_literal_newlines(text: str) -> str:
+    """Turn two-character \\n / \\r sequences into real line breaks.
+
+    After a successful JSON parse, a double-escaped value becomes the
+    characters backslash + n. ``_plain_text_to_blocks`` only splits on a
+    real LF, so the letter would otherwise be one or two paragraphs with
+    visible ``\\n`` in the text. Unescape before triple-newline collapse.
+    """
+    return (
+        (text or "")
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+    )
 
 
 def _normalize_newlines(text: str) -> str:
@@ -69,10 +87,12 @@ def finalize_plain_text_for_docx(content: str, template: Optional[str]) -> str:
     """
     Last pass on plain-text cover letter before DOCX build.
 
-    Always collapse 3+ consecutive newlines to exactly two (one blank line).
-    LLMs routinely over-emit blank lines regardless of template guidance.
+    Unescape literal ``\\n`` first, then always collapse 3+ consecutive
+    newlines to exactly two (one blank line). LLMs routinely over-emit
+    blank lines regardless of template guidance.
     """
-    text = _normalize_newlines(content or "")
+    text = _unescape_literal_newlines(content or "")
+    text = _normalize_newlines(text)
     if not text.strip():
         return text
     text = _collapse_triple_newlines_in_plain_text(text)
