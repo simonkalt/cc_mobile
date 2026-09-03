@@ -139,6 +139,29 @@ def _sanitize_markdown_no_html(markdown: str) -> str:
     return text.strip()
 
 
+def _normalize_content_markdown(content: str) -> str:
+    """
+    Normalize spaced markdown emphasis markers in plain-text cover letter content
+    so what the client receives matches what the DOCX parser produces.
+
+    Some LLMs (e.g. gpt-5.5 via OpenRouter) emit loose markers like
+    "* * Company Name * *" or "* Text * *" instead of "**Company Name**".
+    The DOCX generator already normalizes these via _normalize_spaced_markdown_emphasis,
+    but the raw ``content`` field was returned as-is, causing visible asterisks in
+    client-side previews and share-as-PDF exports.
+
+    This runs the same normalization line-by-line and returns the cleaned text.
+    """
+    if not content:
+        return content
+    try:
+        from app.utils.docx_generator import _normalize_spaced_markdown_emphasis
+        lines = content.splitlines(keepends=True)
+        return "".join(_normalize_spaced_markdown_emphasis(line) for line in lines)
+    except Exception:
+        return content
+
+
 def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
     """
     Docx-only contract: preserve "content" (plain text) when present; else legacy markdown/html.
@@ -156,8 +179,11 @@ def _normalize_generation_response(result: Any, req: Any) -> Dict[str, Any]:
             req, result if isinstance(result, dict) else payload
         )
         return payload
-    # When we have "content" (docx-only flow), keep it as-is; docx is built from plain text
+    # When we have "content" (docx-only flow), normalize spaced markdown emphasis so the
+    # client receives clean text (e.g. "* * Foo * *" → "**Foo**") matching what the DOCX
+    # parser produces.  The actual bold/italic semantics are preserved for client renderers.
     if payload.get("content") is not None:
+        payload["content"] = _normalize_content_markdown(payload["content"])
         payload["docxTemplateHints"] = _docx_template_hints_from_request(
             req, result if isinstance(result, dict) else payload
         )
