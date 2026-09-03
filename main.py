@@ -977,6 +977,52 @@ def _inject_store_urls_into_index_html(html: str) -> str:
     )
 
 
+_DEFAULT_PAYPAL_CLIENT_ID = (
+    "BAAzVzqRs6cgLZ7DYPU7jbGd6XevxtxkytV-QF9COxzqngWfHjJWywa6Zwsl0ACheirPJI83MGBFrSuMF0"
+)
+_DEFAULT_PAYPAL_HOSTED_BUTTON_ID = "2GMS84Y7YGKJ4"
+_PAYPAL_CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_PAYPAL_BUTTON_ID_RE = re.compile(r"^[A-Za-z0-9]+$")
+_PAYPAL_CURRENCY_RE = re.compile(r"^[A-Za-z]{3}$")
+_PAYPAL_FUNDING_RE = re.compile(r"^[a-zA-Z0-9,-]+$")
+
+
+def _inject_paypal_into_html(html: str) -> str:
+    """Replace PayPal placeholders from env (PAYPAL_CLIENT_ID, PAYPAL_HOSTED_BUTTON_ID, …)."""
+    from urllib.parse import urlencode
+
+    client_id = (os.getenv("PAYPAL_CLIENT_ID") or _DEFAULT_PAYPAL_CLIENT_ID).strip()
+    button_id = (
+        os.getenv("PAYPAL_HOSTED_BUTTON_ID") or _DEFAULT_PAYPAL_HOSTED_BUTTON_ID
+    ).strip()
+    currency = (os.getenv("PAYPAL_CURRENCY") or "USD").strip() or "USD"
+    enable_funding = (os.getenv("PAYPAL_ENABLE_FUNDING") or "venmo").strip() or "venmo"
+
+    if not _PAYPAL_CLIENT_ID_RE.fullmatch(client_id):
+        client_id = _DEFAULT_PAYPAL_CLIENT_ID
+    if not _PAYPAL_BUTTON_ID_RE.fullmatch(button_id):
+        button_id = _DEFAULT_PAYPAL_HOSTED_BUTTON_ID
+    if not _PAYPAL_CURRENCY_RE.fullmatch(currency):
+        currency = "USD"
+    if not _PAYPAL_FUNDING_RE.fullmatch(enable_funding):
+        enable_funding = "venmo"
+
+    sdk_src = "https://www.paypal.com/sdk/js?" + urlencode(
+        {
+            "client-id": client_id,
+            "components": "hosted-buttons",
+            "enable-funding": enable_funding,
+            "currency": currency.upper(),
+        }
+    )
+    import html as html_module
+
+    safe_src = html_module.escape(sdk_src, quote=True)
+    return html.replace("__PAYPAL_SDK_SRC__", safe_src).replace(
+        "__PAYPAL_HOSTED_BUTTON_ID__", button_id
+    )
+
+
 def _cover_letters_landing_variant(request: Request) -> str:
     """
     Resolve legacy vs v2 cover-letters landing.
@@ -1064,6 +1110,25 @@ def support_page():
     if os.path.exists(path):
         return FileResponse(path, media_type="text/html")
     return JSONResponse(status_code=404, content={"detail": "Support page not found"})
+
+
+@app.get("/make-payment", include_in_schema=False)
+@app.get("/make-payment/", include_in_schema=False)
+def make_payment_page():
+    """Unlisted PayPal payment page — not linked from marketing nav/footer."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", "make-payment.html")
+    if not os.path.exists(path):
+        return JSONResponse(status_code=404, content={"detail": "Make payment page not found"})
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    html = _inject_gtag_into_index_html(html)
+    html = _inject_paypal_into_html(html)
+    return HTMLResponse(
+        content=html,
+        media_type="text/html",
+        headers={"X-Robots-Tag": "noindex, nofollow"},
+    )
 
 
 @app.get("/news", include_in_schema=False)

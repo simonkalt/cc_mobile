@@ -118,6 +118,14 @@ class Settings:
     # Cover-letters landing kill-switch: "legacy" (default) | "v2". Preview with ?v=legacy|v2
     COVER_LETTERS_LANDING: Optional[str] = os.getenv("COVER_LETTERS_LANDING")
 
+    # Unlisted /make-payment page — PayPal hosted button (public client id, not a secret)
+    PAYPAL_CLIENT_ID: Optional[str] = os.getenv("PAYPAL_CLIENT_ID")
+    PAYPAL_HOSTED_BUTTON_ID: Optional[str] = os.getenv("PAYPAL_HOSTED_BUTTON_ID")
+    PAYPAL_CURRENCY: str = (os.getenv("PAYPAL_CURRENCY") or "USD").strip() or "USD"
+    PAYPAL_ENABLE_FUNDING: str = (
+        (os.getenv("PAYPAL_ENABLE_FUNDING") or "venmo").strip() or "venmo"
+    )
+
     # Public legal pages (HTML on marketing site). Used by client-settings for registration links, etc.
     PUBLIC_PRIVACY_POLICY_URL: str = (
         (os.getenv("PUBLIC_PRIVACY_POLICY_URL") or "").strip()

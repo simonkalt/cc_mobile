@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Make a Payment | sAImon Software</title>
+    <meta
+      name="description"
+      content="Make a payment to sAImon Software for services required or rendered."
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/website/images/1.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/website/site.css" />
+    <script src="__PAYPAL_SDK_SRC__"></script>
+  </head>
+  <body>
+    <nav class="site-nav" aria-label="Primary">
+      <a class="nav-brand" href="/cover-letters">
+        <span class="nav-product">Job Cover Letters – AI</span>
+        <span class="nav-company">by sAImon Software</span>
+      </a>
+      <div class="nav-actions">
+        <a class="nav-link-quiet" href="/">sAImon Software</a>
+        <a class="btn btn-primary" href="/cover-letters">Try for free</a>
+      </div>
+    </nav>
+
+    <div class="page-shell">
+      <div class="page-card">
+        <div class="page-hero">
+          <h1>Make a Payment</h1>
+          <p>sAImon Software</p>
+        </div>
+
+        <p class="payment-copy">
+          Make a payment to sAImon Software for any services required or rendered.
+          Make sure to specify what the payment is for in the description.
+        </p>
+
+        <div class="paypal-wrap">
+          <div id="paypal-container-__PAYPAL_HOSTED_BUTTON_ID__"></div>
+          <script>
+            paypal.HostedButtons({
+              hostedButtonId: "__PAYPAL_HOSTED_BUTTON_ID__",
+            }).render("#paypal-container-__PAYPAL_HOSTED_BUTTON_ID__");
+          </script>
+        </div>
+      </div>
+    </div>
+
+    <footer class="site-footer">
+      <div class="footer-links">
+        <a href="/cover-letters">Cover Letters</a>
+        <a href="/">sAImon Software</a>
+        <a href="/support.html">Support</a>
+        <a href="/news">News</a>
+      </div>
+      <div class="footer-legal">
+        <a href="/website/docs/terms-of-service.html">Terms</a>
+        ·
+        <a href="/website/docs/privacy-policy.html">Privacy</a>
+        ·
+        <a href="/delete-account.html">Delete account</a>
+      </div>
+      <p class="copyright">&copy; 2026 sAImon Software. All rights reserved.</p>
+    </footer>
+  </body>
+</html>
