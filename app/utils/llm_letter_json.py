@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 _LEAKED_JSON_CLOSER_RE = re.compile(
     r'\\?["\u201c\u201d](?:\s|\\[nrt])*\}(?:\s|\\[nrt])*$'
 )
+# A last line that is only JSON punctuation (the quote may already have been
+# consumed as the string closer, leaving a lone } on the next page).
+_JSON_DEBRIS_LINE_RE = re.compile(r'^[\s\\]*["\u201c\u201d}{]+[\s\\]*$')
 
 
 def _rewrite_json_quoted_value_escaping_unescaped_control_chars(
@@ -62,11 +65,27 @@ def strip_leaked_json_wrapper(text: str) -> str:
     """Remove a trailing JSON string/object closer that leaked into letter text."""
     if not text:
         return text
+    original = text
     updated, n = _LEAKED_JSON_CLOSER_RE.subn("", text)
     if n:
+        text = updated.rstrip()
+
+    lines = text.split("\n")
+    removed_debris = False
+    while lines:
+        last = lines[-1].strip()
+        if last and _JSON_DEBRIS_LINE_RE.match(last) and ("}" in last or last in ('"', "\u201c", "\u201d")):
+            lines.pop()
+            removed_debris = True
+            while lines and not lines[-1].strip():
+                lines.pop()
+            continue
+        break
+
+    if n or removed_debris:
         logger.info("Removed leaked JSON closing quote/brace from LLM letter field")
-        return updated.rstrip()
-    return text
+        return "\n".join(lines).rstrip()
+    return original
 
 
 def _sanitize_parsed_letter_fields(json_r: Dict[str, Any]) -> Dict[str, Any]:
@@ -193,9 +212,9 @@ def _try_repair_json_unescaped_string_controls(json_str: str) -> Optional[str]:
             escaped, end_idx, did_change = (
                 _rewrite_json_quoted_value_escaping_unescaped_control_chars(t, value_start)
             )
-            # Unterminated value: model often wrote \" then } as if closing JSON.
+            # Unterminated value: leftover object closer (optional escaped quote + }).
             if end_idx >= len(t):
-                peeled, n = re.subn(r'\\"(?:\\[nrt]|\s)*\}\s*$', "", escaped)
+                peeled, n = re.subn(r'(?:\\")?(?:\\[nrt]|\s)*\}\s*$', "", escaped)
                 if n:
                     escaped = peeled
                     did_change = True

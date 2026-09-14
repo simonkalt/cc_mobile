@@ -43,6 +43,14 @@ class TestStripLeakedJsonWrapper(unittest.TestCase):
         body = 'I have 5 years of "hands-on" experience.\n\n' + SIGNATURE
         self.assertEqual(strip_leaked_json_wrapper(body + '"\n}'), body)
 
+    def test_strips_lone_brace_on_following_page(self):
+        leaked = SIGNATURE + "\n\n\n}"
+        self.assertEqual(strip_leaked_json_wrapper(leaked), SIGNATURE)
+
+    def test_strips_lone_brace_on_next_line(self):
+        leaked = SIGNATURE + "\n}"
+        self.assertEqual(strip_leaked_json_wrapper(leaked), SIGNATURE)
+
 
 class TestParseLlmResponseJson(unittest.TestCase):
     def test_valid_json_unchanged(self):
@@ -73,6 +81,16 @@ class TestParseLlmResponseJson(unittest.TestCase):
     def test_recovers_unterminated_content_without_keeping_closer(self):
         # Escaped closer + unescaped newlines: quote/brace would otherwise land in content.
         raw = '{"content": "' + SIGNATURE + '\\"\n}'
+        parsed = parse_llm_response_json(raw)
+        self.assertEqual(parsed["content"], SIGNATURE)
+
+    def test_strips_brace_inside_valid_json_after_blank_lines(self):
+        raw = json.dumps({"content": SIGNATURE + "\n\n\n}"})
+        parsed = parse_llm_response_json(raw)
+        self.assertEqual(parsed["content"], SIGNATURE)
+
+    def test_recovers_unterminated_newline_then_object_brace(self):
+        raw = '{"content": "' + SIGNATURE + "\n}"
         parsed = parse_llm_response_json(raw)
         self.assertEqual(parsed["content"], SIGNATURE)
 
