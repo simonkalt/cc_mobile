@@ -11,7 +11,7 @@ import re
 import hashlib
 import time
 from datetime import timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status  # type: ignore[import-untyped]
 from dotenv import dotenv_values
@@ -50,6 +50,10 @@ from app.utils.llm_utils import (
     load_system_prompt,
     normalize_llm_name,
 )
+from app.utils.llm_letter_json import (
+    parse_llm_response_json,
+    strip_leaked_json_wrapper,
+)
 from app.utils.llm_token_limits import (
     max_output_tokens_for_model,
     resolve_openai_model,
@@ -85,71 +89,6 @@ _USER_PROFILE_CACHE_TTL_SECONDS = 5 * 60
 _local_resume_cache: Dict[str, tuple[float, str]] = {}
 _local_result_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
 _local_user_profile_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
-
-
-def _rewrite_json_quoted_value_escaping_unescaped_control_chars(
-    s: str, value_start: int
-) -> Tuple[str, int, bool]:
-    """
-    Walk a JSON string value from the first char after the opening quote, copying
-    valid \\-escapes as-is, and replacing unescaped U+00–U+1F (including bare
-    newlines) with JSON \\n / \\r / \\t / \\u00xx. Returns
-    (escaped_string_body, index_after_closing_double_quote, did_change). If the
-    string is not closed, ends at len(s) with did_change True when controls were fixed.
-    """
-    i = value_start
-    out: List[str] = []
-    did_change = False
-    while i < len(s):
-        c = s[i]
-        if c == "\\" and i + 1 < len(s):
-            out.append(s[i])
-            out.append(s[i + 1])
-            i += 2
-            continue
-        if c == '"':
-            return ("".join(out), i + 1, did_change)
-        o = ord(c)
-        if o < 0x20:
-            did_change = True
-            if c == "\n":
-                out.append("\\n")
-            elif c == "\r":
-                out.append("\\r")
-            elif c == "\t":
-                out.append("\\t")
-            else:
-                out.append(f"\\u{o:04x}")
-        else:
-            out.append(c)
-        i += 1
-    return ("".join(out), len(s), did_change)
-
-
-def _try_repair_json_unescaped_string_controls(json_str: str) -> Optional[str]:
-    """
-    Re-encode known top-level string fields when the model broke JSON with literal
-    line breaks or unescaped control characters inside quoted values.
-    """
-    t = json_str
-    for _ in range(8):
-        before = t
-        for key in ("content", "markdown", "html"):
-            m = re.search(rf'"{re.escape(key)}"\s*:\s*"', t)
-            if not m:
-                continue
-            value_start = m.end()
-            escaped, end_idx, did_change = _rewrite_json_quoted_value_escaping_unescaped_control_chars(
-                t, value_start
-            )
-            if not did_change:
-                continue
-            t = t[:value_start] + escaped + '"' + t[end_idx:]
-        if t == before:
-            break
-    if t == json_str:
-        return None
-    return t
 
 
 def _sha256_text(value: str) -> str:
@@ -1259,6 +1198,7 @@ Placeholders present in this template (replace with resume/job data): {ph_line}.
     docx_style_instruction = """
 === DOCX INLINE STYLE TAGS (CRITICAL) ===
 Your JSON response still returns exactly one field: "content".
+Do not put a closing quotation mark or } at the end of the letter; those are JSON syntax around the content field, not part of the letter.
 Inside "content", you MAY use ONLY these inline tags for run-level styling:
 - [size:Npt]text[/size]        e.g. [size:14pt]Important Title[/size]
 - [color:#RRGGBB]text[/color]  e.g. [color:#1f4e79]Company Name[/color]
@@ -1646,104 +1586,8 @@ Apply them exactly. They take priority over any conflicting earlier instructions
         if timing:
             timing.checkpoint("usage_updates_done")
 
-        # Clean and parse the response
         logger.info("Cleaning and parsing LLM response text")
-        r = r.replace("```json", "").replace("```", "").strip()
-
-        # Try to extract JSON if it's embedded in text
-        # Look for JSON object boundaries
-        start_idx = r.find("{")
-        end_idx = r.rfind("}")
-
-        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            # Extract just the JSON portion
-            json_str = r[start_idx : end_idx + 1]
-        else:
-            json_str = r
-
-        logger.info("Attempting to parse JSON from LLM response")
-        try:
-            json_r = json.loads(json_str)
-            logger.info("JSON parse of LLM response succeeded")
-        except json.JSONDecodeError as e:
-            # If parsing fails, try to fix common issues
-            logger.warning(f"Initial JSON parse failed: {e}, attempting to fix...")
-
-            # Fix 0: literal newlines / control characters inside a quoted "content" (etc.)
-            repaired = _try_repair_json_unescaped_string_controls(json_str)
-            json_r: Optional[Dict[str, Any]] = None
-            if repaired is not None:
-                try:
-                    json_r = json.loads(repaired)
-                    logger.info(
-                        "JSON parse succeeded after re-escaping unescaped string controls"
-                    )
-                except json.JSONDecodeError as e0:
-                    logger.debug(f"Control-char repair not sufficient: {e0}")
-                    json_r = None
-            # Fix 1: Look for the last complete JSON object (balanced braces)
-            if json_r is None:
-                brace_count = 0
-                last_valid_end = -1
-                for i, char in enumerate(json_str):
-                    if char == "{":
-                        brace_count += 1
-                    elif char == "}":
-                        brace_count -= 1
-                        if brace_count == 0:
-                            last_valid_end = i
-                            break
-
-                if last_valid_end > 0:
-                    try:
-                        json_r = json.loads(json_str[: last_valid_end + 1])
-                        logger.info("Successfully fixed truncated JSON (balanced braces)")
-                    except json.JSONDecodeError:
-                        json_r = None
-                else:
-                    json_r = None
-
-            # Fix 2: If still no parse (e.g. unterminated string), recover "content" or "markdown" from start
-            if json_r is None and ("Unterminated string" in str(e) or "Expecting" in str(e)):
-                content_match = re.search(r'"content"\s*:\s*"', json_str)
-                markdown_match = re.search(r'"markdown"\s*:\s*"', json_str)
-                if content_match:
-                    value_start = content_match.end()
-                    raw_content = json_str[value_start:]
-                    escaped = (
-                        raw_content.replace("\\", "\\\\")
-                        .replace('"', '\\"')
-                        .replace("\n", "\\n")
-                        .replace("\r", "\\r")
-                    )
-                    try:
-                        fixed_str = '{"content": "' + escaped + '"}'
-                        json_r = json.loads(fixed_str)
-                        logger.info("Recovered from unterminated string: using content")
-                    except json.JSONDecodeError:
-                        pass
-                if json_r is None and markdown_match:
-                    value_start = markdown_match.end()
-                    raw_markdown = json_str[value_start:]
-                    # Escape for JSON: backslash and quote first, then newlines
-                    escaped = (
-                        raw_markdown.replace("\\", "\\\\")
-                        .replace('"', '\\"')
-                        .replace("\n", "\\n")
-                        .replace("\r", "\\r")
-                    )
-                    try:
-                        fixed_str = '{"markdown": "' + escaped + '", "html": ""}'
-                        json_r = json.loads(fixed_str)
-                        logger.info(
-                            "Recovered from unterminated string: using markdown content, html empty"
-                        )
-                    except json.JSONDecodeError:
-                        pass
-
-            if json_r is None:
-                logger.warning("JSON parse still failed after all fix attempts; re-raising error")
-                raise e
+        json_r = parse_llm_response_json(r)
 
         # Docx components flow: LLM returns document_xml, numbering_xml, styles_xml (when USE_DOCX_COMPONENTS)
         doc_xml = json_r.get("document_xml")
@@ -1772,6 +1616,7 @@ Apply them exactly. They take priority over any conflicting earlier instructions
                 letter_content,
                 resolved_template_for_layout,
             )
+            letter_content = strip_leaked_json_wrapper(letter_content)
             _write_additional_instructions_debug(additional_instructions, letter_content)
             result_payload = {"content": letter_content}
             if timing:
