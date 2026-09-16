@@ -482,6 +482,230 @@ a {
   color: var(--forest);
 }
 
+/* Company hub */
+.company-hero {
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 20%, rgba(42, 90, 67, 0.35), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 85% 80%, rgba(30, 90, 138, 0.22), transparent 50%),
+    linear-gradient(160deg, var(--forest-deep) 0%, var(--forest) 48%, #234f3a 100%);
+  color: #f4faf6;
+}
+
+.company-hero-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 56px 24px 64px;
+}
+
+.company-hero .hero-kicker {
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b7d4c4;
+  margin-bottom: 14px;
+}
+
+.company-hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 4.5vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  margin-bottom: 18px;
+}
+
+.company-lead {
+  font-size: 1.15rem;
+  line-height: 1.7;
+  color: rgba(244, 250, 246, 0.88);
+  max-width: 40rem;
+}
+
+.company-section {
+  padding: 56px 24px;
+}
+
+.company-section-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.company-section h2 {
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 3vw, 2.25rem);
+  color: var(--forest);
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.company-section-lead {
+  color: var(--muted);
+  font-size: 1.05rem;
+  max-width: 38rem;
+  margin-bottom: 2rem;
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.product-card {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 20px 24px;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: var(--shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.product-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 22px 48px rgba(18, 40, 32, 0.16);
+}
+
+.product-card-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  margin-bottom: 16px;
+  background: var(--mist);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.product-card-logo--cream {
+  background: #f7f4ee;
+}
+
+.product-card-logo img {
+  max-height: 120px;
+  width: auto;
+  object-fit: contain;
+}
+
+.product-card h3 {
+  font-family: var(--font-display);
+  color: var(--forest);
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.product-card p {
+  color: var(--muted);
+  flex: 1;
+  margin-bottom: 1rem;
+}
+
+.product-card-cta {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.product-card:hover .product-card-cta {
+  color: var(--accent-hover);
+}
+
+.company-section--contact {
+  background: #fff;
+  border-top: 1px solid var(--border);
+}
+
+.contact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 1.5rem;
+}
+
+.contact-item {
+  background: var(--mist);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem 1.25rem;
+}
+
+.contact-item h3 {
+  font-family: var(--font-display);
+  color: var(--forest);
+  font-size: 1.1rem;
+  margin-bottom: 0.4rem;
+}
+
+.contact-item p,
+.contact-item a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.contact-item a {
+  color: var(--accent);
+}
+
+.contact-item a:hover {
+  color: var(--accent-hover);
+}
+
+.contact-item p {
+  font-weight: 500;
+  margin-top: 0.25rem;
+}
+
+.coming-soon-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.coming-soon {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px 64px;
+  background: #f7f4ee;
+}
+
+.coming-soon-logo {
+  width: min(520px, 92vw);
+  height: auto;
+  margin-bottom: 8px;
+}
+
+.coming-soon-kicker {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.coming-soon h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 3rem);
+  color: var(--forest);
+  margin-bottom: 12px;
+}
+
+.coming-soon-lead {
+  color: var(--muted);
+  font-size: 1.1rem;
+  max-width: 28rem;
+  margin-bottom: 8px;
+}
+
 @media (max-width: 720px) {
   .page-card {
     padding: 24px 18px;
@@ -489,5 +713,14 @@ a {
 
   .nav-link-quiet {
     display: none;
+  }
+
+  .product-grid,
+  .contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .company-hero-inner {
+    padding: 40px 20px 48px;
   }
 }

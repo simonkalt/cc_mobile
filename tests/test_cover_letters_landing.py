@@ -1,4 +1,4 @@
-"""Cover-letters marketing routes: redirect, kill-switch, preview override."""
+"""Cover-letters marketing routes and company hub."""
 
 import os
 import unittest
@@ -14,10 +14,39 @@ class TestCoverLettersLanding(unittest.TestCase):
 
         cls.client = TestClient(app, follow_redirects=False)
 
-    def test_root_redirects_to_cover_letters_with_query(self):
+    def test_root_serves_company_hub(self):
         resp = self.client.get("/?utm_source=test")
-        self.assertEqual(resp.status_code, 301)
-        self.assertEqual(resp.headers.get("location"), "/cover-letters?utm_source=test")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("sAImon Software", resp.text)
+        self.assertIn("globalconcierge", resp.text)
+        self.assertIn("Job Cover Letter", resp.text)
+        self.assertIn("Marriage Minded", resp.text)
+        self.assertIn('href="/cover-letters"', resp.text)
+        self.assertIn("https://gc-desk-web.onrender.com/", resp.text)
+        self.assertIn('href="/marriage-minded"', resp.text)
+        self.assertIn("support@saimonsoft.com", resp.text)
+        self.assertIn("+1-702-760-7526", resp.text)
+        self.assertIn("Las Vegas", resp.text)
+        self.assertNotEqual(resp.headers.get("location"), "/cover-letters?utm_source=test")
+
+    def test_marriage_minded_coming_soon(self):
+        resp = self.client.get("/marriage-minded")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Coming soon", resp.text)
+        self.assertIn("MM-Logo-A.png", resp.text)
+        self.assertIn("Marriage Minded", resp.text)
+
+    def test_marriage_minded_trailing_slash(self):
+        resp = self.client.get("/marriage-minded/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Coming soon", resp.text)
+
+    def test_support_host_serves_support(self):
+        resp = self.client.get("/", headers={"host": "support.saimonsoft.com"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Support", resp.text)
+        self.assertIn("Job Cover Letters", resp.text)
+        self.assertNotIn("product-card", resp.text)
 
     def test_default_serves_legacy(self):
         with mock.patch.dict(os.environ, {}, clear=False):

@@ -52,7 +52,7 @@ class TestMakePaymentPage(unittest.TestCase):
         self.assertIn("enable-funding=venmo%2Cpaypal", resp.text)
 
     def test_not_linked_from_marketing_pages(self):
-        for path in ("/cover-letters", "/support.html", "/delete-account.html", "/news"):
+        for path in ("/", "/cover-letters", "/support.html", "/delete-account.html", "/news"):
             resp = self.client.get(path)
             self.assertEqual(resp.status_code, 200, path)
             self.assertNotIn("/make-payment", resp.text)

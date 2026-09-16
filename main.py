@@ -937,6 +937,20 @@ def _inject_gtag_into_index_html(html: str) -> str:
     return html.replace("</head>", snippet + "  </head>", 1)
 
 
+def _serve_website_html(*relative_parts, not_found_detail="Page not found"):
+    """Read website HTML and inject GA when GOOGLE_ANALYTICS_TAG is set."""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(project_root, "website", *relative_parts)
+    if not os.path.exists(path):
+        return JSONResponse(status_code=404, content={"detail": not_found_detail})
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return HTMLResponse(
+        content=_inject_gtag_into_index_html(html),
+        media_type="text/html",
+    )
+
+
 _DEFAULT_PLAY_STORE_URL = (
     "https://play.google.com/store/apps/details?"
     "id=com.saimonsoft.customcoverlettermobile.app&hl=en_US"
@@ -1043,9 +1057,6 @@ def _serve_cover_letters_landing(request: Request):
     variant = _cover_letters_landing_variant(request)
     filename = "index.legacy.html" if variant == "legacy" else "index.html"
     index_path = os.path.join(project_root, "website", "cover-letters", filename)
-    if not os.path.exists(index_path):
-        # Fallback: old root index if cover-letters files are missing
-        index_path = os.path.join(project_root, "website", "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             html = f.read()
@@ -1062,8 +1073,7 @@ def _serve_cover_letters_landing(request: Request):
     )
 
 
-# Interim: product lives at /cover-letters; company hub on / comes later.
-# support.saimonsoft.com keeps serving support on /.
+# Company hub on /; support.saimonsoft.com keeps serving support on /.
 @app.get("/")
 def read_root(request: Request):
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -1074,10 +1084,7 @@ def read_root(request: Request):
         if os.path.exists(support_path):
             return FileResponse(support_path, media_type="text/html")
 
-    # Preserve query string (ads / UTM) on redirect to /cover-letters
-    qs = request.url.query
-    target = "/cover-letters" + (f"?{qs}" if qs else "")
-    return RedirectResponse(url=target, status_code=301)
+    return _serve_website_html("index.html", not_found_detail="Company hub not found")
 
 
 @app.get("/cover-letters", include_in_schema=False)
@@ -1085,6 +1092,17 @@ def read_root(request: Request):
 def cover_letters_landing(request: Request):
     """Job Cover Letters marketing page (legacy or v2 via COVER_LETTERS_LANDING / ?v=)."""
     return _serve_cover_letters_landing(request)
+
+
+@app.get("/marriage-minded", include_in_schema=False)
+@app.get("/marriage-minded/", include_in_schema=False)
+def marriage_minded_coming_soon():
+    """Marriage Minded coming-soon stub."""
+    return _serve_website_html(
+        "marriage-minded",
+        "index.html",
+        not_found_detail="Marriage Minded page not found",
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
