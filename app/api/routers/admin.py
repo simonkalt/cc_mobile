@@ -29,6 +29,7 @@ from app.models.admin import (
     AdminVerify2FAResponse,
 )
 from app.services.verification_service import (
+    SMS_SEND_FAILED_DETAIL,
     send_and_store_verification_code,
     send_and_store_verification_code_email,
     verify_code,
@@ -157,6 +158,64 @@ def _user_doc_to_detail(doc: dict) -> AdminUserDetail:
 # Auth flow
 # ---------------------------------------------------------------------------
 
+def _deliver_admin_2fa(user: dict, delivery: str) -> tuple[str, str]:
+    """
+    Send the admin 2FA code.
+
+    SMS is tried first when requested. If Telnyx times out or otherwise fails,
+    the same login continues over email so a provider outage does not 500.
+    Returns (delivery_method, user-facing message).
+    """
+    user_id = str(user["_id"])
+    email = user.get("email", "")
+    delivery = (delivery or "sms").lower()
+
+    if delivery == "email":
+        send_and_store_verification_code_email(
+            user_id=user_id,
+            email=email,
+            purpose="admin_2fa",
+            delivery_method="email",
+        )
+        return "email", "Verification code sent via email"
+
+    phone = user.get("phone")
+    if not phone:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "No phone number on file. Use email delivery instead.",
+        )
+
+    try:
+        send_and_store_verification_code(
+            user_id=user_id, phone_number=phone, purpose="admin_2fa"
+        )
+    except HTTPException as exc:
+        sms_failed = (
+            exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            and exc.detail == SMS_SEND_FAILED_DETAIL
+        )
+        if not sms_failed:
+            raise
+        logger.warning("Admin SMS 2FA failed for %s; sending the code by email instead", email)
+        try:
+            send_and_store_verification_code_email(
+                user_id=user_id,
+                email=email,
+                purpose="admin_2fa",
+                delivery_method="email",
+            )
+        except HTTPException as email_exc:
+            logger.error("Admin 2FA email fallback also failed for %s: %s", email, email_exc.detail)
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Could not send the verification code by SMS or email. Try again in a moment.",
+            ) from email_exc
+        return "email", "SMS could not be sent. Verification code sent via email instead."
+
+    return "sms", "Verification code sent via sms"
+
+
 @router.post("/login", response_model=AdminLoginResponse)
 def admin_login(body: AdminLoginRequest):
     collection = _require_db()
@@ -179,24 +238,7 @@ def admin_login(body: AdminLoginRequest):
     collection.update_one({"_id": user["_id"]}, {"$set": {"failedLoginAttempts": 0}})
 
     user_id = str(user["_id"])
-    delivery = (body.delivery_method or "sms").lower()
-
-    if delivery == "email":
-        send_and_store_verification_code_email(
-            user_id=user_id,
-            email=user.get("email", ""),
-            purpose="admin_2fa",
-            delivery_method="email",
-        )
-    else:
-        phone = user.get("phone")
-        if not phone:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "No phone number on file. Use email delivery instead.",
-            )
-        send_and_store_verification_code(user_id=user_id, phone_number=phone, purpose="admin_2fa")
-        delivery = "sms"
+    delivery, message = _deliver_admin_2fa(user, body.delivery_method or "sms")
 
     logger.info("Admin 2FA code sent to %s via %s", body.email, delivery)
 
@@ -204,7 +246,7 @@ def admin_login(body: AdminLoginRequest):
         requires_2fa=True,
         user_id=user_id,
         delivery_method=delivery,
-        message=f"Verification code sent via {delivery}",
+        message=message,
     )
 
 
@@ -239,24 +281,8 @@ def admin_resend_code(body: AdminResendCodeRequest):
     if not user or not user.get("super_user"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not authorized")
 
-    delivery = (body.delivery_method or "sms").lower()
-    user_id = str(user["_id"])
-
-    if delivery == "email":
-        send_and_store_verification_code_email(
-            user_id=user_id,
-            email=user.get("email", ""),
-            purpose="admin_2fa",
-            delivery_method="email",
-        )
-    else:
-        phone = user.get("phone")
-        if not phone:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "No phone number on file")
-        send_and_store_verification_code(user_id=user_id, phone_number=phone, purpose="admin_2fa")
-        delivery = "sms"
-
-    return {"message": f"Code resent via {delivery}"}
+    delivery, message = _deliver_admin_2fa(user, body.delivery_method or "sms")
+    return {"message": message, "delivery_method": delivery}
 
 
 # ---------------------------------------------------------------------------

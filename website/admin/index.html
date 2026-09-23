@@ -61,7 +61,11 @@
     <div class="auth-wrapper">
       <div class="card card-sm auth-card" x-data="{ code: '' }">
         <h2>Verification</h2>
-        <p class="subtitle">Enter the 6-digit code sent to your device</p>
+        <p class="subtitle">Enter the 6-digit code</p>
+
+        <template x-if="$store.auth.notice">
+          <div class="alert alert-success" x-text="$store.auth.notice"></div>
+        </template>
 
         <template x-if="$store.auth.error">
           <div class="alert alert-error" x-text="$store.auth.error"></div>
@@ -85,7 +89,7 @@
 
         <div style="margin-top:16px; display:flex; justify-content:space-between">
           <button class="btn-link" @click="$store.auth.resend()">Resend code</button>
-          <button class="btn-link" @click="$store.auth.view = 'login'">Back to login</button>
+          <button class="btn-link" @click="$store.auth.backToLogin()">Back to login</button>
         </div>
       </div>
     </div>

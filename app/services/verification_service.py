@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 # Verification code expiration time (10 minutes)
 VERIFICATION_CODE_EXPIRY_MINUTES = 10
 
+SMS_SEND_FAILED_DETAIL = "Failed to send verification code"
+
 
 def _verification_email_delivery_fail_open() -> bool:
     """When true, store codes even if outbound email fails (UAT / local testing)."""
@@ -243,7 +245,7 @@ def send_and_store_verification_code(
     if not send_verification_code(normalized_phone, code, purpose):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send verification code"
+            detail=SMS_SEND_FAILED_DETAIL,
         )
     
     # Store code

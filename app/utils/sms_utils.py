@@ -4,6 +4,7 @@ SMS utilities for Telnyx integration
 
 import logging
 import random
+from typing import Optional
 
 from app.core.config import settings
 
@@ -20,6 +21,20 @@ def generate_verification_code() -> str:
         6-digit code as string
     """
     return str(random.randint(100000, 999999))
+
+
+def _log_telnyx_http_error(phone_number: str, resp) -> None:
+    try:
+        err = resp.json()
+        err_detail = err.get("errors", [{}])[0] if err.get("errors") else {}
+        logger.error(
+            "Telnyx SMS failed to %s: %s %s",
+            phone_number,
+            resp.status_code,
+            err_detail.get("detail", resp.text),
+        )
+    except Exception:
+        logger.error("Telnyx SMS failed to %s: %s %s", phone_number, resp.status_code, resp.text)
 
 
 def send_sms(phone_number: str, message: str) -> bool:
@@ -42,45 +57,68 @@ def send_sms(phone_number: str, message: str) -> bool:
         return False
 
     try:
-        import requests
-
-        resp = requests.post(
-            TELNYX_MESSAGES_URL,
-            headers={
-                "Authorization": f"Bearer {settings.TELNYX_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "from": settings.TELNYX_PHONE_NUMBER,
-                "to": phone_number,
-                "text": message,
-            },
-            timeout=15,
-        )
+        import httpx
     except ImportError:
-        logger.error("requests library not available")
-        return False
-    except Exception as e:
-        logger.error("Error sending SMS to %s: %s", phone_number, e)
+        logger.error("httpx library not available")
         return False
 
-    if resp.status_code in (200, 201):
-        data = resp.json()
-        msg_id = (data.get("data") or {}).get("id")
-        logger.info("SMS sent successfully to %s. Message ID: %s", phone_number, msg_id)
-        return True
+    # Telnyx is behind Cloudflare. On some hosts (Render included) the IPv6
+    # path completes TLS and then never returns a body, which surfaces as
+    # "Read timed out". Binding 0.0.0.0 forces an IPv4 socket.
+    timeout = httpx.Timeout(12.0, connect=5.0)
+    headers = {
+        "Authorization": f"Bearer {settings.TELNYX_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "from": settings.TELNYX_PHONE_NUMBER,
+        "to": phone_number,
+        "text": message,
+    }
 
-    try:
-        err = resp.json()
-        err_detail = err.get("errors", [{}])[0] if err.get("errors") else {}
-        logger.error(
-            "Telnyx SMS failed to %s: %s %s",
-            phone_number,
-            resp.status_code,
-            err_detail.get("detail", resp.text),
-        )
-    except Exception:
-        logger.error("Telnyx SMS failed to %s: %s %s", phone_number, resp.status_code, resp.text)
+    last_error: Optional[Exception] = None
+    for attempt in (1, 2):
+        try:
+            transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=0)
+            with httpx.Client(transport=transport, timeout=timeout, trust_env=False) as client:
+                resp = client.post(TELNYX_MESSAGES_URL, headers=headers, json=payload)
+        except httpx.TimeoutException as exc:
+            last_error = exc
+            logger.warning(
+                "Telnyx SMS timed out to %s (attempt %s/2): %s",
+                phone_number,
+                attempt,
+                exc,
+            )
+            continue
+        except httpx.HTTPError as exc:
+            last_error = exc
+            logger.warning(
+                "Telnyx SMS connection error to %s (attempt %s/2): %s",
+                phone_number,
+                attempt,
+                exc,
+            )
+            continue
+
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            msg_id = (data.get("data") or {}).get("id")
+            logger.info("SMS sent successfully to %s. Message ID: %s", phone_number, msg_id)
+            return True
+
+        if resp.status_code in (502, 503, 504) and attempt == 1:
+            logger.warning(
+                "Telnyx SMS returned %s for %s; retrying",
+                resp.status_code,
+                phone_number,
+            )
+            continue
+
+        _log_telnyx_http_error(phone_number, resp)
+        return False
+
+    logger.error("Error sending SMS to %s: %s", phone_number, last_error)
     return False
 
 

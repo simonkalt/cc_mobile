@@ -97,6 +97,7 @@ document.addEventListener("alpine:init", () => {
     deliveryMethod: "sms",
     userId: null,
     error: "",
+    notice: "",
     loading: false,
 
     get isLoggedIn() {
@@ -128,6 +129,8 @@ document.addEventListener("alpine:init", () => {
           }),
         });
         this.userId = data.user_id;
+        this.deliveryMethod = data.delivery_method || this.deliveryMethod;
+        this.notice = data.message || "";
         this.view = "twofa";
       } catch (e) {
         this.error = e.detail || "Login failed";
@@ -158,15 +161,16 @@ document.addEventListener("alpine:init", () => {
     async resend() {
       this.error = "";
       try {
-        await api("/resend-code", {
+        const data = await api("/resend-code", {
           method: "POST",
           body: JSON.stringify({
             user_id: this.userId,
             delivery_method: this.deliveryMethod,
           }),
         });
+        this.deliveryMethod = data.delivery_method || this.deliveryMethod;
+        this.notice = data.message || "Code resent";
         this.error = "";
-        alert("Code resent");
       } catch (e) {
         this.error = e.detail || "Failed to resend";
       }
@@ -180,6 +184,13 @@ document.addEventListener("alpine:init", () => {
       this.password = "";
       this.userId = null;
       this.error = "";
+      this.notice = "";
+    },
+
+    backToLogin() {
+      this.view = "login";
+      this.error = "";
+      this.notice = "";
     },
   });
 
