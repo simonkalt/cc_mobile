@@ -703,6 +703,194 @@ class GenericParser(BaseJobParser):
         return result
 
 
+_ORACLE_CE_JOB_ID_RE = re.compile(r"/job/(\d+)(?:/|$)")
+_ORACLE_CE_API_HOST_RE = re.compile(
+    r"https://([a-z0-9.-]+\.oraclecloud\.com)(?::\d+)?/hcmRestApi/",
+    re.I,
+)
+_ORACLE_CE_SITE_RE = re.compile(r"siteNumber=([A-Za-z0-9_]+)")
+
+
+def _looks_like_oracle_ce_page(url: str, html: str) -> bool:
+    """Oracle Candidate Experience shells put only a short blurb in og:description."""
+    path = urlparse(url).path or ""
+    if not _ORACLE_CE_JOB_ID_RE.search(path) or not html:
+        return False
+    lowered = html.lower()
+    return (
+        "hcmrestapi" in lowered
+        or "oj-hcm-ce" in lowered
+        or "candidateexperience" in lowered
+    )
+
+
+def _oracle_ce_api_host(url: str, html: str) -> Optional[str]:
+    match = _ORACLE_CE_API_HOST_RE.search(html or "")
+    if match:
+        return match.group(1)
+    host = urlparse(url).netloc.split(":")[0].lower()
+    if host.endswith(".oraclecloud.com"):
+        return host
+    return None
+
+
+def _meta_property_content(html: str, prop: str) -> Optional[str]:
+    tag = BeautifulSoup(html or "", "html.parser").find("meta", property=prop)
+    if tag and tag.get("content"):
+        text = str(tag["content"]).strip()
+        return text or None
+    return None
+
+
+def _oracle_html_fragment_to_text(
+    fragment: Optional[str], heading: Optional[str] = None
+) -> Optional[str]:
+    if not fragment or not str(fragment).strip():
+        return None
+    wrapped = BeautifulSoup(f"<div>{fragment}</div>", "html.parser")
+    root = wrapped.find("div")
+    if root is None:
+        return None
+    for li in root.find_all("li"):
+        li.insert(0, "- ")
+    text = _html_element_to_text(root)
+    if not text:
+        return None
+    if heading and not text.lower().startswith(heading.lower()):
+        text = f"{heading}\n\n{text}"
+    return text
+
+
+def _compose_oracle_ce_description(item: dict) -> Optional[str]:
+    parts = []
+    description = _oracle_html_fragment_to_text(
+        item.get("ExternalDescriptionStr"), "Job Description"
+    )
+    if description:
+        parts.append(description)
+    responsibilities = _oracle_html_fragment_to_text(
+        item.get("ExternalResponsibilitiesStr")
+        or item.get("InternalResponsibilitiesStr")
+    )
+    if responsibilities:
+        parts.append(responsibilities)
+    qualifications = _oracle_html_fragment_to_text(
+        item.get("ExternalQualificationsStr") or item.get("InternalQualificationsStr")
+    )
+    if qualifications:
+        parts.append(qualifications)
+    about = _oracle_html_fragment_to_text(item.get("CorporateDescriptionStr"), "About Us")
+    if about:
+        parts.append(about)
+    text = "\n\n".join(parts).strip()
+    if not text:
+        return None
+    short = _normalize_job_description(item.get("ShortDescriptionStr")) or ""
+    # og:description on these pages is ShortDescriptionStr. Keep the requisition
+    # body only when it actually contains the rest of the posting.
+    if short and len(text) < len(short) + 200:
+        return None
+    return text
+
+
+def _try_oracle_ce_extraction(url: str, html: str) -> Optional[JobExtractionResult]:
+    """Load the full requisition from Oracle Candidate Experience's public API.
+
+    The job page HTML only includes ShortDescriptionStr (via og:description).
+    Responsibilities, qualifications, and the about section are fetched as JSON.
+    """
+    if not _looks_like_oracle_ce_page(url, html):
+        return None
+
+    job_match = _ORACLE_CE_JOB_ID_RE.search(urlparse(url).path or "")
+    site_match = _ORACLE_CE_SITE_RE.search(html or "")
+    api_host = _oracle_ce_api_host(url, html)
+    if not job_match or not site_match or not api_host:
+        logger.info(
+            "Oracle CE page missing job id, site number, or API host "
+            "(job=%s site=%s host=%s)",
+            bool(job_match),
+            bool(site_match),
+            api_host,
+        )
+        return None
+
+    job_id = job_match.group(1)
+    site_number = site_match.group(1)
+    api_url = (
+        f"https://{api_host}/hcmRestApi/resources/latest/"
+        "recruitingCEJobRequisitionDetails"
+        "?expand=all&onlyData=true"
+        f"&finder=ById;Id={job_id},siteNumber={site_number}"
+    )
+    try:
+        response = requests.get(
+            api_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/91.0.4472.124 Safari/537.36"
+                ),
+                "Accept": "application/json",
+                "Ora-Irc-Language": "en",
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("Oracle CE job details request failed: %s", exc)
+        return None
+
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not items or not isinstance(items, list) or not isinstance(items[0], dict):
+        logger.info("Oracle CE job details response had no requisition")
+        return None
+
+    item = items[0]
+    description = _compose_oracle_ce_description(item)
+    if not description:
+        return None
+
+    result = JobExtractionResult()
+    result.method = "beautifulsoup-oracle-ce"
+    organization = str(item.get("Organization") or "").strip()
+    site_name = _meta_property_content(html, "og:site_name")
+    result.company = organization or site_name or "Oracle"
+    title = str(item.get("Title") or "").strip() or (
+        _meta_property_content(html, "og:title") or ""
+    )
+    result.job_title = title or None
+    result.job_description = description
+    contact = str(item.get("ExternalContactName") or "").strip()
+    if _is_plausible_person_name(contact):
+        result.hiring_manager = contact
+    result.is_complete = result.has_minimum_data()
+    return result
+
+
+def _parse_job_page(soup: BeautifulSoup, html: str, url: str) -> JobExtractionResult:
+    oracle_result = _try_oracle_ce_extraction(url, html)
+    if oracle_result and oracle_result.has_minimum_data():
+        logger.info(
+            "Oracle CE API extraction used (%s chars)",
+            len(oracle_result.job_description or ""),
+        )
+        return oracle_result
+
+    site = detect_site(url)
+    parsers = {
+        "linkedin": LinkedInParser(),
+        "indeed": IndeedParser(),
+        "glassdoor": GlassdoorParser(),
+        "generic": GenericParser(),
+    }
+    parser = parsers.get(site, GenericParser())
+    logger.info(f"Using {site} parser for extraction...")
+    return parser.parse(soup, url)
+
+
 def detect_site(url: str) -> str:
     """Detect which job site the URL belongs to"""
     domain = urlparse(url).netloc.lower()
@@ -1161,17 +1349,7 @@ def extract_from_html(html: str, url: str) -> JobExtractionResult:
     # Detect site and use appropriate parser
     site = detect_site(url)
     logger.info(f"Detected site: {site} for URL: {url}")
-
-    parsers = {
-        "linkedin": LinkedInParser(),
-        "indeed": IndeedParser(),
-        "glassdoor": GlassdoorParser(),
-        "generic": GenericParser(),
-    }
-
-    parser = parsers.get(site, GenericParser())
-    logger.info(f"Using {site} parser for extraction...")
-    result = parser.parse(soup, url)
+    result = _parse_job_page(soup, html, url)
 
     # Log extraction details
     logger.info(
@@ -1257,17 +1435,7 @@ def extract_with_beautifulsoup(url: str) -> JobExtractionResult:
     # Detect site and use appropriate parser
     site = detect_site(url)
     logger.info(f"Detected site: {site} for URL: {url}")
-
-    parsers = {
-        "linkedin": LinkedInParser(),
-        "indeed": IndeedParser(),
-        "glassdoor": GlassdoorParser(),
-        "generic": GenericParser(),
-    }
-
-    parser = parsers.get(site, GenericParser())
-    logger.info(f"Using {site} parser for extraction...")
-    result = parser.parse(soup, url)
+    result = _parse_job_page(soup, html, url)
 
     # Log extraction details
     logger.info(
