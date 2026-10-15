@@ -311,10 +311,8 @@ class Settings:
 
     # Stripe Configuration (supports both legacy and newer env names)
     STRIPE_LIVE: bool = os.getenv("STRIPE_LIVE", "false").lower() == "true"
-    STRIPE_TEST_SECRET_KEY: Optional[str] = os.getenv("STRIPE_TEST_SECRET_KEY")
-    STRIPE_LIVE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_LIVE_SECRET_KEY")
     # Backward-compatible aliases used by older subscription modules
-    STRIPE_TEST_API_KEY: Optional[str] = os.getenv("STRIPE_TEST_API_KEY") or STRIPE_TEST_SECRET_KEY
+    STRIPE_TEST_API_KEY: Optional[str] = os.getenv("STRIPE_TEST_API_KEY")
     STRIPE_API_KEY: Optional[str] = os.getenv("STRIPE_API_KEY")
     STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY")
     STRIPE_TEST_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_TEST_PUBLIC_KEY")
