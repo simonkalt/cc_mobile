@@ -22,7 +22,7 @@ class TestCoverLettersLanding(unittest.TestCase):
         self.assertIn("Job Cover Letter", resp.text)
         self.assertIn("Marriage Minded", resp.text)
         self.assertIn('href="/cover-letters"', resp.text)
-        self.assertIn("https://gc-desk-web.onrender.com/", resp.text)
+        self.assertIn("https://www.globalconcierge-ai.com/", resp.text)
         self.assertIn('href="/marriage-minded"', resp.text)
         self.assertIn("support@saimonsoft.com", resp.text)
         self.assertIn("+1-702-760-7526", resp.text)
