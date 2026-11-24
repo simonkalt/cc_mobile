@@ -12,7 +12,11 @@ from typing import Any, Optional
 
 from app.core.config import settings
 from app.utils.grok_models import GROK_MODEL_ID, is_grok_model
-from app.utils.llm_token_limits import max_output_tokens_for_model
+from app.utils.llm_token_limits import (
+    OPENAI_SUNSET_REPLACEMENT,
+    RETIRED_OPENAI_MODEL_IDS,
+    max_output_tokens_for_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,7 @@ OPENROUTER_MODEL_MAP: dict[str, str] = {
     "gpt-5.5": "openai/gpt-5.5",
     "gpt-5.2": "openai/gpt-5.5",
     "gpt-4.1": "openai/gpt-4.1",
+    OPENAI_SUNSET_REPLACEMENT: "openai/gpt-6.2-sol",
     "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
     "claude-haiku-4-5-20251001": "anthropic/claude-haiku-4.5",
     "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
@@ -63,6 +68,10 @@ def canonicalize_app_model(model: str) -> str:
     if not raw:
         return "gpt-5.5"
     lower = raw.lower()
+    if lower in RETIRED_OPENAI_MODEL_IDS:
+        return OPENAI_SUNSET_REPLACEMENT
+    if lower in ("gpt-5.6-sol", "gpt-5.6-luna"):
+        return OPENAI_SUNSET_REPLACEMENT
     if lower in _DISPLAY_ALIASES:
         return _DISPLAY_ALIASES[lower]
     # Legacy OpenAI id still tracked/mapped as gpt-5.5
@@ -73,7 +82,7 @@ def canonicalize_app_model(model: str) -> str:
     if is_grok_model(raw):
         return GROK_MODEL_ID
     if lower.startswith("gpt-"):
-        if raw in ("gpt-4.1", "gpt-5.5"):
+        if raw in ("gpt-4.1", "gpt-5.5", OPENAI_SUNSET_REPLACEMENT):
             return raw
         return "gpt-5.5"
     if "haiku" in lower:

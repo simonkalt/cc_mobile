@@ -1450,12 +1450,19 @@ Apply them exactly. They take priority over any conflicting earlier instructions
             r = response.text
             logger.info(f"Gemini response length: {len(r)} characters")
 
-        elif llm == "ChatGPT" or llm == gpt_model or llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2"):
+        elif llm == "ChatGPT" or llm == gpt_model or llm in (
+            "gpt-4.1",
+            "gpt-5.5",
+            "gpt-5.2",
+            "gpt-6.2-sol",
+        ):
             if not OPENAI_AVAILABLE or not settings.OPENAI_API_KEY:
                 raise ValueError("OpenAI not available or API key not set")
             client = OpenAI(api_key=settings.OPENAI_API_KEY)
             openai_model = resolve_openai_model(
-                llm if llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2") else gpt_model,
+                llm
+                if llm in ("gpt-4.1", "gpt-5.5", "gpt-5.2", "gpt-6.2-sol")
+                else gpt_model,
                 fallback=gpt_model,
             )
             messages = _build_chat_messages()

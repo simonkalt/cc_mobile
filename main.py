@@ -863,11 +863,19 @@ def normalize_llm_name(llm: str) -> str:
     Normalize LLM name to a canonical form for tracking.
     Maps display names and aliases to standard model names.
     """
+    from app.utils.llm_token_limits import OPENAI_SUNSET_REPLACEMENT, RETIRED_OPENAI_MODEL_IDS
+
     llm_lower = llm.lower()
 
     # Map display names and aliases to canonical model names
+    if llm_lower in RETIRED_OPENAI_MODEL_IDS:
+        return OPENAI_SUNSET_REPLACEMENT
+    if llm_lower in ("gpt-5.6-sol", "gpt-5.6-luna"):
+        return OPENAI_SUNSET_REPLACEMENT
     if "gemini" in llm_lower or llm == "gemini-2.5-flash":
         return "gemini-2.5-flash"
+    elif llm == OPENAI_SUNSET_REPLACEMENT or llm_lower == OPENAI_SUNSET_REPLACEMENT:
+        return OPENAI_SUNSET_REPLACEMENT
     elif llm == "gpt-5.2" or llm_lower == "gpt-5.2":
         return "gpt-5.5"
     elif llm == "gpt-5.5" or llm_lower == "gpt-5.5":

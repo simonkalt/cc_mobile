@@ -17,6 +17,7 @@ from app.utils.openrouter_client import (
         ("gpt-5.5", "openai/gpt-5.5"),
         ("gpt-5.2", "openai/gpt-5.5"),
         ("gpt-4.1", "openai/gpt-4.1"),
+        ("gpt-6.2-sol", "openai/gpt-6.2-sol"),
         ("claude-haiku-4-5", "anthropic/claude-haiku-4.5"),
         ("claude-haiku-4-5-20251001", "anthropic/claude-haiku-4.5"),
         ("claude-sonnet-4-6", "anthropic/claude-sonnet-4.6"),
@@ -41,6 +42,10 @@ def test_to_openrouter_model(app_id, expected_slug):
         ("Gemini", "gemini-2.5-flash"),
         ("Grok", GROK_MODEL_ID),
         ("gpt-5.2", "gpt-5.5"),
+        ("gpt-5", "gpt-6.2-sol"),
+        ("o3-pro", "gpt-6.2-sol"),
+        ("gpt-5.6-sol", "gpt-6.2-sol"),
+        ("gpt-5.6-luna", "gpt-6.2-sol"),
     ],
 )
 def test_canonicalize_app_model(raw, canonical):
@@ -48,6 +53,12 @@ def test_canonicalize_app_model(raw, canonical):
 
 
 def test_registry_models_are_mapped():
-    for name in ("gpt-5.5", "claude-haiku-4-5", "gemini-2.5-flash", GROK_MODEL_ID):
+    for name in (
+        "gpt-5.5",
+        "gpt-6.2-sol",
+        "claude-haiku-4-5",
+        "gemini-2.5-flash",
+        GROK_MODEL_ID,
+    ):
         assert name in OPENROUTER_MODEL_MAP
         assert "/" in OPENROUTER_MODEL_MAP[name]

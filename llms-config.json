@@ -6,6 +6,11 @@
       "description": "GPT-5.5 model"
     },
     {
+      "value": "gpt-6.2-sol",
+      "label": "GPT-6.2 Sol",
+      "description": "OpenAI GPT-6.2 Sol — recommended upgrade for OpenAI writing"
+    },
+    {
       "value": "claude-haiku-4-5",
       "label": "Claude Haiku 4.5",
       "description": "Anthropic's Claude Haiku 4.5 model (faster)"
