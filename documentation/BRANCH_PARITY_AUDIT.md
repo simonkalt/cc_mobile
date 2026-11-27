@@ -1,8 +1,8 @@
 # Branch Parity Audit
 
-- Source ref: `origin/UAT`
+- Source ref: `origin/uat`
 - Target ref: `origin/MS-Word-Integration`
-- Divergence: source ahead `13`, target ahead `148`
+- Divergence: source ahead `311`, target ahead `148`
 
 ## File Change Overview (noise-filtered)
 - Total changed paths: `293`
@@ -132,64 +132,45 @@
 
 ## Critical Directory Presence
 
-- `app/api/routers`: missing in source `1`
-  - `app/api/routers/linkedin.py`
+- `app/api/routers`: missing in source `0`
 - `app/models`: missing in source `0`
-- `app/services`: missing in source `4`
+- `app/services`: missing in source `1`
   - `app/services/.DS_Store`
-  - `app/services/linkedin_job_api.py`
-  - `app/services/print.css`
-  - `app/services/telnyx_webhook_service.py`
-- `app/utils`: missing in source `2`
-  - `app/utils/jwt.py`
-  - `app/utils/redis_utils.py`
-- `templates`: missing in source `4`
-  - `templates/creative/1.template`
-  - `templates/formal/1.template`
-  - `templates/formal/2.template`
-  - `templates/informal/1.template`
+- `app/utils`: missing in source `0`
+- `templates`: missing in source `0`
 - `website`: missing in source `0`
 - `documents`: missing in source `0`
 
 ## Route Parity
-- Source routes: `64`
+- Source routes: `138`
 - Target routes: `74`
-- Missing in source: `10`
-- `GET /auth-url`
-- `GET /callback`
-- `GET /me`
-- `GET /oauth/callback`
-- `GET /profile`
-- `GET /profile/bizcard`
-- `GET /status`
-- `POST /refresh-token`
-- `POST /webhook/telnyx`
-- `PUT /me/sms-opt`
+- Missing in source: `1`
+- `POST /api/files/generate-pdf`
+
+## Router Registration Parity (main.py)
+- Source registered routers: `21`
+- Target registered routers: `2`
+- Missing in source: `0`
 
 ## Environment Key Parity (os.getenv)
-- Missing in source: `32`
-- `FROM_EMAIL`
+- Missing in source: `21`
+- `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`
+- `JWT_REFRESH_TOKEN_EXPIRE_DAYS`
 - `LINKEDIN_CLIENT_ID`
 - `LINKEDIN_CLIENT_SECRET`
-- `LINKEDIN_REDIRECT_URI`
-- `LINKEDIN_SCOPE`
-- `LINKEDIN_SUCCESS_REDIRECT`
-- `NO_COLOR`
-- `NUTRIENT_API_KEY`
-- `PRINT_PREVIEW_RAW_HTML`
-- `PRINT_PREVIEW_USE_NUTRIENT`
-- `PRINT_PREVIEW_USE_WEASYPRINT_ONLY`
-- `REDIS_API_KEY`
+- `OCI_COMPARTMENT_ID`
+- `OCI_CONFIG_FILE`
+- `OCI_CONFIG_PROFILE`
+- `OCI_MODEL_ID`
+- `OCI_REGION`
 - `REDIS_DB`
-- `REDIS_HOST`
-- `REDIS_PASSWORD`
 - `REDIS_PORT`
-- `REDIS_SSL`
-- `REDIS_USERNAME`
-- `TELNYX_API_KEY`
-- `TELNYX_PHONE_NUMBER`
-- `TERM`
-- `USE_SYSTEM_PROMPT_FILE`
+- `SMTP_PASSWORD`
+- `SMTP_PORT`
+- `SMTP_SERVER`
+- `SMTP_USERNAME`
+- `SMTP_USE_SSL`
+- `SMTP_USE_TLS`
 - `ZOHO_ACCOUNT_ID`
 - `ZOHO_CLIENT_ID`
 - `ZOHO_CLIENT_SECRET`
